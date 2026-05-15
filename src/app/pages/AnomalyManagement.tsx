@@ -1,5 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
+import { fetchAttendanceAnomalies, saveAttendanceAnomalies, type AttendanceAnomalyRecord as RealAnomalyRecord } from '../api/realData';
+
 import { useLocation } from 'react-router';
 import {
   Search, X, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
@@ -8,12 +10,7 @@ import {
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────
-type AnomalyRecord = {
-  id: number; name: string; empId: string; dept: string;
-  date: string; weekday: string; shift: string; type: string;
-  desc: string; clock: string; reminder: '已提醒' | '未提醒';
-  handled: boolean; writeOff: '已核销' | '未核销';
-};
+type AnomalyRecord = RealAnomalyRecord;
 
 type BizRecord = {
   id: number; name: string; empId: string; dept: string;
@@ -28,8 +25,19 @@ type ColDef = { key: string; label: string; width: number; visible: boolean };
 const DEPT_OPTIONS = ['产品研发中心', '产品运营部', '研发设计一部', '研发设计二部', '工艺开发部', '技术支持部', '直营建连店'];
 const ATTEND_GROUPS = ['华托大厦考勤组', '综合考勤组', '研发中心考勤组', '工艺部考勤组'];
 const ANOMALY_TYPES = ['全部', '迟到', '旷工', '早退', '未打卡', '未排班'];
-const HANDLE_ACTIONS = ['补卡', '请假', '外出（公出）', '出差', '变更班次', '核销异常'];
+const REMARK_MAX_LEN = 300;
+const ATTEND_GROUP_BY_DEPT: Record<string, string> = {
+  '产品研发中心': '研发中心考勤组',
+  '产品运营部': '综合考勤组',
+  '研发设计一部': '研发中心考勤组',
+  '研发设计二部': '研发中心考勤组',
+  '工艺开发部': '工艺部考勤组',
+  '技术支持部': '工艺部考勤组',
+  '直营建连店': '华托大厦考勤组',
+};
 const SHIFTS = [
+
+
   '早七点半到五点半', '早八点到五点半', '早八点半到五点半', '早九点到六点',
   '早九点到五点半', '早九点半到六点半', '早十点到七点', '早十点半到七点半',
   '早十二点到八点半', '中班十二到九', '晚班六到次日零点', '夜班十到次日六',
@@ -64,7 +72,7 @@ const ANOMALY_RECORDS: AnomalyRecord[] = [
   { id:7, name:'朱苗建', empId:'CP25020', dept:'直营建连店',   date:'2026-05-05', weekday:'二', shift:'早七点半到五点半', type:'未打卡',desc:'上班未打卡',         clock:'— / 17:30',     reminder:'已提醒', handled:true,  writeOff:'已核销' },
   { id:8, name:'曹文瑶', empId:'CP25004', dept:'产品运营部',   date:'2026-05-05', weekday:'二', shift:'早九点到六点',    type:'迟到',  desc:'上班迟到12分钟',     clock:'09:12 / 18:05', reminder:'已提醒', handled:true,  writeOff:'已核销' },
   { id:9, name:'劲善达', empId:'CP25017', dept:'工艺开发部',   date:'2026-05-04', weekday:'一', shift:'早九点到六点',    type:'迟到',  desc:'上班迟到8分钟',      clock:'09:08 / 18:02', reminder:'未提醒', handled:false, writeOff:'未核销' },
-];
+].slice(0, 5);
 
 const BIZ_RECORDS_LEAVE: BizRecord[] = [
   { id:1, name:'孟佳玫', empId:'CP25006', dept:'产品运营部',   leaveType:'年假', startTime:'2026-05-02 09:00', endTime:'2026-05-02 18:00', origDuration:'8小时', recalcDuration:'8小时', updatedShift:'早九点到六点', reason:'假期期间有加班记录与请假时段重叠', source:'假期管理', approvalStatus:'已通过', cancelStatus:'未申请取消' },
@@ -87,9 +95,12 @@ function useClickOutside(ref: React.RefObject<HTMLElement | null>, cb: () => voi
 const pBtn = (c: any): React.CSSProperties => ({ padding: '5px 14px', fontSize: '12px', border: 'none', borderRadius: 4, cursor: 'pointer', backgroundColor: c.primary, color: '#fff', whiteSpace: 'nowrap' });
 const oBtn = (c: any, a?: boolean, d?: boolean): React.CSSProperties => ({ padding: '5px 12px', fontSize: '12px', borderRadius: 4, cursor: a === false ? 'not-allowed' : 'pointer', backgroundColor: 'transparent', whiteSpace: 'nowrap', border: `1px solid ${d ? '#FCA5A5' : a ? c.primary : c.inputBorder}`, color: d ? '#DC2626' : a ? c.primary : c.text, opacity: a === false ? 0.45 : 1 });
 
-function showActionFeedback(action: string) {
-  window.alert(`异常管理：${action}（交互已接通）`);
+function matchDateRange(date: string, start: string, end: string) {
+  if (start && date < start) return false;
+  if (end && date > end) return false;
+  return true;
 }
+
 const thS = (c: any): React.CSSProperties => ({ padding: '8px 10px', fontSize: '12px', color: c.textMuted, fontWeight: 500, textAlign: 'left', borderBottom: `1px solid ${c.tableBorder}`, backgroundColor: c.tableHeaderBg, whiteSpace: 'nowrap', position: 'sticky', top: 0, zIndex: 20 });
 const tdS = (c: any): React.CSSProperties => ({ padding: '7px 10px', fontSize: '12px', color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
 const pgS = (c: any, active: boolean): React.CSSProperties => ({ minWidth: 24, height: 24, padding: '0 5px', fontSize: '12px', border: `1px solid ${active ? c.primary : c.inputBorder}`, borderRadius: 4, backgroundColor: active ? c.primary : 'transparent', color: active ? '#fff' : c.text, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' });
@@ -263,55 +274,340 @@ function ColSettingsModal({ cols, onClose, onApply, colors }: {
 
 // ─── 考勤异常 View ─────────────────────────────
 function AnomalyAttendance({ colors }: { colors: any }) {
-  const [empSearch, setEmpSearch]       = useState('');
-  const [activeCard, setActiveCard]     = useState<string | null>(null);
-  const [showMore, setShowMore]         = useState(false);
-  const [showHandle, setShowHandle]     = useState(false);
+  const [empSearch, setEmpSearch] = useState('');
+  const [activeCard, setActiveCard] = useState<string | null>(null);
+  const [showMore, setShowMore] = useState(false);
   const [showReminder, setShowReminder] = useState(false);
   const [showShiftPicker, setShowShiftPicker] = useState(false);
-  const [selected, setSelected]         = useState<Set<number>>(new Set());
-  const [page, setPage]                 = useState(1);
-  const [pageSize, setPageSize]         = useState(20);
-  const [jumpPage, setJumpPage]         = useState('');
-  const handleRef = useRef<HTMLDivElement>(null);
-  useClickOutside(handleRef, () => setShowHandle(false));
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [jumpPage, setJumpPage] = useState('');
+  const [rows, setRows] = useState<AnomalyRecord[]>(ANOMALY_RECORDS);
+  const [sourceFile, setSourceFile] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [showRemarkModal, setShowRemarkModal] = useState(false);
+  const [remarkText, setRemarkText] = useState('');
+  const [remarkTargetIds, setRemarkTargetIds] = useState<number[]>([]);
 
-  const STAT_CARDS = [
-    { key: 'all',     label: '异常',    count: 14, color: colors.primary },
-    { key: '迟到',    label: '迟到',    count: 5,  color: '#D97706' },
-    { key: '旷工',    label: '旷工',    count: 3,  color: '#DC2626' },
-    { key: 'remind',  label: '提醒状态', count: null, color: colors.textMuted },
-    { key: '未提醒',  label: '未提醒',  count: 9,  color: '#6366F1' },
-    { key: '未核销',  label: '未核销',  count: 11, color: '#0891B2' },
+  const [dateStart, setDateStart] = useState('');
+  const [dateEnd, setDateEnd] = useState('');
+  const [deptFilter, setDeptFilter] = useState('');
+  const [attendGroupFilter, setAttendGroupFilter] = useState('');
+  const [anomalyTypeFilter, setAnomalyTypeFilter] = useState('全部');
+
+  const [appliedDateStart, setAppliedDateStart] = useState('');
+  const [appliedDateEnd, setAppliedDateEnd] = useState('');
+  const [appliedDeptFilter, setAppliedDeptFilter] = useState('');
+  const [appliedAttendGroupFilter, setAppliedAttendGroupFilter] = useState('');
+  const [appliedAnomalyTypeFilter, setAppliedAnomalyTypeFilter] = useState('全部');
+
+  const [sortKey, setSortKey] = useState<keyof AnomalyRecord>('date');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const TABLE_COLS: Array<{ k: keyof AnomalyRecord; l: string; w: number }> = [
+    { k: 'name', l: '姓名', w: 70 },
+    { k: 'empId', l: '工号', w: 85 },
+    { k: 'dept', l: '部门', w: 110 },
+    { k: 'date', l: '日期', w: 90 },
+    { k: 'shift', l: '班次', w: 140 },
+    { k: 'type', l: '异常类型', w: 80 },
+    { k: 'desc', l: '异常说明', w: 150 },
+    { k: 'clock', l: '打卡时间', w: 120 },
+    { k: 'reminder', l: '提醒状态', w: 85 },
+    { k: 'writeOff', l: '核销状态', w: 85 },
+    { k: 'remark', l: '备注', w: 170 },
   ];
 
-  const filteredRows = ANOMALY_RECORDS.filter(r => {
-    if (!activeCard || activeCard === 'all' || activeCard === 'remind') return true;
+  const loadAnomalies = useCallback(async () => {
+
+    try {
+      const res = await fetchAttendanceAnomalies();
+      if (res.rows?.length) {
+        setRows(res.rows);
+      }
+      setSourceFile(res.sourceFile || '');
+      setLoadError('');
+    } catch (_error) {
+      setLoadError('真实数据连接失败，当前展示静态数据');
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAnomalies();
+  }, [loadAnomalies]);
+
+  const persistRows = useCallback(async (nextRows: AnomalyRecord[]) => {
+    setSaving(true);
+    try {
+      const saved = await saveAttendanceAnomalies(nextRows);
+      setSourceFile(saved.sourceFile || '本地持久化数据 data-store.json');
+      setLoadError('');
+    } catch (_error) {
+      setLoadError('保存失败，请检查后端服务');
+      throw _error;
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
+  const STAT_CARDS = [
+    { key: 'all', label: '异常', count: rows.length, color: colors.primary },
+    { key: '迟到', label: '迟到', count: rows.filter(row => row.type === '迟到').length, color: '#D97706' },
+    { key: '旷工', label: '旷工', count: rows.filter(row => row.type === '旷工').length, color: '#DC2626' },
+    { key: '已提醒', label: '已提醒', count: rows.filter(row => row.reminder === '已提醒').length, color: '#16A34A' },
+    { key: '未提醒', label: '未提醒', count: rows.filter(row => row.reminder === '未提醒').length, color: '#6366F1' },
+    { key: '未核销', label: '未核销', count: rows.filter(row => row.writeOff === '未核销').length, color: '#0891B2' },
+  ];
+
+  const filteredRows = rows.filter(r => {
+    const keyword = empSearch.trim().toLowerCase();
+    const matchKeyword = !keyword || r.name.toLowerCase().includes(keyword) || r.empId.toLowerCase().includes(keyword);
+    if (!matchKeyword) return false;
+
+    if (!matchDateRange(r.date, appliedDateStart, appliedDateEnd)) return false;
+    if (appliedDeptFilter && r.dept !== appliedDeptFilter) return false;
+
+    const rowAttendGroup = ATTEND_GROUP_BY_DEPT[r.dept] || '';
+    if (appliedAttendGroupFilter && rowAttendGroup !== appliedAttendGroupFilter) return false;
+
+    if (appliedAnomalyTypeFilter && appliedAnomalyTypeFilter !== '全部' && r.type !== appliedAnomalyTypeFilter) return false;
+
+    if (!activeCard || activeCard === 'all') return true;
+    if (activeCard === '已提醒') return r.reminder === '已提醒';
     if (activeCard === '未提醒') return r.reminder === '未提醒';
     if (activeCard === '未核销') return r.writeOff === '未核销';
     return r.type === activeCard;
   });
 
+  const normalizeSortValue = (value: unknown): string | number => {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'boolean') return value ? 1 : 0;
+    if (value === null || value === undefined) return '';
+
+    const text = String(value).trim();
+    if (!text) return '';
+
+    const timestamp = Date.parse(text);
+    if (!Number.isNaN(timestamp)) return timestamp;
+
+    return text;
+  };
+
+  const sortedRows = [...filteredRows].sort((a, b) => {
+    const left = normalizeSortValue(a[sortKey]);
+    const right = normalizeSortValue(b[sortKey]);
+
+    if (typeof left === 'number' && typeof right === 'number') {
+      return sortDir === 'asc' ? left - right : right - left;
+    }
+
+    const result = String(left).localeCompare(String(right), 'zh-CN', { numeric: true, sensitivity: 'base' });
+    return sortDir === 'asc' ? result : -result;
+  });
+
+  const pagedRows = sortedRows.slice((page - 1) * pageSize, page * pageSize);
+
   const allSelected = selected.size === filteredRows.length && filteredRows.length > 0;
+
   const someSelected = selected.size > 0 && !allSelected;
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(filteredRows.map(r => r.id)));
-  const toggleRow = (id: number) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleRow = (id: number) => setSelected(s => {
+    const n = new Set(s);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const targetIds = selected.size > 0 ? Array.from(selected) : filteredRows.map(row => row.id);
+
+  const applyAndSaveRows = useCallback(async (updater: (row: AnomalyRecord) => AnomalyRecord) => {
+    const idSet = new Set(targetIds);
+    if (idSet.size === 0) {
+      window.alert('暂无可操作记录');
+      return;
+    }
+
+    const nextRows = rows.map(row => (idSet.has(row.id) ? updater(row) : row));
+    setRows(nextRows);
+    try {
+      await persistRows(nextRows);
+      setSelected(new Set());
+    } catch (_error) {
+      window.alert('保存失败，请检查后端服务');
+    }
+  }, [persistRows, rows, targetIds]);
+
+  const handleSendReminder = useCallback(async () => {
+    await applyAndSaveRows(row => ({ ...row, reminder: '已提醒' }));
+  }, [applyAndSaveRows]);
+
+  const handleWriteOff = useCallback(async () => {
+    await applyAndSaveRows(row => ({ ...row, writeOff: '已核销', handled: true }));
+  }, [applyAndSaveRows]);
+
+  const openRemarkModal = useCallback((ids: number[]) => {
+    if (ids.length === 0) {
+      window.alert('请先选择需要备注的记录');
+      return;
+    }
+
+    const first = rows.find(row => row.id === ids[0]);
+    setRemarkTargetIds(ids);
+    setRemarkText(first?.remark || '');
+    setShowRemarkModal(true);
+  }, [rows]);
+
+  const saveRemark = useCallback(async () => {
+    const content = remarkText.trim();
+    const idSet = new Set(remarkTargetIds);
+    const now = content ? new Date().toLocaleString('zh-CN') : '';
+
+    const nextRows = rows.map(row => (
+      idSet.has(row.id)
+        ? {
+          ...row,
+          remark: content,
+          remarkUpdatedAt: now,
+          handled: content ? true : row.writeOff === '已核销',
+        }
+        : row
+    ));
+
+    setRows(nextRows);
+    try {
+      await persistRows(nextRows);
+      setShowRemarkModal(false);
+      setRemarkTargetIds([]);
+      setSelected(new Set());
+    } catch (_error) {
+      window.alert(content ? '备注保存失败，请检查后端服务' : '备注删除失败，请检查后端服务');
+    }
+  }, [persistRows, remarkTargetIds, remarkText, rows]);
+
+  const clearRemark = useCallback(async () => {
+    setRemarkText('');
+    const idSet = new Set(remarkTargetIds);
+    const nextRows = rows.map(row => (
+      idSet.has(row.id)
+        ? { ...row, remark: '', remarkUpdatedAt: '', handled: row.writeOff === '已核销' }
+        : row
+    ));
+
+    setRows(nextRows);
+    try {
+      await persistRows(nextRows);
+      setShowRemarkModal(false);
+      setRemarkTargetIds([]);
+      setSelected(new Set());
+    } catch (_error) {
+      window.alert('备注删除失败，请检查后端服务');
+    }
+  }, [persistRows, remarkTargetIds, rows]);
+
+
+  const handleExport = useCallback(() => {
+    const exportRows = selected.size > 0
+      ? filteredRows.filter(row => selected.has(row.id))
+      : filteredRows;
+
+    if (exportRows.length === 0) {
+      window.alert('暂无可导出的异常记录');
+      return;
+    }
+
+    const headers = ['姓名', '工号', '部门', '日期', '异常类型', '异常说明', '提醒状态', '核销状态', '备注', '备注时间'];
+    const escapeCsv = (value: string) => {
+      const escaped = value.replace(/"/g, '""');
+      return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
+    };
+
+    const csvRows = exportRows.map(row => [
+      row.name,
+      row.empId,
+      row.dept,
+      row.date,
+      row.type,
+      row.desc,
+      row.reminder,
+      row.writeOff,
+      row.remark || '',
+      row.remarkUpdatedAt || '',
+    ]);
+
+    const csv = [headers, ...csvRows].map(line => line.map(cell => escapeCsv(String(cell))).join(',')).join('\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `考勤异常-${new Date().toISOString().slice(0, 10)}-${selected.size > 0 ? '选中记录' : '筛选结果'}.csv`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+  }, [filteredRows, selected]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const getPages = (): (number | '...')[] =>
     totalPages <= 7 ? Array.from({ length: totalPages }, (_, i) => i + 1) : [1, 2, '...', totalPages];
 
+  const handleSort = (key: keyof AnomalyRecord) => {
+    if (sortKey === key) {
+      setSortDir(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+    setPage(1);
+  };
+
+  const getSortMark = (key: keyof AnomalyRecord) => {
+    if (sortKey !== key) return '↕';
+    return sortDir === 'asc' ? '↑' : '↓';
+  };
+
+  const handleQuery = () => {
+
+    setAppliedDateStart(dateStart);
+    setAppliedDateEnd(dateEnd);
+    setAppliedDeptFilter(deptFilter);
+    setAppliedAttendGroupFilter(attendGroupFilter);
+    setAppliedAnomalyTypeFilter(anomalyTypeFilter || '全部');
+    setSelected(new Set());
+    setPage(1);
+  };
+
+  const handleReset = () => {
+    setDateStart('');
+    setDateEnd('');
+    setDeptFilter('');
+    setAttendGroupFilter('');
+    setAnomalyTypeFilter('全部');
+
+    setAppliedDateStart('');
+    setAppliedDateEnd('');
+    setAppliedDeptFilter('');
+    setAppliedAttendGroupFilter('');
+    setAppliedAnomalyTypeFilter('全部');
+
+    setEmpSearch('');
+    setShowMore(false);
+    setActiveCard(null);
+    setSelected(new Set());
+    setPage(1);
+  };
+
   return (
+
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Filter bar */}
       <div style={{ backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, padding: '10px 16px 0', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg }}>
             <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>考勤日期:</span>
-            <input type="date" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, width: 108 }}/>
+            <input value={dateStart} onChange={e => setDateStart(e.target.value)} type="date" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, width: 108 }}/>
             <span style={{ fontSize: '12px', color: colors.textMuted }}>—</span>
-            <input type="date" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, width: 108 }}/>
+            <input value={dateEnd} onChange={e => setDateEnd(e.target.value)} type="date" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, width: 108 }}/>
           </div>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg, minWidth: 150 }}>
             <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>员工:</span>
             <Search size={11} style={{ color: colors.textMuted }}/>
@@ -322,30 +618,49 @@ function AnomalyAttendance({ colors }: { colors: any }) {
             更多筛选 {showMore ? <ChevronUp size={11}/> : <ChevronDown size={11}/>}
           </button>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button onClick={() => { setEmpSearch(''); setShowMore(false); setActiveCard(null); setSelected(new Set()); setPage(1); }} style={oBtn(colors)}>重置</button>
-            <button onClick={() => { setPage(1); showActionFeedback('查询异常记录'); }} style={pBtn(colors)}>查询</button>
+            <button onClick={handleReset} style={oBtn(colors)}>重置</button>
+            <button onClick={handleQuery} style={pBtn(colors)}>查询</button>
           </div>
+
         </div>
         {showMore && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            {[{ label: '部门', opts: DEPT_OPTIONS }, { label: '考勤组', opts: ATTEND_GROUPS }, { label: '异常类型', opts: ANOMALY_TYPES }].map(({ label, opts }) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg }}>
-                <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>{label}:</span>
-                <select style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text }}>
-                  <option value="">全部</option>
-                  {opts.map(o => <option key={o}>{o}</option>)}
-                </select>
-              </div>
-            ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg }}>
+              <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>部门:</span>
+              <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text }}>
+                <option value="">全部</option>
+                {DEPT_OPTIONS.map(option => <option key={option} value={option}>{option}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg }}>
+              <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>考勤组:</span>
+              <select value={attendGroupFilter} onChange={e => setAttendGroupFilter(e.target.value)} style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text }}>
+                <option value="">全部</option>
+                {ATTEND_GROUPS.map(option => <option key={option} value={option}>{option}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg }}>
+              <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>异常类型:</span>
+              <select value={anomalyTypeFilter} onChange={e => setAnomalyTypeFilter(e.target.value)} style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text }}>
+                {ANOMALY_TYPES.map(option => <option key={option} value={option}>{option}</option>)}
+              </select>
+            </div>
           </div>
         )}
+
       </div>
+      {(sourceFile || loadError) && (
+        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>
+          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
+          {loadError ? ` ${loadError}` : ''}
+        </div>
+      )}
 
       {/* Stat cards */}
       <div style={{ display: 'flex', gap: 10, padding: '12px 16px', flexShrink: 0, flexWrap: 'wrap' }}>
         {STAT_CARDS.map(card => (
           <div key={card.key}
-            onClick={() => card.count !== null && setActiveCard(activeCard === card.key ? null : card.key)}
+            onClick={() => { if (card.count !== null) { setActiveCard(activeCard === card.key ? null : card.key); setSelected(new Set()); setPage(1); } }}
             style={{ flex: 1, minWidth: 90, padding: '10px 14px', backgroundColor: activeCard === card.key ? `${card.color}14` : colors.statCardBg, border: `1px solid ${activeCard === card.key ? card.color : colors.cardBorder}`, borderRadius: 8, cursor: card.count !== null ? 'pointer' : 'default', transition: 'all 0.15s' }}>
             <div style={{ fontSize: '11px', color: colors.textMuted, marginBottom: 4 }}>{card.label}</div>
             {card.count !== null
@@ -357,33 +672,22 @@ function AnomalyAttendance({ colors }: { colors: any }) {
 
       {/* Action bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px 10px', flexShrink: 0, flexWrap: 'wrap' }}>
-        <button onClick={() => selected.size > 0 && showActionFeedback(`发送提醒（${selected.size}条）`)} disabled={selected.size === 0} style={{ ...oBtn(colors, undefined, false), ...(selected.size === 0 ? { opacity: 0.45, cursor: 'not-allowed' } : {}), display: 'flex', alignItems: 'center', gap: 4 }}>
+        <button onClick={handleSendReminder} disabled={saving || filteredRows.length === 0} style={{ ...oBtn(colors), ...(saving || filteredRows.length === 0 ? { opacity: 0.45, cursor: 'not-allowed' } : {}), display: 'flex', alignItems: 'center', gap: 4 }}>
           <Bell size={12}/>发送提醒
         </button>
-        {/* 处理异常 dropdown */}
-        <div ref={handleRef} style={{ position: 'relative' }}>
-          <button onClick={() => selected.size > 0 && setShowHandle(v => !v)}
-            disabled={selected.size === 0}
-            style={{ ...oBtn(colors, showHandle), ...(selected.size === 0 ? { opacity: 0.45, cursor: 'not-allowed' } : {}), display: 'flex', alignItems: 'center', gap: 4 }}>
-            处理异常 <ChevronDown size={11}/>
-          </button>
-          {showHandle && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 200, marginTop: 4, backgroundColor: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.1)', width: 130, overflow: 'hidden' }}>
-              {HANDLE_ACTIONS.map(a => (
-                <div key={a} onClick={() => { setShowHandle(false); if (a === '变更班次') setShowShiftPicker(true); }}
-                  style={{ padding: '9px 14px', fontSize: '12px', cursor: 'pointer', color: colors.text }}
-                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.backgroundColor = colors.tableRowHover}
-                  onMouseLeave={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'}>{a}</div>
-              ))}
-            </div>
-          )}
-        </div>
+        <button onClick={() => openRemarkModal(targetIds)} disabled={saving || filteredRows.length === 0} style={{ ...oBtn(colors), ...(saving || filteredRows.length === 0 ? { opacity: 0.45, cursor: 'not-allowed' } : {}), display: 'flex', alignItems: 'center', gap: 4 }}>
+          备注
+        </button>
+        <button onClick={handleWriteOff} disabled={saving || filteredRows.length === 0} style={{ ...oBtn(colors), ...(saving || filteredRows.length === 0 ? { opacity: 0.45, cursor: 'not-allowed' } : {}), display: 'flex', alignItems: 'center', gap: 4 }}>
+          核销异常
+        </button>
         <button onClick={() => setShowReminder(true)} style={{ ...oBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}>
           <Settings2 size={12}/>提醒设置
         </button>
-        <button onClick={() => showActionFeedback('导出异常记录')} style={{ ...oBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}><Download size={12}/>导出</button>
+        <button onClick={handleExport} style={{ ...oBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}><Download size={12}/>导出</button>
         {selected.size > 0 && <span style={{ fontSize: '12px', color: colors.textMuted }}>已选 {selected.size} 条</span>}
       </div>
+
 
       {/* Table */}
       <div style={{ flex: 1, overflow: 'auto', backgroundColor: colors.cardBg, borderTop: `1px solid ${colors.cardBorder}` }}>
@@ -393,20 +697,28 @@ function AnomalyAttendance({ colors }: { colors: any }) {
               <th style={{ ...thS(colors), width: 36, textAlign: 'center', padding: '8px 0', left: 0, position: 'sticky', zIndex: 25 }}>
                 <input type="checkbox" checked={allSelected} ref={el => { if (el) el.indeterminate = someSelected; }} onChange={toggleAll} style={{ accentColor: colors.primary, width: 14, height: 14 }}/>
               </th>
-              {[
-                { k:'name', l:'姓名',      w:70  },{ k:'empId', l:'工号',      w:85  },
-                { k:'dept', l:'部门',      w:110 },{ k:'date',  l:'日期',      w:90  },
-                { k:'shift',l:'班次',      w:140 },{ k:'type',  l:'异常类型',  w:80  },
-                { k:'desc', l:'异常说明',  w:150 },{ k:'clock', l:'打卡时间',  w:120 },
-                { k:'reminder',l:'提醒状态',w:85 },{ k:'writeOff',l:'核销状态',w:85 },
-              ].map(col => <th key={col.k} style={{ ...thS(colors), width: col.w, minWidth: col.w, borderLeft: `1px solid ${colors.tableBorder}` }}>{col.l}</th>)}
-              <th style={{ ...thS(colors), width: 60, textAlign: 'center', borderLeft: `1px solid ${colors.tableBorder}` }}>操作</th>
+              {TABLE_COLS.map(col => (
+                <th
+                  key={col.k}
+                  onClick={() => handleSort(col.k)}
+                  style={{ ...thS(colors), width: col.w, minWidth: col.w, borderLeft: `1px solid ${colors.tableBorder}`, cursor: 'pointer', userSelect: 'none' }}
+                >
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    {col.l}
+                    <span style={{ fontSize: '11px', color: sortKey === col.k ? colors.primary : colors.textMuted }}>{getSortMark(col.k)}</span>
+                  </span>
+                </th>
+              ))}
+
+              <th style={{ ...thS(colors), width: 72, textAlign: 'center', borderLeft: `1px solid ${colors.tableBorder}` }}>备注</th>
+
             </tr>
           </thead>
           <tbody>
             {filteredRows.length === 0 ? (
-              <tr><td colSpan={12} style={{ textAlign: 'center', padding: '60px 0', color: colors.textMuted, fontSize: '13px' }}>暂无异常记录</td></tr>
-            ) : filteredRows.map((row, ri) => {
+              <tr><td colSpan={13} style={{ textAlign: 'center', padding: '60px 0', color: colors.textMuted, fontSize: '13px' }}>暂无异常记录</td></tr>
+
+            ) : pagedRows.map((row, ri) => {
               const isSel = selected.has(row.id);
               const typeColor: Record<string, string> = { '迟到': '#D97706', '旷工': '#DC2626', '早退': '#D97706', '未打卡': '#6366F1', '未排班': colors.textMuted };
               return (
@@ -417,7 +729,7 @@ function AnomalyAttendance({ colors }: { colors: any }) {
                   <td style={{ ...tdS(colors), width: 36, textAlign: 'center', padding: '7px 0', position: 'sticky', left: 0, backgroundColor: isSel ? `${colors.primary}0D` : ri % 2 === 0 ? colors.cardBg : colors.tableStripe }}>
                     <input type="checkbox" checked={isSel} onChange={() => toggleRow(row.id)} style={{ accentColor: colors.primary, width: 14, height: 14 }}/>
                   </td>
-                  <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}` }}><span onClick={() => showActionFeedback(`查看异常员工：${row.name}`)} style={{ color: colors.primary, fontWeight: 500, cursor: 'pointer' }}>{row.name}</span></td>
+                  <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}` }}><span onClick={() => window.alert(`异常员工详情\n姓名：${row.name}\n员工号：${row.empId}\n部门：${row.dept}\n异常类型：${row.type}\n异常日期：${row.date}`)} style={{ color: colors.primary, fontWeight: 500, cursor: 'pointer' }}>{row.name}</span></td>
                   <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}`, fontSize: '11px', color: colors.textMuted }}>{row.empId}</td>
                   <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.dept}</td>
                   <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}` }}>{row.date} <span style={{ fontSize: '10px', color: colors.textMuted }}>周{row.weekday}</span></td>
@@ -433,9 +745,13 @@ function AnomalyAttendance({ colors }: { colors: any }) {
                   <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}` }}>
                     <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: 10, backgroundColor: row.writeOff === '已核销' ? colors.badgeGreenBg : colors.badgeGrayBg, color: row.writeOff === '已核销' ? colors.badgeGreenText : colors.badgeGrayText }}>{row.writeOff}</span>
                   </td>
-                  <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}`, textAlign: 'center' }}>
-                    <button onClick={() => showActionFeedback(`处理异常：${row.name}`)} style={{ fontSize: '11px', color: colors.primary, border: `1px solid ${colors.primary}`, borderRadius: 4, padding: '2px 8px', cursor: 'pointer', backgroundColor: 'transparent' }}>处理</button>
+                  <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}`, fontSize: '11px', color: row.remark ? colors.text : colors.textMuted }} title={row.remark || ''}>
+                    {row.remark || '—'}
                   </td>
+                  <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}`, textAlign: 'center' }}>
+                    <button onClick={() => openRemarkModal([row.id])} style={{ fontSize: '11px', color: colors.primary, border: `1px solid ${colors.primary}`, borderRadius: 4, padding: '2px 8px', cursor: 'pointer', backgroundColor: 'transparent' }}>备注</button>
+                  </td>
+
                 </tr>
               );
             })}
@@ -459,44 +775,138 @@ function AnomalyAttendance({ colors }: { colors: any }) {
         <span style={{ fontSize: '12px', color: colors.textMuted }}>页</span>
       </div>
 
+      {showRemarkModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 620, backgroundColor: 'rgba(0,0,0,0.32)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ backgroundColor: colors.cardBg, borderRadius: 10, width: 420, boxShadow: '0 8px 28px rgba(0,0,0,0.16)', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px', borderBottom: `1px solid ${colors.divider}` }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: colors.text }}>异常备注（{remarkTargetIds.length} 条）</span>
+              <button onClick={() => setShowRemarkModal(false)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: colors.textMuted }}><X size={14}/></button>
+            </div>
+            <div style={{ padding: '14px 16px' }}>
+              <textarea
+                value={remarkText}
+                onChange={event => setRemarkText(event.target.value.slice(0, REMARK_MAX_LEN))}
+                placeholder="请输入备注内容（如：员工已补卡，待主管审批）"
+                rows={4}
+                style={{ width: '100%', border: `1px solid ${colors.inputBorder}`, outline: 'none', fontSize: '12px', background: colors.inputBg, color: colors.text, borderRadius: 6, padding: '10px 12px', lineHeight: 1.6, resize: 'vertical' }}
+              />
+              <div style={{ marginTop: 6, textAlign: 'right', fontSize: '11px', color: colors.textMuted }}>{remarkText.length}/{REMARK_MAX_LEN}</div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '10px 16px', borderTop: `1px solid ${colors.divider}` }}>
+              <button onClick={clearRemark} disabled={saving} style={{ ...oBtn(colors, false, true), opacity: saving ? 0.55 : 1 }}>
+                删除备注
+              </button>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={() => setShowRemarkModal(false)} style={oBtn(colors)}>取消</button>
+                <button onClick={saveRemark} disabled={saving} style={{ ...pBtn(colors), opacity: saving ? 0.6 : 1 }}>
+                  {saving ? '保存中...' : '保存备注'}
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
       {showReminder && <ReminderModal colors={colors} onClose={() => setShowReminder(false)}/>}
       {showShiftPicker && <ShiftPickerModal colors={colors} onClose={() => setShowShiftPicker(false)}/>}
     </div>
   );
 }
 
+
 // ─── 业务异常 View ─────────────────────────────
 function AnomalyBusiness({ colors }: { colors: any }) {
-  const [bizTab, setBizTab]           = useState<'leave' | 'fieldout'>('leave');
-  const [statusTab, setStatusTab]     = useState<'pending' | 'processing' | 'done'>('pending');
-  const [showMore, setShowMore]       = useState(false);
+  const [bizTab, setBizTab] = useState<'leave' | 'fieldout'>('leave');
+  const [statusTab, setStatusTab] = useState<'pending' | 'processing' | 'done'>('pending');
+  const [showMore, setShowMore] = useState(false);
   const [showColSettings, setShowColSettings] = useState(false);
-  const [bizCols, setBizCols]         = useState<ColDef[]>(BIZ_COLS_DEFAULT);
-  const [selected, setSelected]       = useState<Set<number>>(new Set());
-  const [page, setPage]               = useState(1);
-  const [pageSize, setPageSize]       = useState(20);
-  const [jumpPage, setJumpPage]       = useState('');
+  const [bizCols, setBizCols] = useState<ColDef[]>(BIZ_COLS_DEFAULT);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [jumpPage, setJumpPage] = useState('');
+  const [bizRowsByTab, setBizRowsByTab] = useState<{ leave: BizRecord[]; fieldout: BizRecord[] }>({
+    leave: BIZ_RECORDS_LEAVE,
+    fieldout: BIZ_RECORDS_FIELDOUT,
+  });
 
-  const rows = bizTab === 'leave' ? BIZ_RECORDS_LEAVE : BIZ_RECORDS_FIELDOUT;
+  const rows = bizRowsByTab[bizTab];
+  const filteredRows = rows.filter(row => {
+
+    if (statusTab === 'done') return row.approvalStatus === '已通过';
+    if (statusTab === 'processing') return row.approvalStatus === '审批中';
+    return row.approvalStatus !== '已通过';
+  });
+  const pagedRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
   const visCols = bizCols.filter(c => c.visible);
-  const allSel = selected.size === rows.length && rows.length > 0;
-  const someSel = selected.size > 0 && !allSel;
-  const toggleAll = () => setSelected(allSel ? new Set() : new Set(rows.map(r => r.id)));
+  const allSel = pagedRows.length > 0 && pagedRows.every(row => selected.has(row.id));
+  const someSel = pagedRows.some(row => selected.has(row.id)) && !allSel;
+  const toggleAll = () => setSelected(prev => {
+    const next = new Set(prev);
+    if (allSel) pagedRows.forEach(row => next.delete(row.id));
+    else pagedRows.forEach(row => next.add(row.id));
+    return next;
+  });
   const toggleRow = (id: number) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const getPages = (): (number | '...')[] => totalPages <= 5 ? Array.from({ length: totalPages }, (_, i) => i + 1) : [1, 2, '...', totalPages];
+
+  const bizTabItems = [
+    { v: 'leave', l: '请假', n: bizRowsByTab.leave.length },
+    { v: 'fieldout', l: '外出', n: bizRowsByTab.fieldout.length },
+  ] as const;
+
+  const statusItems = [
+    { v: 'pending', l: '待处理', n: rows.filter(row => row.approvalStatus !== '已通过').length },
+    { v: 'processing', l: '处理中', n: rows.filter(row => row.approvalStatus === '审批中').length },
+    { v: 'done', l: '已完成', n: rows.filter(row => row.approvalStatus === '已通过').length },
+  ] as const;
 
   const approvalColor: Record<string, [string, string]> = {
     '已通过': [colors.badgeGreenBg, colors.badgeGreenText],
-    '审批中': [colors.badgeBlueBg,  colors.badgeBlueText],
-    '已拒绝': [colors.badgeRedBg,   colors.badgeRedText],
+    '审批中': [colors.badgeBlueBg, colors.badgeBlueText],
+    '已拒绝': [colors.badgeRedBg, colors.badgeRedText],
+  };
+
+  const handleRecalculate = () => {
+    if (selected.size === 0) return;
+
+    setBizRowsByTab(prev => {
+      const currentRows = prev[bizTab];
+      const nextRows = currentRows.map(row => {
+        if (!selected.has(row.id)) return row;
+        return {
+          ...row,
+          recalcDuration: row.recalcDuration || row.origDuration || '0小时',
+          updatedShift: row.updatedShift || '早九点到六点',
+          approvalStatus: row.approvalStatus === '已通过' ? '已通过' : '审批中',
+        };
+      });
+      return { ...prev, [bizTab]: nextRows };
+    });
+
+    setSelected(new Set());
+  };
+
+  const handleDelete = () => {
+    if (selected.size === 0) return;
+
+    setBizRowsByTab(prev => {
+      const currentRows = prev[bizTab];
+      const nextRows = currentRows.filter(row => !selected.has(row.id));
+      return { ...prev, [bizTab]: nextRows };
+    });
+
+    setSelected(new Set());
+    setPage(1);
   };
 
   return (
+
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Biz type tabs */}
       <div style={{ backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, display: 'flex', padding: '0 16px', flexShrink: 0 }}>
-        {[{ v: 'leave', l: '请假', n: BIZ_RECORDS_LEAVE.length }, { v: 'fieldout', l: '外出', n: BIZ_RECORDS_FIELDOUT.length }].map(t => (
+        {bizTabItems.map(t => (
           <button key={t.v} onClick={() => { setBizTab(t.v as any); setSelected(new Set()); setPage(1); }}
             style={{ padding: '12px 16px', fontSize: '13px', fontWeight: bizTab === t.v ? 600 : 400, border: 'none', background: 'transparent', cursor: 'pointer', color: bizTab === t.v ? colors.primary : colors.textMuted, borderBottom: `2px solid ${bizTab === t.v ? colors.primary : 'transparent'}`, display: 'flex', alignItems: 'center', gap: 6 }}>
             {t.l}
@@ -508,16 +918,18 @@ function AnomalyBusiness({ colors }: { colors: any }) {
       <div style={{ backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, padding: '10px 16px 0', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', border: `1px solid ${colors.inputBorder}`, borderRadius: 4, overflow: 'hidden' }}>
-            {[{ v:'pending', l:'待处理' }, { v:'processing', l:'处理中' }, { v:'done', l:'已完成' }].map(s => (
-              <button key={s.v} onClick={() => setStatusTab(s.v as any)}
-                style={{ padding: '5px 12px', fontSize: '12px', border: 'none', cursor: 'pointer', backgroundColor: statusTab === s.v ? colors.primary : 'transparent', color: statusTab === s.v ? '#fff' : colors.text }}>{s.l}</button>
+            {statusItems.map(s => (
+              <button key={s.v} onClick={() => { setStatusTab(s.v); setSelected(new Set()); setPage(1); }}
+                style={{ padding: '5px 12px', fontSize: '12px', border: 'none', cursor: 'pointer', backgroundColor: statusTab === s.v ? colors.primary : 'transparent', color: statusTab === s.v ? '#fff' : colors.text, display: 'flex', alignItems: 'center', gap: 5 }}>
+                {s.l}<span style={{ fontSize: '11px', padding: '1px 6px', borderRadius: 9, backgroundColor: statusTab === s.v ? '#fff' : colors.badgeGrayBg, color: statusTab === s.v ? colors.primary : colors.badgeGrayText }}>{s.n}</span>
+              </button>
             ))}
           </div>
           <button onClick={() => setShowMore(v => !v)} style={{ ...oBtn(colors, showMore), display: 'flex', alignItems: 'center', gap: 4 }}>
             更多筛选 {showMore ? <ChevronUp size={11}/> : <ChevronDown size={11}/>}
           </button>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button style={oBtn(colors)}>重置</button>
+            <button onClick={() => { setStatusTab('pending'); setSelected(new Set()); setPage(1); }} style={oBtn(colors)}>重置</button>
             <button style={pBtn(colors)}>查询</button>
           </div>
         </div>
@@ -539,12 +951,13 @@ function AnomalyBusiness({ colors }: { colors: any }) {
       </div>
       {/* Action bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0, flexWrap: 'wrap' }}>
-        <button disabled={selected.size === 0} style={{ ...oBtn(colors), ...(selected.size === 0 ? { opacity: 0.45, cursor: 'not-allowed' } : {}), display: 'flex', alignItems: 'center', gap: 4 }}>
+        <button onClick={handleRecalculate} disabled={selected.size === 0} style={{ ...oBtn(colors), ...(selected.size === 0 ? { opacity: 0.45, cursor: 'not-allowed' } : {}), display: 'flex', alignItems: 'center', gap: 4 }}>
           <RotateCcw size={12}/>重算
         </button>
-        <button disabled={selected.size === 0} style={{ ...(selected.size === 0 ? { ...oBtn(colors), opacity: 0.45, cursor: 'not-allowed' } : oBtn(colors, false, true)), display: 'flex', alignItems: 'center', gap: 4 }}>
+        <button onClick={handleDelete} disabled={selected.size === 0} style={{ ...(selected.size === 0 ? { ...oBtn(colors), opacity: 0.45, cursor: 'not-allowed' } : oBtn(colors, false, true)), display: 'flex', alignItems: 'center', gap: 4 }}>
           <Trash2 size={12}/>删除
         </button>
+
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
           {selected.size > 0 && <span style={{ fontSize: '12px', color: colors.textMuted }}>已选 {selected.size} 条</span>}
           <button onClick={() => setShowColSettings(true)} style={{ ...oBtn(colors, showColSettings), display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -554,7 +967,7 @@ function AnomalyBusiness({ colors }: { colors: any }) {
       </div>
       {/* Table */}
       <div style={{ flex: 1, overflow: 'auto', backgroundColor: colors.cardBg }}>
-        <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: '100%' }}>
+        <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 1320, width: 'max-content' }}>
           <thead>
             <tr>
               <th style={{ ...thS(colors), width: 36, textAlign: 'center', padding: '8px 0', position: 'sticky', left: 0, zIndex: 25 }}>
@@ -565,9 +978,9 @@ function AnomalyBusiness({ colors }: { colors: any }) {
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
+            {filteredRows.length === 0 ? (
               <tr><td colSpan={visCols.length + 2} style={{ textAlign: 'center', padding: '60px 0', color: colors.textMuted, fontSize: '13px' }}>暂无业务异常数据</td></tr>
-            ) : rows.map((row, ri) => {
+            ) : pagedRows.map((row, ri) => {
               const isSel = selected.has(row.id);
               return (
                 <tr key={row.id}
@@ -598,7 +1011,7 @@ function AnomalyBusiness({ colors }: { colors: any }) {
       </div>
       {/* Bottom bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 16px', backgroundColor: colors.cardBg, borderTop: `1px solid ${colors.cardBorder}`, flexShrink: 0 }}>
-        <span style={{ marginLeft: 'auto', fontSize: '12px', color: colors.textMuted }}>共{rows.length}笔</span>
+        <span style={{ marginLeft: 'auto', fontSize: '12px', color: colors.textMuted }}>共{filteredRows.length}笔</span>
         <button style={pgS(colors, false)} onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}><ChevronLeft size={12}/></button>
         {getPages().map((p, i) => p === '...' ? <span key={`e${i}`} style={{ fontSize: '12px', color: colors.textMuted }}>...</span> : <button key={p} style={pgS(colors, page === p)} onClick={() => setPage(p as number)}>{p}</button>)}
         <button style={pgS(colors, false)} onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}><ChevronRight size={12}/></button>

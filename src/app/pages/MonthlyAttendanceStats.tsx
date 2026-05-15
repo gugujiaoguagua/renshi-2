@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
+import { fetchMonthlyAttendanceEmployees, type MonthlyAttendanceEmployee as RealMonthlyEmployee } from '../api/realData';
 import {
   ChevronDown, ChevronLeft, ChevronRight, Search, X,
   Info, Settings2, Download, Calendar,
@@ -8,10 +9,7 @@ import {
 // ─── Types & Constants ───────────────────────
 type ViewMode = 'result' | 'clock';
 
-type Employee = {
-  name: string; empId: string; dept: string; position: string;
-  attendGroup: string; deptFullPath: string; bizGroup: string;
-};
+type Employee = RealMonthlyEmployee;
 
 const LEFT_COLS = [
   { key: 'name',         label: '姓名',       defaultVis: true  },
@@ -53,7 +51,7 @@ const EMPLOYEES: Employee[] = [
   { name: '周誓',   empId: 'CP25021', dept: '工艺开发部',   position: '高级工艺工程师',     attendGroup: '华托大厦', deptFullPath: '产品研发中心/工艺',   bizGroup: '' },
   { name: '赵继磊', empId: 'CP25022', dept: '技术服务组',   position: '中级技术工程师',     attendGroup: '华托大厦', deptFullPath: '产品研发中心/技术',   bizGroup: '' },
   { name: '行健磊', empId: 'CP25023', dept: '技术服务组',   position: '业务技术工程师',     attendGroup: '华托大厦', deptFullPath: '产品研发中心/技术',   bizGroup: '' },
-];
+].slice(0, 5);
 
 // ─── Helpers ─────────────────────────────────
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, cb: () => void) {
@@ -315,6 +313,26 @@ export default function MonthlyAttendanceStats() {
   const [pageSize, setPageSize] = useState(20);
   const [jumpPage, setJumpPage] = useState('');
   const [showDataInfo, setShowDataInfo] = useState(false);
+  const [employees, setEmployees] = useState<Employee[]>(EMPLOYEES);
+  const [sourceFile, setSourceFile] = useState('');
+  const [loadError, setLoadError] = useState('');
+
+  const loadMonthlyAttendance = useCallback(async () => {
+    try {
+      const res = await fetchMonthlyAttendanceEmployees();
+      if (res.rows?.length) {
+        setEmployees(res.rows);
+      }
+      setSourceFile(res.sourceFile || '');
+      setLoadError('');
+    } catch (_error) {
+      setLoadError('真实数据连接失败，当前展示静态数据');
+    }
+  }, []);
+
+  useEffect(() => {
+    loadMonthlyAttendance();
+  }, [loadMonthlyAttendance]);
 
   const monthPickerRef = useRef<HTMLDivElement>(null);
   const colPanelRef = useRef<HTMLDivElement>(null);
@@ -323,7 +341,7 @@ export default function MonthlyAttendanceStats() {
 
   const days = generateDays(year, month);
 
-  const isAbnormalEmployee = (emp: Employee) => emp.empId !== 'CP25023';
+  const isAbnormalEmployee = (emp: Employee) => Object.values(emp.dayResults || {}).some(value => value && !value.includes('正常') && !value.includes('休'));
 
   const applyFilters = () => {
     setEmpSearch(draftEmpSearch.trim());
@@ -344,7 +362,7 @@ export default function MonthlyAttendanceStats() {
     setJumpPage('');
   };
 
-  const filteredEmployees = EMPLOYEES.filter(emp => {
+  const filteredEmployees = employees.filter(emp => {
     const keyword = empSearch.trim().toLowerCase();
     const matchKeyword = !keyword || emp.name.toLowerCase().includes(keyword) || emp.empId.toLowerCase().includes(keyword);
     const matchDept = !deptFilter || emp.dept === deptFilter;
@@ -388,15 +406,19 @@ export default function MonthlyAttendanceStats() {
 
   // Get cell value for a specific employee + day
   const getCellResult = (emp: Employee, day: number, isWeekend: boolean): React.ReactNode => {
+    const realValue = emp.dayResults?.[String(day)]?.trim();
+    if (realValue) {
+      const clean = realValue.replace(/\n/g, ' / ');
+      const isNormal = clean.includes('正常');
+      const isRest = clean.includes('休');
+      return <span style={{ fontSize: '11px', color: isNormal ? '#059669' : isRest ? colors.textMuted : '#D97706', fontWeight: isNormal || !isRest ? 500 : 400 }}>{clean}</span>;
+    }
     if (isWeekend) {
       return <span style={{ fontSize: '11px', color: colors.textMuted }}>休</span>;
     }
     const state = getPastFuture(year, month, day);
     if (state === 'future') {
       return <span style={{ fontSize: '11px', color: colors.textMuted }}>未核算</span>;
-    }
-    if (emp.empId === 'CP25023' && day <= 6) {
-      return <span style={{ fontSize: '11px', color: '#059669', fontWeight: 500 }}>正常</span>;
     }
     return <span style={{ fontSize: '11px', color: '#D97706', fontWeight: 500 }}>未排班</span>;
   };
@@ -467,6 +489,13 @@ export default function MonthlyAttendanceStats() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: colors.appBg, overflow: 'hidden' }}>
+
+      {(sourceFile || loadError) && (
+        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>
+          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
+          {loadError ? ` ${loadError}` : ''}
+        </div>
+      )}
 
       {/* ── Filter bar ───────────────────── */}
       <div style={{ padding: '10px 16px 0', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0 }}>

@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev": "vite"
+    "dev": "vite",
+    "data": "node ./server/data-server.mjs",
+    "mobile-data": "set DATA_SERVER_PORT=3199&& node ./server/data-server.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -62,7 +64,10 @@
     "sonner": "2.0.3",
     "tailwind-merge": "3.2.0",
     "tw-animate-css": "1.3.8",
-    "vaul": "1.1.2"
+    "vaul": "1.1.2",
+    "cors": "2.8.5",
+    "express": "4.21.2",
+    "xlsx": "0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.1.12",

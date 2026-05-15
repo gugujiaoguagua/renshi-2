@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
+import { fetchWorkDataRecords, type WorkDataRecord } from '../api/realData';
 import {
   ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X, Search,
   Settings2, Download, GripVertical, Plus, Minus, RotateCcw,
@@ -10,12 +11,7 @@ type TabType = 'records' | 'uncalculated';
 type ApprovalStatus = '已通过' | '审批中' | '已拒绝' | '已撤销' | '已退回';
 type CancelStatus = '未申请取消' | '取消审批中' | '已取消';
 
-type DutyRecord = {
-  id: number; applicant: string; applicantId: string; applicantDept: string;
-  applyType: string; initiator: string; initiatorId: string;
-  initiateTime: string; completeTime: string; bizDate: string;
-  summary: string; approvalStatus: ApprovalStatus; cancelStatus: CancelStatus;
-};
+type DutyRecord = WorkDataRecord;
 
 type UncalcRecord = {
   id: number; applicant: string; empId: string; dept: string;
@@ -57,10 +53,6 @@ const UNCALC_COLS_DEFAULT: ColDef[] = [
 const DEPT_OPTIONS = ['产品研发中心','产品运营部','研发设计一部','研发设计二部','直营建连店','工艺开发部','技术支持部'];
 const ALL_STATUSES: ApprovalStatus[] = ['已通过','审批中','已拒绝','已撤销','已退回'];
 
-function showActionFeedback(action: string) {
-  window.alert(`勤务数据：${action}（交互已接通）`);
-}
-
 // ─── Mock Data ────────────────────────────────
 const DUTY_RECORDS: DutyRecord[] = [
   { id:1,  applicant:'林娜',   applicantId:'CP25003', applicantDept:'产品研发中心', applyType:'出差', initiator:'林娜',   initiatorId:'CP25003', initiateTime:'2026-05-05 09:15', completeTime:'2026-05-05 14:30', bizDate:'2026-05-07 ~ 2026-05-09', summary:'北京客户拜访出差（3天）',   approvalStatus:'已通过', cancelStatus:'未申请取消' },
@@ -75,7 +67,7 @@ const DUTY_RECORDS: DutyRecord[] = [
   { id:10, applicant:'戴琳玲', applicantId:'CP25013', applicantDept:'工艺开发部',   applyType:'加班', initiator:'戴琳玲', initiatorId:'CP25013', initiateTime:'2026-05-06 20:00', completeTime:'2026-05-06 22:10', bizDate:'2026-05-06',              summary:'产品发布版本加班2小时',     approvalStatus:'已通过', cancelStatus:'未申请取消' },
   { id:11, applicant:'邹智旭', applicantId:'CP25014', applicantDept:'工艺开发部',   applyType:'病假', initiator:'邹智旭', initiatorId:'CP25014', initiateTime:'2026-05-06 07:30', completeTime:'',                 bizDate:'2026-05-07',              summary:'感冒病假申请（1天）',       approvalStatus:'审批中', cancelStatus:'未申请取消' },
   { id:12, applicant:'荣誉',   applicantId:'CP25015', applicantDept:'工艺开发部',   applyType:'年假', initiator:'荣誉',   initiatorId:'CP25015', initiateTime:'2026-04-25 09:00', completeTime:'2026-04-25 11:20', bizDate:'2026-04-27 ~ 2026-05-01', summary:'五一节前年假（5天）',       approvalStatus:'已撤销', cancelStatus:'未申请取消' },
-];
+].slice(0, 5);
 
 const UNCALC_RECORDS: UncalcRecord[] = [
   { id:1, applicant:'曹文瑶', empId:'CP25004', dept:'产品运营部',   applyType:'加班', bizStartTime:'2026-04-30 18:00', bizEndTime:'2026-04-30 21:00', initiateTime:'2026-04-30 21:10', assignPeriod:'2026年04月', uncalcDates:'04/30',             uncalcCount:1 },
@@ -86,7 +78,7 @@ const UNCALC_RECORDS: UncalcRecord[] = [
   { id:6, applicant:'戴琳玲', empId:'CP25013', dept:'工艺开发部',   applyType:'加班', bizStartTime:'2026-04-30 19:00', bizEndTime:'2026-04-30 22:30', initiateTime:'2026-04-30 22:45', assignPeriod:'2026年04月', uncalcDates:'04/30',             uncalcCount:1 },
   { id:7, applicant:'方赛',   empId:'CP25016', dept:'工艺开发部',   applyType:'年假', bizStartTime:'2026-04-27 08:30', bizEndTime:'2026-04-27 17:30', initiateTime:'2026-04-24 09:00', assignPeriod:'2026年04月', uncalcDates:'04/27',             uncalcCount:1 },
   { id:8, applicant:'周誓',   empId:'CP25021', dept:'工艺开发部',   applyType:'出差', bizStartTime:'2026-04-28 07:00', bizEndTime:'2026-04-30 20:00', initiateTime:'2026-04-27 14:00', assignPeriod:'2026年04月', uncalcDates:'04/28, 04/29, 04/30', uncalcCount:3 },
-];
+].slice(0, 5);
 
 // ─── Helpers ─────────────────────────────────
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, cb: () => void) {
@@ -270,18 +262,104 @@ export default function WorkData() {
   const [pageSize, setPageSize] = useState(20);
   const [jumpPage, setJumpPage] = useState('');
   const [quickFilter, setQuickFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [dutyRows, setDutyRows] = useState<DutyRecord[]>(DUTY_RECORDS);
+  const [sourceFile, setSourceFile] = useState('');
+  const [loadError, setLoadError] = useState('');
+
+  const loadWorkData = useCallback(async () => {
+    try {
+      const res = await fetchWorkDataRecords();
+      if (res.rows?.length) {
+        setDutyRows(res.rows);
+      }
+      setSourceFile(res.sourceFile || '');
+      setLoadError('');
+    } catch (_error) {
+      setLoadError('真实数据连接失败，当前展示静态数据');
+    }
+  }, []);
+
+  useEffect(() => {
+    loadWorkData();
+  }, [loadWorkData]);
 
   const QUICK_FILTERS = [{ v: 'all', label: '全部' }, { v: 'today', label: '今日' }, { v: 'week', label: '本周' }, { v: 'month', label: '本月' }] as const;
 
-  const totalCount = tab === 'records' ? 78 : 8;
-  const totalPages = Math.ceil(totalCount / pageSize);
-  const displayRows = tab === 'records' ? DUTY_RECORDS : UNCALC_RECORDS;
+  const rawRows = tab === 'records' ? dutyRows : UNCALC_RECORDS;
+  const isInQuickRange = (dateText: string) => {
+    if (quickFilter === 'all') return true;
+    const date = new Date(String(dateText || '').slice(0, 10));
+    if (Number.isNaN(date.getTime())) return true;
+    const today = new Date('2026-05-09');
+    const diffDays = Math.floor((today.getTime() - date.getTime()) / 86400000);
+    if (quickFilter === 'today') return diffDays === 0;
+    if (quickFilter === 'week') return diffDays >= 0 && diffDays <= 6;
+    if (quickFilter === 'month') return date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth();
+    return true;
+  };
+  const displayRows = rawRows.filter((row: any) => {
+    const keyword = empSearch.trim().toLowerCase();
+    const matchKeyword = !keyword || `${row.applicant || ''}${row.applicantId || row.empId || ''}`.toLowerCase().includes(keyword);
+    const matchStatus = statusFilter === 'all' || row.approvalStatus === statusFilter || row.applyType === statusFilter;
+    const matchQuick = isInQuickRange(row.initiateTime || row.bizDate || row.bizStartTime);
+    return matchKeyword && matchStatus && matchQuick;
+  });
+  const statusItems = tab === 'records'
+    ? [
+        { key: 'all', label: '全部', count: rawRows.length },
+        { key: '已通过', label: '已通过', count: (rawRows as DutyRecord[]).filter(row => row.approvalStatus === '已通过').length },
+        { key: '审批中', label: '审批中', count: (rawRows as DutyRecord[]).filter(row => row.approvalStatus === '审批中').length },
+        { key: '月度统计', label: '月度统计', count: (rawRows as DutyRecord[]).filter(row => row.applyType === '月度统计').length },
+      ]
+    : [
+        { key: 'all', label: '全部', count: rawRows.length },
+        { key: '加班', label: '加班', count: (rawRows as UncalcRecord[]).filter(row => row.applyType === '加班').length },
+        { key: '出差', label: '出差', count: (rawRows as UncalcRecord[]).filter(row => row.applyType === '出差').length },
+      ];
+  const normalizeSortValue = (value: unknown): number | string => {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'boolean') return value ? 1 : 0;
+    if (value === null || value === undefined) return '';
+
+    const text = String(value).trim();
+    if (!text) return '';
+
+    const timestamp = Date.parse(text);
+    if (!Number.isNaN(timestamp)) return timestamp;
+
+    return text;
+  };
+
+  const sortedRows = sortKey
+    ? [...displayRows].sort((a, b) => {
+        const left = normalizeSortValue((a as Record<string, unknown>)[sortKey]);
+        const right = normalizeSortValue((b as Record<string, unknown>)[sortKey]);
+
+        if (typeof left === 'number' && typeof right === 'number') {
+          return sortDir === 'asc' ? left - right : right - left;
+        }
+
+        const result = String(left).localeCompare(String(right), 'zh-CN', { numeric: true, sensitivity: 'base' });
+        return sortDir === 'asc' ? result : -result;
+      })
+    : displayRows;
+
+  const totalCount = sortedRows.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const pageRows = sortedRows.slice((page - 1) * pageSize, page * pageSize);
   const currentCols = tab === 'records' ? dutyCols.filter(c => c.visible) : uncalcCols.filter(c => c.visible);
 
   const handleSort = (key: string) => {
-    if (sortKey === key) { setSortDir(d => d === 'asc' ? 'desc' : null); if (sortDir === 'desc') setSortKey(null); }
-    else { setSortKey(key); setSortDir('asc'); }
+    if (sortKey === key) {
+      setSortDir(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+    setPage(1);
   };
+
 
   const getPages = (): (number | '...')[] => totalPages <= 7
     ? Array.from({ length: totalPages }, (_, i) => i + 1)
@@ -296,8 +374,8 @@ export default function WorkData() {
       <div style={{ backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', padding: '0 16px' }}>
           {[
-            { v: 'records',      label: '勤务记录', count: 78 },
-            { v: 'uncalculated', label: '未核算',   count: 8  },
+            { v: 'records',      label: '勤务记录', count: dutyRows.length },
+            { v: 'uncalculated', label: '未核算',   count: UNCALC_RECORDS.length  },
           ].map(t => {
             const active = tab === t.v;
             return (
@@ -345,8 +423,8 @@ export default function WorkData() {
             更多筛选 {showMore ? <ChevronUp size={11}/> : <ChevronDown size={11}/>}
           </button>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button onClick={() => showActionFeedback('重置筛选')} style={p5s12(colors)}>重置</button>
-            <button onClick={() => showActionFeedback('查询记录')} style={p5s14(colors)}>查询</button>
+            <button onClick={() => { setEmpSearch(''); setQuickFilter('all'); setStatusFilter('all'); setPage(1); }} style={p5s12(colors)}>重置</button>
+            <button onClick={() => setPage(1)} style={p5s14(colors)}>查询</button>
           </div>
         </div>
         {/* Row 2 (expanded: 完成日期 + 快捷筛选) */}
@@ -361,7 +439,7 @@ export default function WorkData() {
             <span style={{ fontSize: '12px', color: colors.textMuted, marginLeft: 4 }}>快捷筛选</span>
             <div style={{ display: 'flex', gap: 4 }}>
               {QUICK_FILTERS.map(qf => (
-                <button key={qf.v} onClick={() => setQuickFilter(qf.v)}
+                <button key={qf.v} onClick={() => { setQuickFilter(qf.v); setPage(1); }}
                   style={{ padding: '4px 12px', fontSize: '12px', border: `1px solid ${quickFilter === qf.v ? colors.primary : colors.inputBorder}`, borderRadius: 4, cursor: 'pointer', backgroundColor: quickFilter === qf.v ? `${colors.primary}12` : 'transparent', color: quickFilter === qf.v ? colors.primary : colors.text }}>{qf.label}</button>
               ))}
             </div>
@@ -369,9 +447,27 @@ export default function WorkData() {
         )}
       </div>
 
+      {(sourceFile || loadError) && (
+        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>
+          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
+          {loadError ? ` ${loadError}` : ''}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, padding: '8px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0, flexWrap: 'wrap' }}>
+        {statusItems.map(item => {
+          const active = statusFilter === item.key;
+          return (
+            <button key={item.key} onClick={() => { setStatusFilter(item.key); setPage(1); }} style={{ padding: '4px 10px', fontSize: '12px', border: `1px solid ${active ? colors.primary : colors.inputBorder}`, borderRadius: 12, cursor: 'pointer', backgroundColor: active ? `${colors.primary}12` : 'transparent', color: active ? colors.primary : colors.textMuted }}>
+              {item.label} <strong>{item.count}</strong>
+            </button>
+          );
+        })}
+      </div>
+
       {/* ── Table ─────────────────────────── */}
       <div style={{ flex: 1, overflow: 'auto', backgroundColor: colors.cardBg, borderTop: `1px solid ${colors.cardBorder}` }}>
-        <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: '100%' }}>
+        <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: tab === 'records' ? 1420 : 1100, width: 'max-content' }}>
           <thead>
             <tr>
               {/* No row number or checkbox - align with spec fields only */}
@@ -391,7 +487,7 @@ export default function WorkData() {
             </tr>
           </thead>
           <tbody>
-            {displayRows.map((row, ri) => (
+            {pageRows.map((row, ri) => (
               <tr key={row.id}
                 style={{ backgroundColor: ri % 2 === 0 ? colors.cardBg : colors.tableStripe, borderBottom: `1px solid ${colors.tableBorder}` }}
                 onMouseEnter={e => (e.currentTarget.style.backgroundColor = colors.tableRowHover)}
@@ -399,7 +495,7 @@ export default function WorkData() {
                 {currentCols.map(col => {
                   const v = (row as any)[col.key];
                   let content: React.ReactNode = v ?? '—';
-                  if (col.key === 'applicant') content = <span onClick={() => showActionFeedback(`查看申请人：${v}`)} style={{ color: colors.primary, cursor: 'pointer', fontWeight: 500 }}>{v}</span>;
+                  if (col.key === 'applicant') content = <span onClick={() => window.alert(`申请人详情\n姓名：${row.applicant}\n员工号：${row.applicantId}\n部门：${row.applicantDept}\n类型：${row.applyType}`)} style={{ color: colors.primary, cursor: 'pointer', fontWeight: 500 }}>{v}</span>;
                   else if (col.key === 'applyType') content = <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: 10, backgroundColor: colors.badgeBlueBg, color: colors.badgeBlueText }}>{v}</span>;
                   else if (col.key === 'approvalStatus') content = <StatusBadge status={v as ApprovalStatus} colors={colors}/>;
                   else if (col.key === 'cancelStatus') content = <span style={{ fontSize: '11px', color: v === '取消审批中' ? colors.badgeBlueText : colors.textMuted }}>{v}</span>;
@@ -411,7 +507,7 @@ export default function WorkData() {
                   return <td key={col.key} style={{ ...tdS(colors), width: col.width, minWidth: col.width, borderLeft: `1px solid ${colors.tableBorder}` }}>{content}</td>;
                 })}
                 <td style={{ ...tdS(colors), width: 60, textAlign: 'center', borderLeft: `1px solid ${colors.tableBorder}` }}>
-                  <button onClick={() => showActionFeedback(`查看记录：${row.applicant}`)} style={{ fontSize: '11px', color: colors.primary, border: `1px solid ${colors.primary}`, borderRadius: 4, padding: '2px 8px', cursor: 'pointer', backgroundColor: 'transparent' }}>查看</button>
+                  <button onClick={() => window.alert(`勤务记录详情\n申请人：${row.applicant}\n业务类型：${row.applyType}\n业务日期：${row.bizDate}\n摘要：${row.summary}\n审批状态：${row.approvalStatus}`)} style={{ fontSize: '11px', color: colors.primary, border: `1px solid ${colors.primary}`, borderRadius: 4, padding: '2px 8px', cursor: 'pointer', backgroundColor: 'transparent' }}>查看</button>
                 </td>
               </tr>
             ))}

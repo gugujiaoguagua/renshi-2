@@ -1,16 +1,13 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
+import { fetchExternalRecords, type ExternalRecord as RealExternalRecord } from '../api/realData';
 import {
   ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X, Search,
   Plus, Upload, Download, Trash2, Info, Settings2, GripVertical, Minus,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────
-type ExternalRecord = {
-  id: number; module: string; attendDate: string; period: string;
-  statItem: string; statValue: string | number;
-  creator: string; createTime: string; modifier: string; modifyTime: string;
-};
+type ExternalRecord = RealExternalRecord;
 
 type ColDef = { key: string; label: string; width: number; visible: boolean };
 
@@ -49,6 +46,19 @@ function useClickOutside(ref: React.RefObject<HTMLElement | null>, cb: () => voi
   }, [ref, cb]);
 }
 
+function downloadExternalCsv(filename: string, headers: string[], rows: string[][]) {
+  const csv = [headers, ...rows]
+    .map(row => row.map(cell => /[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell).join(','))
+    .join('\n');
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.URL.revokeObjectURL(url);
+}
+
 const pBtn = (colors: any): React.CSSProperties => ({ padding: '5px 14px', fontSize: '12px', border: 'none', borderRadius: 4, cursor: 'pointer', backgroundColor: colors.primary, color: '#fff', whiteSpace: 'nowrap' });
 const oBtn = (colors: any, active?: boolean, danger?: boolean): React.CSSProperties => ({
   padding: '5px 12px', fontSize: '12px', borderRadius: 4, cursor: 'pointer', backgroundColor: 'transparent', whiteSpace: 'nowrap',
@@ -61,22 +71,27 @@ const pgS = (colors: any, active: boolean): React.CSSProperties => ({ minWidth: 
 const inS = (colors: any): React.CSSProperties => ({ padding: '5px 10px', fontSize: '12px', border: `1px solid ${colors.inputBorder}`, borderRadius: 4, backgroundColor: colors.inputBg, color: colors.text, outline: 'none' });
 
 // ─── Simple Dropdown ──────────────────────────
-function SimpleSelect({ label, options, colors }: { label: string; options: string[]; colors: any }) {
+function SimpleSelect({ label, options, colors, value, onChange }: { label: string; options: string[]; colors: any; value?: string; onChange?: (value: string) => void }) {
   const [open, setOpen] = useState(false);
-  const [val, setVal] = useState('');
+  const [innerValue, setInnerValue] = useState('');
+  const val = value ?? innerValue;
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(ref, () => setOpen(false));
+  const setValue = (next: string) => {
+    if (onChange) onChange(next);
+    else setInnerValue(next);
+  };
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <div onClick={() => setOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 4, border: `1px solid ${open ? colors.primary : colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg, cursor: 'pointer', minWidth: 110 }}>
         <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap', flexShrink: 0 }}>{label}:</span>
         <span style={{ flex: 1, fontSize: '12px', color: val ? colors.text : colors.textMuted }}>{val || '请选择'}</span>
-        {val ? <X size={10} onClick={e => { e.stopPropagation(); setVal(''); }} style={{ color: colors.textMuted, flexShrink: 0 }}/> : <ChevronDown size={10} style={{ color: colors.textMuted, flexShrink: 0 }}/>}
+        {val ? <X size={10} onClick={e => { e.stopPropagation(); setValue(''); }} style={{ color: colors.textMuted, flexShrink: 0 }}/> : <ChevronDown size={10} style={{ color: colors.textMuted, flexShrink: 0 }}/>}
       </div>
       {open && (
         <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 200, marginTop: 4, backgroundColor: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', minWidth: 130, overflow: 'hidden' }}>
           {options.map(opt => (
-            <div key={opt} onClick={() => { setVal(opt); setOpen(false); }}
+            <div key={opt} onClick={() => { setValue(opt); setOpen(false); }}
               style={{ padding: '7px 12px', fontSize: '12px', cursor: 'pointer', color: val === opt ? colors.primary : colors.text }}
               onMouseEnter={e => (e.currentTarget as HTMLElement).style.backgroundColor = colors.tableRowHover}
               onMouseLeave={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'}>{opt}</div>
@@ -263,14 +278,68 @@ export default function ExternalDataManagement() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [jumpPage, setJumpPage] = useState('');
+  const [rows, setRows] = useState<ExternalRecord[]>(RECORDS);
+  const [sourceFile, setSourceFile] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [moduleFilter, setModuleFilter] = useState('');
+  const [bizTypeFilter, setBizTypeFilter] = useState('');
+  const [periodFilter, setPeriodFilter] = useState('');
+  const [statItemFilter, setStatItemFilter] = useState('');
+  const [deptFilter, setDeptFilter] = useState('');
+  const [dateStart, setDateStart] = useState('');
+  const [dateEnd, setDateEnd] = useState('');
 
-  const [rows] = useState<ExternalRecord[]>(RECORDS);
-  const totalCount = rows.length;
+  const loadExternalRows = useCallback(async () => {
+    try {
+      const res = await fetchExternalRecords();
+      if (res.rows?.length) {
+        setRows(res.rows);
+      }
+      setSourceFile(res.sourceFile || '');
+      setLoadError('');
+    } catch (_error) {
+      setLoadError('真实数据连接失败，当前展示静态数据');
+    }
+  }, []);
+
+  useEffect(() => {
+    loadExternalRows();
+  }, [loadExternalRows]);
+
+  const filteredRows = useMemo(() => {
+    const keyword = empSearch.trim().toLowerCase();
+    return rows.filter(row => {
+      const bizMatched = !bizTypeFilter || String(row.statItem || '').includes(bizTypeFilter) || String(row.statValue || '').includes(bizTypeFilter);
+      const deptMatched = !deptFilter || row.creator.includes(deptFilter) || row.module.includes(deptFilter);
+      const keywordMatched = !keyword
+        || row.creator.toLowerCase().includes(keyword)
+        || row.module.toLowerCase().includes(keyword)
+        || String(row.statItem || '').toLowerCase().includes(keyword)
+        || String(row.statValue || '').toLowerCase().includes(keyword);
+      return keywordMatched
+        && (!moduleFilter || row.module === moduleFilter)
+        && bizMatched
+        && (!periodFilter || row.period === periodFilter)
+        && (!statItemFilter || row.statItem === statItemFilter)
+        && deptMatched
+        && (!dateStart || row.attendDate >= dateStart)
+        && (!dateEnd || row.attendDate <= dateEnd);
+    });
+  }, [rows, empSearch, moduleFilter, bizTypeFilter, periodFilter, statItemFilter, deptFilter, dateStart, dateEnd]);
+
+  const totalCount = filteredRows.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
   const visibleCols = cols.filter(c => c.visible);
-  const allSelected = rows.length > 0 && selected.size === rows.length;
+  const allSelected = filteredRows.length > 0 && selected.size === filteredRows.length;
   const someSelected = selected.size > 0 && !allSelected;
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(rows.map(r => r.id)));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(filteredRows.map(r => r.id)));
   const toggleRow = (id: number) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   const handleSort = (key: string) => {
@@ -278,7 +347,7 @@ export default function ExternalDataManagement() {
     else { setSortKey(key); setSortDir('asc'); }
   };
 
-  const sortedRows = [...rows].sort((a, b) => {
+  const sortedRows = [...filteredRows].sort((a, b) => {
     if (!sortKey || !sortDir) return 0;
     const av = (a as any)[sortKey], bv = (b as any)[sortKey];
     if (!av) return 1; if (!bv) return -1;
@@ -286,9 +355,31 @@ export default function ExternalDataManagement() {
     return sortDir === 'asc' ? cmp : -cmp;
   });
 
+  const pagedRows = useMemo(() => sortedRows.slice((page - 1) * pageSize, page * pageSize), [sortedRows, page, pageSize]);
+
   const getPages = (): (number | '...')[] => totalPages <= 7
     ? Array.from({ length: totalPages }, (_, i) => i + 1)
     : [1, 2, 3, '...', totalPages];
+
+  const resetFilters = () => {
+    setModuleFilter('');
+    setBizTypeFilter('');
+    setPeriodFilter('');
+    setStatItemFilter('');
+    setDeptFilter('');
+    setDateStart('');
+    setDateEnd('');
+    setEmpSearch('');
+    setSelected(new Set());
+    setPage(1);
+  };
+  const exportRows = () => downloadExternalCsv('外部数据.csv', visibleCols.map(col => col.label), filteredRows.map(row => visibleCols.map(col => String((row as any)[col.key] ?? ''))));
+  const deleteRows = () => {
+    if (!selected.size) return;
+    setRows(current => current.filter(row => !selected.has(row.id)));
+    setSelected(new Set());
+    setPage(1);
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: colors.appBg, overflow: 'hidden' }}>
@@ -298,6 +389,8 @@ export default function ExternalDataManagement() {
         <Info size={14} style={{ color: '#D97706', flexShrink: 0, marginTop: 1 }}/>
         <span style={{ fontSize: '12px', color: '#92400E', lineHeight: 1.5 }}>
           外部数据导入后，需在<strong>月考勤汇总</strong>页面执行"核算考勤"操作，数据方可参与统计计算并更新汇总结果。
+          {sourceFile ? ` 当前已连接真实数据源：${sourceFile}` : ''}
+          {loadError ? `（${loadError}）` : ''}
         </span>
       </div>
 
@@ -305,16 +398,16 @@ export default function ExternalDataManagement() {
       <div style={{ backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, padding: '10px 16px 0', marginTop: 10, flexShrink: 0 }}>
         {/* Row 1 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-          <SimpleSelect label="应用模块" options={MODULE_OPTIONS} colors={colors}/>
-          <SimpleSelect label="业务类型" options={BIZ_TYPE_OPTIONS} colors={colors}/>
+          <SimpleSelect label="应用模块" options={MODULE_OPTIONS} colors={colors} value={moduleFilter} onChange={setModuleFilter}/>
+          <SimpleSelect label="业务类型" options={BIZ_TYPE_OPTIONS} colors={colors} value={bizTypeFilter} onChange={setBizTypeFilter}/>
           {/* 考勤日期 range */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg }}>
             <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>考勤日期:</span>
-            <input type="date" style={{ ...inS(colors), border: 'none', padding: 0, width: 108 }}/>
+            <input type="date" value={dateStart} onChange={e => setDateStart(e.target.value)} style={{ ...inS(colors), border: 'none', padding: 0, width: 108 }}/>
             <span style={{ fontSize: '12px', color: colors.textMuted }}>—</span>
-            <input type="date" style={{ ...inS(colors), border: 'none', padding: 0, width: 108 }}/>
+            <input type="date" value={dateEnd} onChange={e => setDateEnd(e.target.value)} style={{ ...inS(colors), border: 'none', padding: 0, width: 108 }}/>
           </div>
-          <SimpleSelect label="考勤周期" options={PERIOD_OPTIONS} colors={colors}/>
+          <SimpleSelect label="考勤周期" options={PERIOD_OPTIONS} colors={colors} value={periodFilter} onChange={setPeriodFilter}/>
           {/* 员工 search */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg, minWidth: 150 }}>
             <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>员工:</span>
@@ -327,15 +420,15 @@ export default function ExternalDataManagement() {
             更多筛选 {showMore ? <ChevronUp size={11}/> : <ChevronDown size={11}/>}
           </button>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button style={oBtn(colors)}>重置</button>
-            <button style={pBtn(colors)}>查询</button>
+            <button onClick={resetFilters} style={oBtn(colors)}>重置</button>
+            <button onClick={() => { setSelected(new Set()); setPage(1); }} style={pBtn(colors)}>查询</button>
           </div>
         </div>
         {/* Row 2 (expanded) */}
         {showMore && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            <SimpleSelect label="统计项" options={STAT_ITEMS} colors={colors}/>
-            <SimpleSelect label="部门" options={DEPT_OPTIONS} colors={colors}/>
+            <SimpleSelect label="统计项" options={STAT_ITEMS} colors={colors} value={statItemFilter} onChange={setStatItemFilter}/>
+            <SimpleSelect label="部门" options={DEPT_OPTIONS} colors={colors} value={deptFilter} onChange={setDeptFilter}/>
           </div>
         )}
       </div>
@@ -348,10 +441,11 @@ export default function ExternalDataManagement() {
         <button onClick={() => setShowImport(true)} style={{ ...oBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}>
           <Upload size={12}/>导入
         </button>
-        <button style={{ ...oBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}>
+        <button onClick={exportRows} style={{ ...oBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}>
           <Download size={12}/>导出
         </button>
         <button
+          onClick={deleteRows}
           disabled={selected.size === 0}
           style={{ ...oBtn(colors, false, true), display: 'flex', alignItems: 'center', gap: 4, opacity: selected.size === 0 ? 0.45 : 1, cursor: selected.size === 0 ? 'not-allowed' : 'pointer' }}>
           <Trash2 size={12}/>删除

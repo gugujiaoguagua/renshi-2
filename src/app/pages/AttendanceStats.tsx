@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
+import { fetchAttendanceEmployees, type AttendanceEmployee } from '../api/realData';
 import {
   Calendar, Search, RefreshCw, ChevronDown, Settings2,
   ChevronLeft, ChevronRight, X, ChevronUp, RotateCcw,
@@ -85,7 +86,7 @@ const EMPLOYEES: Employee[] = [
   { name: '崔晴洁', empId: 'CP25014', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '工艺开发部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
   { name: '谢梅',   empId: 'CP25015', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '工艺开发部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
   { name: '方责',   empId: 'CP25016', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '工艺开发部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-];
+].slice(0, 5);
 
 const FILTER_DEPTS = Array.from(new Set(EMPLOYEES.map(emp => emp.dept).filter(Boolean))).map((label, index) => ({
   id: `dept-${index + 1}`,
@@ -195,13 +196,13 @@ function DateField({ value, onChange, colors, active }: { value: string; onChang
   );
 }
 
-function DeptDropdown({ colors, value, onChange }: { colors: any; value: string; onChange: (value: string) => void }) {
+function DeptDropdown({ colors, value, onChange, options }: { colors: any; value: string; onChange: (value: string) => void; options: Array<{ id: string; label: string }> }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(ref, () => setOpen(false));
 
-  const filtered = FILTER_DEPTS.filter(d => d.label.includes(search));
+  const filtered = options.filter(d => d.label.includes(search));
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -336,6 +337,10 @@ function SimpleDropdown({ label, options, value, onChange, colors }: { label: st
 // ─────────────────────────────────────────────
 export default function AttendanceStats() {
   const { colors } = useTheme();
+  const [employees, setEmployees] = useState<Employee[]>(EMPLOYEES);
+  const [sourceFile, setSourceFile] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const [draftFilters, setDraftFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [currentPage, setCurrentPage] = useState(1);
@@ -346,7 +351,41 @@ export default function AttendanceStats() {
   const [pendingCols, setPendingCols] = useState<string[]>(DEFAULT_VISIBLE);
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [activeStatFilter, setActiveStatFilter] = useState<string | null>(null);
   const colPanelRef = useRef<HTMLDivElement>(null);
+
+  const loadAttendance = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetchAttendanceEmployees();
+      if (res.rows?.length) {
+        setEmployees(res.rows);
+      }
+      setSourceFile(res.sourceFile || '');
+      setLoadError('');
+    } catch (_error) {
+      setLoadError('真实数据连接失败，当前展示静态数据');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAttendance();
+  }, [loadAttendance]);
+
+  const filterDepts = useMemo(
+    () => Array.from(new Set(employees.map(emp => emp.dept).filter(Boolean))).map((label, index) => ({ id: `dept-${index + 1}`, label })),
+    [employees]
+  );
+  const filterAttendGroups = useMemo(
+    () => Array.from(new Set(employees.map(emp => (emp.attendGroup || emp.dept)).filter(Boolean))),
+    [employees]
+  );
+  const filterShifts = useMemo(
+    () => Array.from(new Set(employees.map(emp => emp.shift).filter(Boolean))),
+    [employees]
+  );
 
   // Column settings panel
   const openColPanel = () => {
@@ -385,6 +424,7 @@ export default function AttendanceStats() {
   const resetFilters = () => {
     setDraftFilters(DEFAULT_FILTERS);
     setAppliedFilters(DEFAULT_FILTERS);
+    setActiveStatFilter(null);
     setCurrentPage(1);
     setJumpPage('');
   };
@@ -394,6 +434,7 @@ export default function AttendanceStats() {
     setCurrentPage(1);
     setJumpPage('');
     setShowColPanel(false);
+    loadAttendance();
   };
 
   const statusBadge = (status: string) => {
@@ -418,7 +459,7 @@ export default function AttendanceStats() {
     else { setSortCol(key); setSortDir('asc'); }
   };
 
-  const filteredEmployees = EMPLOYEES.filter(emp => {
+  const baseFilteredEmployees = employees.filter(emp => {
     const keyword = appliedFilters.empSearch.trim().toLowerCase();
     const matchesKeyword = !keyword || emp.name.toLowerCase().includes(keyword) || emp.empId.toLowerCase().includes(keyword);
     const matchesDept = !appliedFilters.dept || emp.dept === appliedFilters.dept;
@@ -429,7 +470,35 @@ export default function AttendanceStats() {
     return matchesKeyword && matchesDept && matchesAttendGroup && matchesShift && matchesEmploymentStatus;
   });
 
-  const countWhere = (predicate: (emp: Employee) => boolean) => filteredEmployees.filter(predicate).length;
+  const matchesStatFilter = (emp: Employee) => {
+    if (!activeStatFilter || activeStatFilter === 'all') return true;
+    if (activeStatFilter === 'pending') return !['已出勤', '未出勤', '迟到', '旷工', '休息'].includes(emp.status);
+    if (activeStatFilter === 'present') return emp.status === '已出勤';
+    if (activeStatFilter === 'absent') return emp.status === '未出勤';
+    if (activeStatFilter === 'late') return emp.status === '迟到' || emp.anomaly.includes('迟到');
+    if (activeStatFilter === 'absentWork') return emp.status === '旷工' || emp.anomaly.includes('旷工');
+    if (activeStatFilter === 'rest') return emp.status === '休息' || emp.attendance === '休息';
+    if (activeStatFilter === 'unplanned') return emp.type === '未排班' || emp.anomaly.includes('未排班');
+    if (activeStatFilter === 'card') return (emp.cin1 && emp.cin1 !== '-') || (emp.cout1 && emp.cout1 !== '-');
+    if (activeStatFilter === 'worked') return emp.attendance === '已出勤';
+    if (activeStatFilter === 'leave') return emp.leave && emp.leave !== '-';
+    if (activeStatFilter === 'trip') return emp.fieldTrip.includes('出差');
+    if (activeStatFilter === 'outing') return emp.fieldTrip.includes('外出');
+    if (activeStatFilter === 'early') return emp.anomaly.includes('早退');
+    if (activeStatFilter === 'missing') return emp.anomaly.includes('缺卡');
+    if (activeStatFilter === 'overtime') return emp.anomaly.includes('加班');
+    if (activeStatFilter === 'overtimeAnomaly') return emp.anomaly.includes('加班异常');
+    return true;
+  };
+
+  const filteredEmployees = baseFilteredEmployees.filter(matchesStatFilter);
+  const applyStatFilter = (key: string) => {
+    setActiveStatFilter(current => current === key ? null : key);
+    setCurrentPage(1);
+    setJumpPage('');
+  };
+
+  const countWhere = (predicate: (emp: Employee) => boolean) => baseFilteredEmployees.filter(predicate).length;
   const countStatus = (status: string) => countWhere(emp => emp.status === status);
 
   const presentCount = countStatus('已出勤');
@@ -443,17 +512,17 @@ export default function AttendanceStats() {
   const pendingCount = countWhere(emp => !['已出勤', '未出勤', '迟到', '旷工', '休息'].includes(emp.status));
 
   const statRow1 = [
-    { label: '在勤人数', value: filteredEmployees.length, color: STAT_ROW1_COLORS.text },
-    { label: '待统计人数', value: pendingCount, color: STAT_ROW1_COLORS.pending },
-    { label: '已出勤', value: presentCount, color: STAT_ROW1_COLORS.present },
-    { label: '未出勤', value: absentCount, color: STAT_ROW1_COLORS.absent },
-    { label: '迟到', value: lateCount, color: STAT_ROW1_COLORS.late },
-    { label: '旷工', value: absentWorkCount, color: STAT_ROW1_COLORS.absentWork },
-    { label: '休息', value: restCount, color: STAT_ROW1_COLORS.muted },
-    { label: '未排班', value: unplannedCount, color: STAT_ROW1_COLORS.muted },
-    { label: '自助工卡', value: cardCount, color: STAT_ROW1_COLORS.card },
-    { label: '已出工', value: workedCount, color: STAT_ROW1_COLORS.present },
-    { label: '休息(弹)', value: restCount, color: STAT_ROW1_COLORS.muted },
+    { key: 'all', label: '在勤人数', value: baseFilteredEmployees.length, color: STAT_ROW1_COLORS.text },
+    { key: 'pending', label: '待统计人数', value: pendingCount, color: STAT_ROW1_COLORS.pending },
+    { key: 'present', label: '已出勤', value: presentCount, color: STAT_ROW1_COLORS.present },
+    { key: 'absent', label: '未出勤', value: absentCount, color: STAT_ROW1_COLORS.absent },
+    { key: 'late', label: '迟到', value: lateCount, color: STAT_ROW1_COLORS.late },
+    { key: 'absentWork', label: '旷工', value: absentWorkCount, color: STAT_ROW1_COLORS.absentWork },
+    { key: 'rest', label: '休息', value: restCount, color: STAT_ROW1_COLORS.muted },
+    { key: 'unplanned', label: '未排班', value: unplannedCount, color: STAT_ROW1_COLORS.muted },
+    { key: 'card', label: '自助工卡', value: cardCount, color: STAT_ROW1_COLORS.card },
+    { key: 'worked', label: '已出工', value: workedCount, color: STAT_ROW1_COLORS.present },
+    { key: 'rest', label: '休息(弹)', value: restCount, color: STAT_ROW1_COLORS.muted },
   ] as const;
 
   const leaveCount = countWhere(emp => emp.leave && emp.leave !== '-');
@@ -468,24 +537,24 @@ export default function AttendanceStats() {
     {
       label: '勤务统计(人数)',
       items: [
-        { label: '请假', value: leaveCount },
-        { label: '出差', value: tripCount },
-        { label: '外出', value: outingCount },
+        { key: 'leave', label: '请假', value: leaveCount },
+        { key: 'trip', label: '出差', value: tripCount },
+        { key: 'outing', label: '外出', value: outingCount },
       ],
     },
     {
       label: '异常统计(人数)',
       items: [
-        { label: '迟到', value: lateCount },
-        { label: '早退', value: earlyLeaveCount },
-        { label: '缺卡', value: missingCardCount, highlight: true },
-        { label: '加班统计', value: overtimeCount },
+        { key: 'late', label: '迟到', value: lateCount },
+        { key: 'early', label: '早退', value: earlyLeaveCount },
+        { key: 'missing', label: '缺卡', value: missingCardCount, highlight: true },
+        { key: 'overtime', label: '加班统计', value: overtimeCount },
       ],
     },
     {
       label: `加班异常(${overtimeAnomalyCount})`,
       items: [
-        { label: '加班', value: overtimeCount },
+        { key: 'overtime', label: '加班', value: overtimeCount },
       ],
     },
   ];
@@ -581,9 +650,9 @@ export default function AttendanceStats() {
           <span style={{ color: colors.textMuted, fontSize: '12px' }}>—</span>
           <DateField value={draftFilters.endDate} onChange={value => updateDraftFilter('endDate', value)} colors={colors} active />
 
-          <DeptDropdown colors={colors} value={draftFilters.dept} onChange={value => updateDraftFilter('dept', value)} />
-          <SimpleDropdown label="考勤组" options={FILTER_ATTEND_GROUPS} value={draftFilters.attendGroup} onChange={value => updateDraftFilter('attendGroup', value)} colors={colors} />
-          <SimpleDropdown label="班次" options={FILTER_SHIFTS} value={draftFilters.shift} onChange={value => updateDraftFilter('shift', value)} colors={colors} />
+          <DeptDropdown colors={colors} value={draftFilters.dept} onChange={value => updateDraftFilter('dept', value)} options={filterDepts.length ? filterDepts : FILTER_DEPTS} />
+          <SimpleDropdown label="考勤组" options={filterAttendGroups.length ? filterAttendGroups : FILTER_ATTEND_GROUPS} value={draftFilters.attendGroup} onChange={value => updateDraftFilter('attendGroup', value)} colors={colors} />
+          <SimpleDropdown label="班次" options={filterShifts.length ? filterShifts : FILTER_SHIFTS} value={draftFilters.shift} onChange={value => updateDraftFilter('shift', value)} colors={colors} />
 
           <div style={{
             display: 'flex', alignItems: 'center', gap: '6px',
@@ -623,6 +692,23 @@ export default function AttendanceStats() {
         </div>
       </div>
 
+      {(sourceFile || loadError || isLoading) && (
+        <div style={{
+          margin: '8px 16px 0',
+          padding: '8px 12px',
+          borderRadius: 6,
+          backgroundColor: '#FFFBEB',
+          border: '1px solid #FCD34D',
+          fontSize: '12px',
+          color: '#92400E',
+          flexShrink: 0,
+        }}>
+          {isLoading ? '正在加载真实数据… ' : ''}
+          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
+          {loadError ? ` ${loadError}` : ''}
+        </div>
+      )}
+
       {/* ── Stats row 1 ────────────────────────── */}
       <div style={{
         backgroundColor: colors.statCardBg,
@@ -634,8 +720,8 @@ export default function AttendanceStats() {
           const color = item.color === 'text' ? colors.text : item.color === 'muted' ? colors.textMuted : item.color;
           return (
             <React.Fragment key={i}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', padding: '2px 14px 2px 0', marginRight: '14px', borderRight: i < statRow1.length - 1 ? `1px solid ${colors.divider}` : 'none' }}>
-                <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>{item.label}</span>
+              <div onClick={() => applyStatFilter(item.key)} style={{ display: 'flex', alignItems: 'baseline', gap: '4px', padding: '2px 8px', marginRight: '6px', borderRight: i < statRow1.length - 1 ? `1px solid ${colors.divider}` : 'none', cursor: 'pointer', borderRadius: 4, backgroundColor: activeStatFilter === item.key || (!activeStatFilter && item.key === 'all') ? `${colors.primary}12` : 'transparent' }}>
+                <span style={{ fontSize: '12px', color: activeStatFilter === item.key || (!activeStatFilter && item.key === 'all') ? colors.primary : colors.textMuted, whiteSpace: 'nowrap' }}>{item.label}</span>
                 <span style={{ fontSize: '15px', fontWeight: 700, color, lineHeight: 1 }}>{item.value}</span>
               </div>
             </React.Fragment>
@@ -657,15 +743,18 @@ export default function AttendanceStats() {
             )}
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <span style={{ fontSize: '11px', color: colors.textMuted, whiteSpace: 'nowrap' }}>{group.label}:</span>
-              {group.items.map((item, ii) => (
-                <div key={ii} style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
-                  <span style={{ fontSize: '11px', color: colors.textMuted }}>{item.label}(</span>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: (item as any).highlight ? colors.primary : colors.text }}>
-                    {item.value}
-                  </span>
-                  <span style={{ fontSize: '11px', color: colors.textMuted }}>)</span>
-                </div>
-              ))}
+              {group.items.map((item, ii) => {
+                const active = activeStatFilter === item.key;
+                return (
+                  <div key={ii} onClick={() => applyStatFilter(item.key)} style={{ display: 'flex', alignItems: 'baseline', gap: '3px', cursor: 'pointer', padding: '2px 5px', borderRadius: 4, backgroundColor: active ? `${colors.primary}12` : 'transparent' }}>
+                    <span style={{ fontSize: '11px', color: active ? colors.primary : colors.textMuted }}>{item.label}(</span>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: active || (item as any).highlight ? colors.primary : colors.text }}>
+                      {item.value}
+                    </span>
+                    <span style={{ fontSize: '11px', color: active ? colors.primary : colors.textMuted }}>)</span>
+                  </div>
+                );
+              })}
             </div>
           </React.Fragment>
         ))}

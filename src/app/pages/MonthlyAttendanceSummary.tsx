@@ -1,5 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from '../context/ThemeContext';
+import { fetchMonthlySummaryEmployees, saveMonthlySummaryEmployees, type MonthlySummaryEmployee as RealMonthEmployee } from '../api/realData';
+
 import {
   Calendar,
   Check,
@@ -26,28 +28,7 @@ type SortDir = 'asc' | 'desc' | null;
 type ConfirmType = 'lock' | 'unlock' | 'delete' | 'confirm' | null;
 type SummaryKey = 'total' | 'full' | 'absent' | 'late' | 'hire';
 
-type MonthEmployee = {
-  id: number;
-  name: string;
-  lockStatus: LockStatus;
-  empId: string;
-  dept: string;
-  position: string;
-  hireDate: string;
-  resignDate: string;
-  deptFullPath: string;
-  bizGroup: string;
-  attendGroup: string;
-  shouldWorkDays: number;
-  actualWorkDays: number;
-  absentDays: number;
-  tripDays: number;
-  scheduleDays: number;
-  normalHours: number;
-  lateMinutes: number;
-  earlyLeaveMinutes: number;
-  confirmStatus: ConfirmStatus;
-};
+type MonthEmployee = RealMonthEmployee;
 
 type ColDef = {
   key: keyof MonthEmployee;
@@ -67,6 +48,27 @@ type ActionItem = {
   danger?: boolean;
   disabled?: boolean;
 };
+
+type OperationLog = {
+  id: string;
+  timestamp: number;
+  detail: string;
+};
+
+type CalcScope = 'filtered' | 'selected';
+
+type CalcPayload = {
+  startDate: string;
+  endDate: string;
+  employee: string;
+  dept: string;
+  attendGroup: string;
+};
+
+const OPERATION_LOG_KEY = 'monthly-attendance-summary-logs-v1';
+const OPERATION_LOG_TTL = 24 * 60 * 60 * 1000;
+const MAX_OPERATION_LOGS = 80;
+
 
 const MONTH_LABELS = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
 const DEPT_OPTIONS = ['产品研发中心', '产品运营部', '研发设计一部', '研发设计二部', '直营建连店', '工艺开发部', '技术支持部', '技术服务组'];
@@ -130,7 +132,7 @@ const EMPLOYEE_BASE = [
   { name: '邢佩佩', empId: 'CP25022', dept: '技术服务组', position: '中级技术工程师', hireDate: '2013-06-15', resignDate: '', deptFullPath: '产品研发中心/技术服务组', bizGroup: '-', attendGroup: '华托大厦' },
   { name: '杨钰敏', empId: 'CP25023', dept: '技术服务组', position: '中级技术工程师', hireDate: '2023-10-07', resignDate: '', deptFullPath: '产品研发中心/技术服务组', bizGroup: '-', attendGroup: '华托大厦' },
   { name: '林恺敏', empId: 'CP25025', dept: '数据设计部', position: '资深设计师', hireDate: '2023-12-21', resignDate: '', deptFullPath: '产品研发中心/数据设计部', bizGroup: '-', attendGroup: '华托大厦' },
-];
+].slice(0, 5);
 
 const DEFAULT_ROWS: MonthEmployee[] = EMPLOYEE_BASE.map((emp, index) => ({
   id: index + 1,
@@ -154,6 +156,23 @@ const SUMMARY_ITEMS: { key: SummaryKey; label: string; value: number }[] = [
   { key: 'late', label: '迟到', value: 2 },
   { key: 'hire', label: '入职', value: 9 },
 ];
+
+function normalizeOperationLogs(logs: OperationLog[], now = Date.now()) {
+  return logs
+    .filter(item => now - item.timestamp < OPERATION_LOG_TTL)
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, MAX_OPERATION_LOGS);
+}
+
+function parseDateToMs(date: string) {
+  const value = new Date(date).getTime();
+  return Number.isNaN(value) ? null : value;
+}
+
+function hashEmployeeSeed(empId: string) {
+  return Array.from(empId).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+}
+
 
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, cb: () => void) {
   useEffect(() => {
@@ -406,18 +425,24 @@ function CalcModal({
   colors,
   monthStart,
   monthEnd,
+  scope,
   onClose,
+  onConfirm,
 }: {
   colors: any;
   monthStart: string;
   monthEnd: string;
+  scope: CalcScope;
   onClose: () => void;
+  onConfirm: (payload: CalcPayload) => void;
 }) {
   const [startDate, setStartDate] = useState(monthStart);
   const [endDate, setEndDate] = useState(monthEnd);
   const [employee, setEmployee] = useState('');
   const [dept, setDept] = useState('all');
   const [attendGroup, setAttendGroup] = useState('all');
+
+  const scopeLabel = scope === 'selected' ? '选中记录' : '当前筛选范围';
 
   return (
     <div style={overlayMask}>
@@ -477,7 +502,7 @@ function CalcModal({
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingLeft: 64 }}>
             <span style={{ fontSize: '12px', color: colors.textMuted }}>所选范围</span>
-            <span style={{ fontSize: '12px', color: colors.text }}>全部</span>
+            <span style={{ fontSize: '12px', color: colors.text }}>{scopeLabel}</span>
           </div>
         </div>
 
@@ -485,7 +510,23 @@ function CalcModal({
           <button onClick={onClose} style={outlineBtn(colors)}>取消</button>
           <button
             onClick={() => {
-              window.alert('核算任务已发起');
+              const startMs = parseDateToMs(startDate);
+              const endMs = parseDateToMs(endDate);
+              if (startMs === null || endMs === null) {
+                window.alert('请先选择正确的核算日期范围');
+                return;
+              }
+              if (startMs > endMs) {
+                window.alert('开始日期不能晚于结束日期');
+                return;
+              }
+              onConfirm({
+                startDate,
+                endDate,
+                employee: employee.trim(),
+                dept,
+                attendGroup,
+              });
               onClose();
             }}
             style={primaryBtn(colors)}
@@ -497,6 +538,7 @@ function CalcModal({
     </div>
   );
 }
+
 
 function ColumnSettingsPanel({
   colors,
@@ -776,30 +818,91 @@ export default function MonthlyAttendanceSummary() {
   const [hideResigned, setHideResigned] = useState(false);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [showCalcModal, setShowCalcModal] = useState(false);
+  const [calcScope, setCalcScope] = useState<CalcScope>('filtered');
   const [showImportModal, setShowImportModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showMoreAction, setShowMoreAction] = useState(false);
+  const [showOperationLogs, setShowOperationLogs] = useState(false);
   const [confirmType, setConfirmType] = useState<ConfirmType>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
   const [jumpPage, setJumpPage] = useState('');
   const [columnOrder, setColumnOrder] = useState<string[]>(ALL_COLS.map(item => item.key));
   const [frozenCount, setFrozenCount] = useState(1);
+  const [sourceFile, setSourceFile] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [operationLogs, setOperationLogs] = useState<OperationLog[]>([]);
+
+
+  const loadMonthlySummary = useCallback(async () => {
+    try {
+      const res = await fetchMonthlySummaryEmployees();
+      if (res.rows?.length) {
+        setRows(res.rows);
+        setSelectedRows(new Set());
+        setPage(1);
+      }
+      setSourceFile(res.sourceFile || '');
+      setLoadError('');
+    } catch (_error) {
+      setLoadError('真实数据连接失败，当前展示静态数据');
+    }
+  }, []);
+
+  useEffect(() => {
+    loadMonthlySummary();
+  }, [loadMonthlySummary]);
 
   const monthPickerRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
   const moreActionRef = useRef<HTMLDivElement>(null);
+  const operationLogRef = useRef<HTMLDivElement>(null);
 
   useClickOutside(monthPickerRef, () => setShowMonthPicker(false));
   useClickOutside(settingsRef, () => setShowSettings(false));
   useClickOutside(moreActionRef, () => setShowMoreAction(false));
+  useClickOutside(operationLogRef, () => setShowOperationLogs(false));
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(OPERATION_LOG_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as OperationLog[];
+      if (!Array.isArray(parsed)) return;
+      setOperationLogs(normalizeOperationLogs(parsed));
+    } catch (_error) {
+      setOperationLogs([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    const normalized = normalizeOperationLogs(operationLogs);
+    localStorage.setItem(OPERATION_LOG_KEY, JSON.stringify(normalized));
+  }, [operationLogs]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setOperationLogs(current => normalizeOperationLogs(current));
+    }, 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const appendOperationLog = useCallback((detail: string) => {
+    setOperationLogs(current => normalizeOperationLogs([
+      {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        timestamp: Date.now(),
+        detail,
+      },
+      ...current,
+    ]));
+  }, []);
 
   const monthLabel = `${year}年${String(month + 1).padStart(2, '0')}月`;
+
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const monthStart = `${year}-${String(month + 1).padStart(2, '0')}-01`;
   const monthEnd = `${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
-  const totalCount = 490;
-  const totalPages = Math.ceil(totalCount / pageSize);
 
   const orderedCols = useMemo(
     () => columnOrder
@@ -820,9 +923,13 @@ export default function MonthlyAttendanceSummary() {
       if (hireStatusFilter === '本月入职' && !row.hireDate.startsWith(`${year}-${String(month + 1).padStart(2, '0')}`)) return false;
       if (hireStatusFilter === '已离职' && !row.resignDate) return false;
       if (hireStatusFilter === '在职' && !!row.resignDate) return false;
+      if (summaryTab === 'full' && !(row.actualWorkDays >= row.shouldWorkDays && row.shouldWorkDays > 0)) return false;
+      if (summaryTab === 'absent' && row.absentDays <= 0) return false;
+      if (summaryTab === 'late' && row.lateMinutes <= 0) return false;
+      if (summaryTab === 'hire' && !row.hireDate.startsWith(`${year}-${String(month + 1).padStart(2, '0')}`)) return false;
       return true;
     });
-  }, [rows, employeeSearch, deptFilter, attendGroupFilter, lockFilter, confirmFilter, hideResigned, bizGroupFilter, hireStatusFilter, year, month]);
+  }, [rows, employeeSearch, deptFilter, attendGroupFilter, lockFilter, confirmFilter, hideResigned, bizGroupFilter, hireStatusFilter, summaryTab, year, month]);
 
   const sortedRows = useMemo(() => {
     const list = [...filteredRows];
@@ -838,7 +945,9 @@ export default function MonthlyAttendanceSummary() {
     });
   }, [filteredRows, sortKey, sortDir]);
 
-  const pageRows = sortedRows;
+  const totalCount = filteredRows.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const pageRows = sortedRows.slice((page - 1) * pageSize, page * pageSize);
   const allSelected = pageRows.length > 0 && pageRows.every(row => selectedRows.has(row.id));
   const someSelected = selectedRows.size > 0 && !allSelected;
 
@@ -898,7 +1007,118 @@ export default function MonthlyAttendanceSummary() {
     setConfirmType(null);
   };
 
+  const runCalculation = useCallback(async (payload: CalcPayload) => {
+    const startMs = parseDateToMs(payload.startDate);
+    const endMs = parseDateToMs(payload.endDate);
+    if (startMs === null || endMs === null || startMs > endMs) {
+      window.alert('核算失败：请选择有效日期范围');
+      return;
+    }
+
+    const targetIds = new Set(
+      (calcScope === 'selected' ? rows.filter(row => selectedRows.has(row.id)) : filteredRows).map(row => row.id),
+    );
+    const employeeKeyword = payload.employee.trim().toLowerCase();
+    const fullDays = Math.floor((endMs - startMs) / (24 * 60 * 60 * 1000)) + 1;
+
+    let updatedCount = 0;
+    let skippedLockedCount = 0;
+
+    const nextRows = rows.map(row => {
+      if (!targetIds.has(row.id)) return row;
+      if (payload.dept !== 'all' && row.dept !== payload.dept) return row;
+      if (payload.attendGroup !== 'all' && row.attendGroup !== payload.attendGroup) return row;
+      if (employeeKeyword && !`${row.name}${row.empId}`.toLowerCase().includes(employeeKeyword)) return row;
+
+      if (row.lockStatus === '已锁定') {
+        skippedLockedCount += 1;
+        return row;
+      }
+
+      const calcDays = Math.max(0, Math.min(row.shouldWorkDays, fullDays));
+      const seed = hashEmployeeSeed(row.empId) + fullDays + month + year;
+      const absentDays = calcDays === 0 ? 0 : seed % Math.min(3, calcDays + 1);
+      const tripDays = calcDays === 0 ? 0 : (seed % 5 === 0 ? 1 : 0);
+      const actualWorkDays = Math.max(0, calcDays - absentDays - tripDays);
+      const lateMinutes = actualWorkDays > 0 ? (seed % 4) * 5 : 0;
+      const earlyLeaveMinutes = actualWorkDays > 0 ? (seed % 3) * 5 : 0;
+
+      updatedCount += 1;
+      return {
+        ...row,
+        scheduleDays: calcDays,
+        actualWorkDays,
+        absentDays,
+        tripDays,
+        normalHours: Number((actualWorkDays * 8).toFixed(1)),
+        lateMinutes,
+        earlyLeaveMinutes,
+        confirmStatus: row.confirmStatus === '已确认' ? '已确认' : '已发送',
+      };
+    });
+
+    const scopeText = calcScope === 'selected' ? '选中记录' : '当前筛选范围';
+    if (updatedCount === 0) {
+      appendOperationLog(`核算未执行：${scopeText}内无可核算记录`);
+      window.alert('核算完成：未命中可核算记录');
+      return;
+    }
+
+    setRows(nextRows);
+    setSelectedRows(new Set());
+
+    try {
+      const saved = await saveMonthlySummaryEmployees(nextRows);
+      setSourceFile(saved.sourceFile || '本地持久化数据 data-store.json');
+      setLoadError('');
+      appendOperationLog(`核算并落库成功：${scopeText}更新 ${updatedCount} 条${skippedLockedCount > 0 ? `，跳过已锁定 ${skippedLockedCount} 条` : ''}`);
+      window.alert(`核算完成并已落库，更新 ${updatedCount} 条${skippedLockedCount > 0 ? `，跳过已锁定 ${skippedLockedCount} 条` : ''}`);
+    } catch (_error) {
+      appendOperationLog(`核算完成但落库失败：${scopeText}更新 ${updatedCount} 条`);
+      window.alert(`核算已执行，但保存失败，请检查后端服务`);
+    }
+  }, [appendOperationLog, calcScope, filteredRows, month, rows, selectedRows, year]);
+
+
+  const handleExport = useCallback(() => {
+    const exportRows = selectedRows.size > 0
+      ? sortedRows.filter(row => selectedRows.has(row.id))
+      : sortedRows;
+
+    if (exportRows.length === 0) {
+      window.alert('暂无可导出的记录');
+      return;
+    }
+
+    const headers = orderedCols.map(col => col.label);
+    const dataRows = exportRows.map(row => orderedCols.map(col => {
+      const value = row[col.key];
+      return value === null || value === undefined || value === '' ? '-' : String(value);
+    }));
+
+    const escapeCsv = (value: string) => {
+      const escaped = value.replace(/"/g, '""');
+      return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
+    };
+
+    const csv = [headers, ...dataRows]
+      .map(row => row.map(cell => escapeCsv(cell)).join(','))
+      .join('\n');
+
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `月考勤汇总-${year}-${String(month + 1).padStart(2, '0')}${selectedRows.size > 0 ? '-选中人员' : '-筛选结果'}.csv`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+
+    appendOperationLog(`导出成功：${selectedRows.size > 0 ? '选中人员' : '当前筛选'} ${exportRows.length} 条`);
+  }, [appendOperationLog, month, orderedCols, selectedRows, sortedRows, year]);
+
   const renderCell = (row: MonthEmployee, col: ColDef): React.ReactNode => {
+
+
     const value = row[col.key];
 
     if (col.key === 'name') {
@@ -965,12 +1185,21 @@ export default function MonthlyAttendanceSummary() {
     return String(value);
   };
 
+  const summaryItems: { key: SummaryKey; label: string; value: number }[] = [
+    { key: 'total', label: '总人数(人)', value: rows.length },
+    { key: 'full', label: '全勤', value: rows.filter(row => row.actualWorkDays >= row.shouldWorkDays && row.shouldWorkDays > 0).length },
+    { key: 'absent', label: '旷工', value: rows.filter(row => row.absentDays > 0).length },
+    { key: 'late', label: '迟到', value: rows.filter(row => row.lateMinutes > 0).length },
+    { key: 'hire', label: '入职', value: rows.filter(row => row.hireDate.startsWith(`${year}-${String(month + 1).padStart(2, '0')}`)).length },
+  ];
+
   const moreActionItems: ActionItem[] = [
     { label: '批量确认考勤', action: () => selectedRows.size > 0 && setConfirmType('confirm'), disabled: selectedRows.size === 0 },
     { label: '批量撤销确认', action: () => applySelectionMutation(row => ({ ...row, confirmStatus: '未发送' })) , disabled: selectedRows.size === 0 },
     { label: '重置考勤结果', action: () => applySelectionMutation(row => ({ ...row, actualWorkDays: 0, absentDays: 0, tripDays: 0, scheduleDays: 0, normalHours: 0, lateMinutes: 0, earlyLeaveMinutes: 0, confirmStatus: '未发送' })), disabled: selectedRows.size === 0 },
-    { label: '查看操作日志' },
+    { label: '查看操作日志', action: () => setShowOperationLogs(true) },
   ];
+
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: colors.appBg, overflow: 'hidden' }}>
@@ -1080,8 +1309,40 @@ export default function MonthlyAttendanceSummary() {
         )}
       </div>
 
+      {(sourceFile || loadError) && (
+        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>
+          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
+          {loadError ? ` ${loadError}` : ''}
+        </div>
+      )}
+
+      {operationLogs.length > 0 && (
+        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}>
+          <span>
+            今日操作（24小时内自动清空）：
+            {operationLogs[0]?.detail}
+          </span>
+          <div ref={operationLogRef} style={{ position: 'relative' }}>
+            <button onClick={() => setShowOperationLogs(v => !v)} style={outlineBtn(colors)}>
+              查看当天操作
+            </button>
+            {showOperationLogs && (
+              <div style={{ ...dropdownBox(colors), right: 0, left: 'auto', minWidth: 360, maxWidth: 520, maxHeight: 280, overflowY: 'auto', zIndex: 380 }}>
+                {operationLogs.map(log => (
+                  <div key={log.id} style={{ padding: '8px 12px', borderBottom: `1px solid ${colors.divider}`, fontSize: '12px', color: colors.text }}>
+                    <div style={{ fontSize: '11px', color: colors.textMuted, marginBottom: 3 }}>{new Date(log.timestamp).toLocaleString('zh-CN')}</div>
+                    <div>{log.detail}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 0, padding: '0 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, overflowX: 'auto', flexShrink: 0 }}>
-        {SUMMARY_ITEMS.map(item => {
+
+        {summaryItems.map(item => {
           const active = summaryTab === item.key;
           return (
             <button
@@ -1121,12 +1382,27 @@ export default function MonthlyAttendanceSummary() {
         <ActionDropdown
           label="按考勤"
           items={[
-            { label: '核算当前筛选范围', action: () => setShowCalcModal(true) },
-            { label: '核算选中记录', action: () => selectedRows.size > 0 && setShowCalcModal(true), disabled: selectedRows.size === 0 },
+            {
+              label: '核算当前筛选范围',
+              action: () => {
+                setCalcScope('filtered');
+                setShowCalcModal(true);
+              },
+            },
+            {
+              label: '核算选中记录',
+              action: () => {
+                if (selectedRows.size === 0) return;
+                setCalcScope('selected');
+                setShowCalcModal(true);
+              },
+              disabled: selectedRows.size === 0,
+            },
           ]}
           primary
           colors={colors}
         />
+
         <button onClick={() => selectedRows.size > 0 && setConfirmType('lock')} style={outlineBtn(colors, selectedRows.size === 0)}>
           <Lock size={12} />锁定
         </button>
@@ -1139,9 +1415,10 @@ export default function MonthlyAttendanceSummary() {
         <button onClick={() => setShowImportModal(true)} style={outlineBtn(colors)}>
           <Upload size={12} />导入
         </button>
-        <button style={outlineBtn(colors)}>
+        <button onClick={handleExport} style={outlineBtn(colors)}>
           <Download size={12} />导出
         </button>
+
         <button onClick={() => selectedRows.size > 0 && setConfirmType('delete')} style={outlineBtn(colors, selectedRows.size === 0)}>
           <Trash2 size={12} />删除
         </button>
@@ -1347,14 +1624,37 @@ export default function MonthlyAttendanceSummary() {
         count={selectedRows.size}
         onCancel={() => setConfirmType(null)}
         onConfirm={() => {
-          if (confirmType === 'lock') applySelectionMutation(row => ({ ...row, lockStatus: '已锁定' }));
-          if (confirmType === 'unlock') applySelectionMutation(row => ({ ...row, lockStatus: '未锁定' }));
-          if (confirmType === 'delete') applySelectionMutation(() => null);
-          if (confirmType === 'confirm') applySelectionMutation(row => ({ ...row, confirmStatus: '已确认' }));
+          const selectedCount = selectedRows.size;
+          if (confirmType === 'lock') {
+            applySelectionMutation(row => ({ ...row, lockStatus: '已锁定' }));
+            appendOperationLog(`批量锁定：${selectedCount} 条`);
+          }
+          if (confirmType === 'unlock') {
+            applySelectionMutation(row => ({ ...row, lockStatus: '未锁定' }));
+            appendOperationLog(`批量解锁：${selectedCount} 条`);
+          }
+          if (confirmType === 'delete') {
+            applySelectionMutation(() => null);
+            appendOperationLog(`批量删除：${selectedCount} 条`);
+          }
+          if (confirmType === 'confirm') {
+            applySelectionMutation(row => ({ ...row, confirmStatus: '已确认' }));
+            appendOperationLog(`考勤确认：${selectedCount} 条`);
+          }
         }}
         colors={colors}
       />
-      {showCalcModal && <CalcModal colors={colors} monthStart={monthStart} monthEnd={monthEnd} onClose={() => setShowCalcModal(false)} />}
+      {showCalcModal && (
+        <CalcModal
+          colors={colors}
+          monthStart={monthStart}
+          monthEnd={monthEnd}
+          scope={calcScope}
+          onConfirm={runCalculation}
+          onClose={() => setShowCalcModal(false)}
+        />
+      )}
+
       {showImportModal && <ImportModal colors={colors} onClose={() => setShowImportModal(false)} />}
     </div>
   );

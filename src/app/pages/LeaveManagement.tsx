@@ -16,10 +16,7 @@ import {
 type LeaveView = 'record' | 'balance' | 'detail' | 'type' | 'scheme';
 type MenuItem = { label: string; hint?: string };
 type TabConfig = { key: LeaveView; label: string; path: string };
-
-function showActionFeedback(action: string) {
-  window.alert(`假期管理：${action}（交互已接通）`);
-}
+type SortConfig = { index: number; direction: 'asc' | 'desc' };
 
 const ROUTE_TABS: TabConfig[] = [
   { key: 'record', label: '请假记录', path: '/attendance/leave' },
@@ -53,6 +50,18 @@ const DETAIL_MORE_ITEMS: MenuItem[] = [
   { label: '导出本页数据' },
 ];
 
+const LEAVE_RECORD_ROWS = [
+  ['已通过', '侯雅妮', 'CP25005', '产品运营部', '产品研发中心/产品运营部', '侯雅妮', 'CP25005', '员工发起', '年假', '2026-05-08 09:00', '2026-05-12 18:00', '5天', '年假申请', '2026-05-04 10:00', '2026-05-04 11:00', '已通过', '查看'],
+  ['审批中', '荣誉', 'CP25015', '工艺开发部', '产品研发中心/工艺开发部', '荣誉', 'CP25015', '员工发起', '病假', '2026-05-07 09:00', '2026-05-07 18:00', '1天', '病假申请', '2026-05-06 07:30', '', '审批中', '查看'],
+  ['已拒绝', '张艺嫚', 'CP25007', '研发设计一部', '产品研发中心/研发设计一部', '张艺嫚', 'CP25007', '员工发起', '事假', '2026-05-04 09:00', '2026-05-04 18:00', '1天', '个人事务', '2026-05-03 09:00', '2026-05-03 10:40', '已拒绝', '查看'],
+];
+
+const LEAVE_BALANCE_ROWS = [
+  ['林娜', 'CP25003', '产品研发中心', '产品研发中心', '2023-03-09', '5', '3', '10', '0', '0', '3', '0'],
+  ['曹文瑶', 'CP25004', '产品运营部', '产品研发中心/产品运营部', '2020-12-18', '7', '3', '10', '0', '0', '3', '0'],
+  ['侯雅妮', 'CP25005', '产品运营部', '产品研发中心/产品运营部', '2024-06-19', '2', '3', '10', '0', '0', '3', '0'],
+];
+
 const TYPE_ROWS = [
   { name: '年假', short: '年', enabled: true, unit: '按天请假', paid: '是', negative: '否', before: '否', note: '年假额度可根据员工司龄自动发放，支持跨周期结转。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:17' },
   { name: '病假', short: '病', enabled: true, unit: '按天请假', paid: '否', negative: '否', before: '否', note: '病假需员工上传病历或就诊凭证，系统支持按天或小时折算。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:08' },
@@ -70,6 +79,8 @@ const TYPE_ROWS = [
   { name: '育儿假', short: '育', enabled: false, unit: '按天请假', paid: '否', negative: '否', before: '否', note: '子女三周岁以内员工可享受的地区政策假，支持按次或按年配置。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:10:59' },
   { name: '加班调休', short: '补', enabled: false, unit: '按小时请假', paid: '否', negative: '否', before: '否', note: '无法单独控制的日度过账类调休生成申请。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2025-08-26 15:59:58' },
 ];
+
+type LeaveTypeRow = typeof TYPE_ROWS[number];
 
 export default function LeaveManagement() {
   const { colors } = useTheme();
@@ -162,6 +173,75 @@ function LeaveRecordView({
   onToggleMenu: () => void;
   onCloseMenu: () => void;
 }) {
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [tableRows, setTableRows] = useState<Array<Array<React.ReactNode>>>(LEAVE_RECORD_ROWS);
+  const [dateRange, setDateRange] = useState({ start: '2026-05-01', end: '2026-05-31' });
+  const [deptFilter, setDeptFilter] = useState('');
+  const [applicantFilter, setApplicantFilter] = useState('');
+  const [initiatorFilter, setInitiatorFilter] = useState('');
+  const [leaveTypeFilter, setLeaveTypeFilter] = useState('');
+  const [startTypeFilter, setStartTypeFilter] = useState('');
+  const [recordStatusFilter, setRecordStatusFilter] = useState('');
+  const [flowStatusFilter, setFlowStatusFilter] = useState('');
+  const [sortConfig, setSortConfig] = useState<{ index: number; direction: 'asc' | 'desc' } | null>(null);
+  const rows = tableRows.filter(row => {
+
+    const applicantKeyword = applicantFilter.trim().toLowerCase();
+    const initiatorKeyword = initiatorFilter.trim().toLowerCase();
+    const startDate = String(row[9] || '').slice(0, 10);
+    const matchForm = (!dateRange.start || startDate >= dateRange.start)
+      && (!dateRange.end || startDate <= dateRange.end)
+      && (!deptFilter || row[3] === deptFilter)
+      && (!applicantKeyword || String(row[1]).toLowerCase().includes(applicantKeyword) || String(row[2]).toLowerCase().includes(applicantKeyword))
+      && (!initiatorKeyword || String(row[5]).toLowerCase().includes(initiatorKeyword) || String(row[6]).toLowerCase().includes(initiatorKeyword))
+      && (!leaveTypeFilter || row[8] === leaveTypeFilter)
+      && (!startTypeFilter || row[7] === startTypeFilter)
+      && (!recordStatusFilter || row[0] === recordStatusFilter)
+      && (!flowStatusFilter || row[15] === flowStatusFilter);
+    return matchForm && (statusFilter === 'all' || row[0] === statusFilter || row[15] === statusFilter);
+  });
+  const sortedRows = !sortConfig
+    ? rows
+    : [...rows].sort((a, b) => {
+      const aValue = String(a[sortConfig.index] ?? '');
+      const bValue = String(b[sortConfig.index] ?? '');
+      const factor = sortConfig.direction === 'asc' ? 1 : -1;
+      const parseNum = (text: string) => {
+        const n = Number(text.replace(/[^\d.-]/g, ''));
+        return Number.isFinite(n) && text !== '' ? n : null;
+      };
+      const numA = parseNum(aValue);
+      const numB = parseNum(bValue);
+      if (numA !== null && numB !== null) return (numA - numB) * factor;
+      return aValue.localeCompare(bValue, 'zh-CN', { numeric: true, sensitivity: 'base' }) * factor;
+    });
+  const statusItems = [
+    { key: 'all', label: '全部', count: tableRows.length },
+    { key: '已通过', label: '已通过', count: tableRows.filter(row => row[0] === '已通过').length },
+    { key: '审批中', label: '审批中', count: tableRows.filter(row => row[0] === '审批中').length },
+    { key: '已拒绝', label: '已拒绝', count: tableRows.filter(row => row[0] === '已拒绝').length },
+  ];
+  const resetFilters = () => { setDateRange({ start: '2026-05-01', end: '2026-05-31' }); setDeptFilter(''); setApplicantFilter(''); setInitiatorFilter(''); setLeaveTypeFilter(''); setStartTypeFilter(''); setRecordStatusFilter(''); setFlowStatusFilter(''); setStatusFilter('all'); setSortConfig(null); };
+
+  const exportRows = () => {
+    const csv = [LEAVE_RECORD_COLUMNS, ...rows].map(row => row.map(cell => String(cell ?? '')).join(',')).join('\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = '请假记录.csv';
+    link.click();
+    window.URL.revokeObjectURL(url);
+  };
+  const deleteRows = () => setTableRows(current => current.filter(row => !rows.includes(row)));
+  const addLeaveRecord = (label = '添加请假记录') => {
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    setTableRows(current => [[label.includes('批量') ? '审批中' : '已通过', '新增员工', `LV${String(current.length + 1).padStart(4, '0')}`, '产品运营部', '产品研发中心/产品运营部', '新增员工', `LV${String(current.length + 1).padStart(4, '0')}`, label.includes('管理员') ? '管理员发起' : '员工发起', '年假', `${new Date().toISOString().slice(0, 10)} 09:00`, `${new Date().toISOString().slice(0, 10)} 18:00`, '1天', label, now, label.includes('发起') ? '' : now, label.includes('发起') ? '审批中' : '已通过', '查看'], ...current]);
+  };
+  const clearLeaveRecords = () => {
+    if (!window.confirm('确认清空当前筛选出的请假记录？')) return;
+    setTableRows(current => current.filter(row => !rows.includes(row)));
+  };
   return (
     <>
       <InfoBanner
@@ -173,14 +253,14 @@ function LeaveRecordView({
 
       <div style={filterBar(colors)}>
         <div style={filterRowStyle}>
-          <DateRangeField label="请假日期" colors={colors} required width={248} />
-          <SelectField label="部门" placeholder="请选择" colors={colors} width={154} />
-          <SearchField label="申请人" placeholder="请输入或选择人员" colors={colors} width={182} showUserIcon />
-          <SearchField label="发起人" placeholder="请输入或选择员工号" colors={colors} width={182} showUserIcon />
-          <SelectField label="假期类型" placeholder="请选择" colors={colors} width={154} />
+          <DateRangeField label="请假日期" colors={colors} required width={248} value={dateRange} onChange={setDateRange} />
+          <SelectField label="部门" placeholder="请选择" colors={colors} width={154} options={['产品运营部','工艺开发部','研发设计一部']} value={deptFilter} onChange={setDeptFilter} />
+          <SearchField label="申请人" placeholder="请输入或选择人员" colors={colors} width={182} showUserIcon value={applicantFilter} onChange={setApplicantFilter} />
+          <SearchField label="发起人" placeholder="请输入或选择员工号" colors={colors} width={182} showUserIcon value={initiatorFilter} onChange={setInitiatorFilter} />
+          <SelectField label="假期类型" placeholder="请选择" colors={colors} width={154} options={['年假','病假','事假']} value={leaveTypeFilter} onChange={setLeaveTypeFilter} />
           <div style={actionRightStyle}>
-            <button style={outlineBtn(colors)}>重置</button>
-            <button style={primaryBtn(colors)}>查询</button>
+            <button onClick={resetFilters} style={outlineBtn(colors)}>重置</button>
+            <button onClick={() => setStatusFilter(statusFilter)} style={primaryBtn(colors)}>查询</button>
             <button onClick={onToggleMore} style={toggleBtn(colors, showMore)}>
               更多筛选
               {showMore ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -189,26 +269,44 @@ function LeaveRecordView({
         </div>
         {showMore && (
           <div style={moreRowStyle(colors)}>
-            <SelectField label="发起类型" placeholder="全部" colors={colors} width={148} />
-            <SelectField label="记录状态" placeholder="全部" colors={colors} width={148} />
-            <SelectField label="当前流程状态" placeholder="全部" colors={colors} width={148} />
+            <SelectField label="发起类型" placeholder="全部" colors={colors} width={148} options={['员工发起','管理员发起']} value={startTypeFilter} onChange={setStartTypeFilter} />
+            <SelectField label="记录状态" placeholder="全部" colors={colors} width={148} options={['已通过','审批中','已拒绝']} value={recordStatusFilter} onChange={setRecordStatusFilter} />
+            <SelectField label="当前流程状态" placeholder="全部" colors={colors} width={148} options={['已通过','审批中','已拒绝']} value={flowStatusFilter} onChange={setFlowStatusFilter} />
             <DateRangeField label="发起时间" colors={colors} width={248} />
           </div>
         )}
       </div>
 
+      <StatusFilterBar items={statusItems} activeKey={statusFilter} onChange={setStatusFilter} colors={colors} />
+
       <div style={toolbarStyle(colors)}>
-        <button onClick={() => showActionFeedback('添加请假记录')} style={primaryBtn(colors)}>添加请假记录</button>
-        <DropdownButton label="发起请假流程" items={START_LEAVE_ITEMS} open={menuOpen} onToggle={onToggleMenu} onClose={onCloseMenu} onSelect={(item) => showActionFeedback(item.label)} colors={colors} />
-        <button onClick={() => showActionFeedback('导出请假记录')} style={outlineBtn(colors)}>导出</button>
-        <button onClick={() => showActionFeedback('删除请假记录')} style={outlineBtn(colors)}>删除</button>
+        <button onClick={() => addLeaveRecord()} style={primaryBtn(colors)}>添加请假记录</button>
+        <DropdownButton label="发起请假流程" items={START_LEAVE_ITEMS} open={menuOpen} onToggle={onToggleMenu} onClose={onCloseMenu} onSelect={(item) => addLeaveRecord(item.label)} colors={colors} />
+        <button onClick={exportRows} style={outlineBtn(colors)}>导出</button>
+        <button onClick={deleteRows} style={outlineBtn(colors)}>删除</button>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button onClick={() => showActionFeedback('批量清除记录')} style={linkBtn(colors)}>批量清除记录</button>
-          <button onClick={() => showActionFeedback('表头设置')} style={iconBtn(colors)}><Settings2 size={12} /></button>
+          <button onClick={clearLeaveRecords} style={linkBtn(colors)}>批量清除记录</button>
+          <button onClick={() => setSortConfig(null)} style={iconBtn(colors)} title="恢复默认表头排序"><Settings2 size={12} /></button>
         </div>
       </div>
 
-      <TableShell columns={LEAVE_RECORD_COLUMNS} colors={colors} emptyText="暂无内容" />
+      <TableShell
+        columns={LEAVE_RECORD_COLUMNS}
+        rows={sortedRows}
+        colors={colors}
+        emptyText="暂无内容"
+        sortConfig={sortConfig}
+        nonSortableColumnIndices={[LEAVE_RECORD_COLUMNS.length - 1]}
+        onSortChange={(index) => {
+          if (index >= LEAVE_RECORD_COLUMNS.length - 1) return;
+          setSortConfig(current => {
+            if (!current || current.index !== index) return { index, direction: 'asc' };
+            return { index, direction: current.direction === 'asc' ? 'desc' : 'asc' };
+          });
+        }}
+      />
+
+
     </>
   );
 }
@@ -228,8 +326,36 @@ function LeaveBalanceView({
   onToggleMenu: () => void;
   onCloseMenu: () => void;
 }) {
+  const [sortConfig, setSortConfig] = useState<{ index: number; direction: 'asc' | 'desc' } | null>(null);
+  const sortedRows = !sortConfig
+    ? LEAVE_BALANCE_ROWS
+    : [...LEAVE_BALANCE_ROWS].sort((a, b) => {
+      const aValue = String(a[sortConfig.index] ?? '');
+      const bValue = String(b[sortConfig.index] ?? '');
+      const factor = sortConfig.direction === 'asc' ? 1 : -1;
+      const parseNum = (text: string) => {
+        const n = Number(text.replace(/[^\d.-]/g, ''));
+        return Number.isFinite(n) && text !== '' ? n : null;
+      };
+      const numA = parseNum(aValue);
+      const numB = parseNum(bValue);
+      if (numA !== null && numB !== null) return (numA - numB) * factor;
+      return aValue.localeCompare(bValue, 'zh-CN', { numeric: true, sensitivity: 'base' }) * factor;
+    });
+  const exportBalanceRows = () => {
+    const csv = [LEAVE_BALANCE_COLUMNS, ...sortedRows].map(row => row.map(cell => String(cell ?? '')).join(',')).join('\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = '假期余额.csv';
+    link.click();
+    window.URL.revokeObjectURL(url);
+  };
+
   return (
     <>
+
       <InfoBanner
         colors={colors}
         messages={[
@@ -264,15 +390,28 @@ function LeaveBalanceView({
       </div>
 
       <div style={toolbarStyle(colors)}>
-        <DropdownButton label="发放假期额度" items={BALANCE_GRANT_ITEMS} open={menuOpen} onToggle={onToggleMenu} onClose={onCloseMenu} onSelect={(item) => showActionFeedback(item.label)} colors={colors} />
-        <button onClick={() => showActionFeedback('导出假期余额')} style={outlineBtn(colors)}>导出</button>
+        <DropdownButton label="发放假期额度" items={BALANCE_GRANT_ITEMS} open={menuOpen} onToggle={onToggleMenu} onClose={onCloseMenu} onSelect={(item) => window.alert(`已按「${item.label}」生成假期额度发放任务`)} colors={colors} />
+        <button onClick={exportBalanceRows} style={outlineBtn(colors)}>导出</button>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button onClick={() => showActionFeedback('使用指引')} style={linkBtn(colors)}>使用指引</button>
-          <button onClick={() => showActionFeedback('表头设置')} style={iconBtn(colors)}><Settings2 size={12} /></button>
+          <button onClick={() => window.alert('使用指引\n可通过筛选定位人员，点击导出下载当前余额。')} style={linkBtn(colors)}>使用指引</button>
+          <button onClick={() => setSortConfig(null)} style={iconBtn(colors)} title="恢复默认表头排序"><Settings2 size={12} /></button>
         </div>
       </div>
 
-      <TableShell columns={LEAVE_BALANCE_COLUMNS} colors={colors} emptyText="暂无内容" />
+      <TableShell
+        columns={LEAVE_BALANCE_COLUMNS}
+        rows={sortedRows}
+        colors={colors}
+        emptyText="暂无内容"
+        sortConfig={sortConfig}
+        onSortChange={(index) => {
+          setSortConfig(current => {
+            if (!current || current.index !== index) return { index, direction: 'asc' };
+            return { index, direction: current.direction === 'asc' ? 'desc' : 'asc' };
+          });
+        }}
+      />
+
     </>
   );
 }
@@ -292,6 +431,30 @@ function LeaveDetailView({
   onToggleMenu: () => void;
   onCloseMenu: () => void;
 }) {
+  const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
+  const [detailRows, setDetailRows] = useState<Array<Array<React.ReactNode>>>([]);
+  const addDetailRow = (source = '新增额度记录') => {
+    const today = new Date().toISOString().slice(0, 10);
+    setDetailRows(current => [['新增员工', `LD${String(current.length + 1).padStart(4, '0')}`, '产品运营部', '产品研发中心/产品运营部', today, '2026', '年假', '1', '1', '1', '0', source.includes('冻结') ? '1' : '0', '0', '1', `${today}`, '2026-12-31', today, '查看'], ...current]);
+  };
+  const exportDetailRows = () => {
+    const csv = [LEAVE_DETAIL_COLUMNS, ...detailRows].map(row => row.map(cell => String(cell ?? '')).join(',')).join('\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = '假期额度明细.csv';
+    link.click();
+    window.URL.revokeObjectURL(url);
+  };
+  const handleDetailMore = (item: MenuItem) => {
+    if (item.label.includes('导出')) {
+      exportDetailRows();
+      return;
+    }
+    addDetailRow(item.label);
+  };
+
   return (
     <>
       <InfoBanner
@@ -328,22 +491,30 @@ function LeaveDetailView({
       </div>
 
       <div style={toolbarStyle(colors)}>
-        <button onClick={() => showActionFeedback('新增额度记录')} style={primaryBtn(colors)}>新增额度记录</button>
-        <button onClick={() => showActionFeedback('导入额度记录')} style={outlineBtn(colors)}>导入</button>
-        <button onClick={() => showActionFeedback('导出额度记录')} style={outlineBtn(colors)}>导出</button>
-        <DropdownButton label="更多操作" items={DETAIL_MORE_ITEMS} open={menuOpen} onToggle={onToggleMenu} onClose={onCloseMenu} onSelect={(item) => showActionFeedback(item.label)} colors={colors} />
+        <button onClick={() => addDetailRow()} style={primaryBtn(colors)}>新增额度记录</button>
+        <button onClick={() => addDetailRow('导入额度记录')} style={outlineBtn(colors)}>导入</button>
+        <button onClick={exportDetailRows} style={outlineBtn(colors)}>导出</button>
+        <DropdownButton label="更多操作" items={DETAIL_MORE_ITEMS} open={menuOpen} onToggle={onToggleMenu} onClose={onCloseMenu} onSelect={handleDetailMore} colors={colors} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 4 }}>
           <TogglePill enabled />
           <span style={{ fontSize: '12px', color: colors.text }}>只看有效数据</span>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button onClick={() => showActionFeedback('休假过账记录')} style={linkBtn(colors)}>休假过账记录</button>
-          <button onClick={() => showActionFeedback('额度调整记录')} style={linkBtn(colors)}>额度调整记录</button>
-          <button onClick={() => showActionFeedback('表头设置')} style={iconBtn(colors)}><Settings2 size={12} /></button>
+          <button onClick={() => window.alert(`休假过账记录\n当前筛选下共有 ${detailRows.length} 条额度记录参与过账。`)} style={linkBtn(colors)}>休假过账记录</button>
+          <button onClick={() => window.alert(`额度调整记录\n已记录 ${detailRows.filter(row => String(row[10] ?? '') !== '0').length} 条调整额度。`)} style={linkBtn(colors)}>额度调整记录</button>
+          <button onClick={() => setSortConfig(null)} style={iconBtn(colors)} title="恢复默认表头排序"><Settings2 size={12} /></button>
         </div>
       </div>
 
-      <TableShell columns={LEAVE_DETAIL_COLUMNS} colors={colors} emptyText="暂无内容" />
+      <TableShell
+        columns={LEAVE_DETAIL_COLUMNS}
+        rows={detailRows}
+        colors={colors}
+        emptyText="暂无内容"
+        sortConfig={sortConfig}
+        nonSortableColumnIndices={[LEAVE_DETAIL_COLUMNS.length - 1]}
+        onSortChange={(index) => setSortConfig(current => getNextSortConfig(current, index))}
+      />
     </>
   );
 }
@@ -357,6 +528,60 @@ function LeaveTypeView({
   showMore: boolean;
   onToggleMore: () => void;
 }) {
+  const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
+  const [typeRows, setTypeRows] = useState<Array<LeaveTypeRow>>(TYPE_ROWS);
+  const sortedTypeRows = useMemo(() => {
+    const rows = typeRows.map((row, order) => ({ row, order }));
+    if (!sortConfig) return rows;
+
+    return [...rows].sort((left, right) => compareSortableValues(
+      getTypeSortValue(left.row, left.order, sortConfig.index),
+      getTypeSortValue(right.row, right.order, sortConfig.index),
+      sortConfig.direction,
+    ));
+  }, [sortConfig, typeRows]);
+  const addLeaveType = () => {
+    const name = window.prompt('请输入假期类型名称', `新增假期${typeRows.length + 1}`);
+    if (name === null) return;
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      window.alert('假期类型名称不能为空');
+      return;
+    }
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    setTypeRows(current => [{
+      name: trimmedName,
+      short: trimmedName.slice(0, 1),
+      enabled: true,
+      unit: '按天请假',
+      paid: '否',
+      negative: '否',
+      before: '否',
+      note: '管理员新增假期类型，可继续修改规则说明。',
+      reason: '否',
+      attachment: '否',
+      attachmentNote: '-',
+      creator: '当前用户',
+      createdAt: now,
+      editor: '当前用户',
+      editedAt: now,
+    }, ...current]);
+  };
+  const editLeaveType = (row: LeaveTypeRow) => {
+    const nextName = window.prompt('修改假期类型名称', row.name);
+    if (nextName === null) return;
+    const trimmedName = nextName.trim();
+    if (!trimmedName) {
+      window.alert('假期类型名称不能为空');
+      return;
+    }
+    setTypeRows(current => current.map(item => item.name === row.name ? { ...item, name: trimmedName, short: trimmedName.slice(0, 1), editor: '当前用户', editedAt: new Date().toISOString().slice(0, 19).replace('T', ' ') } : item));
+  };
+  const deleteLeaveType = (row: LeaveTypeRow) => {
+    if (!window.confirm(`确认删除假期类型「${row.name}」？`)) return;
+    setTypeRows(current => current.filter(item => item.name !== row.name));
+  };
+
   return (
     <>
       <InfoBanner
@@ -391,9 +616,9 @@ function LeaveTypeView({
       </div>
 
       <div style={toolbarStyle(colors)}>
-        <button onClick={() => showActionFeedback('新增假期类型')} style={primaryBtn(colors)}>新增假期类型</button>
+        <button onClick={addLeaveType} style={primaryBtn(colors)}>新增假期类型</button>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button onClick={() => showActionFeedback('使用指引')} style={linkBtn(colors)}>
+          <button onClick={() => window.alert('使用指引\n1. 新增假期类型后会立即加入列表。\n2. 修改可调整假期类型名称。\n3. 删除前会二次确认。')} style={linkBtn(colors)}>
             <HelpCircle size={12} />
             使用指引
           </button>
@@ -404,13 +629,30 @@ function LeaveTypeView({
         <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ backgroundColor: colors.tableHeaderBg, position: 'sticky', top: 0, zIndex: 2 }}>
-              {LEAVE_TYPE_COLUMNS.map(column => (
-                <th key={column} style={{ ...th(colors), minWidth: column.length >= 6 ? 136 : 100 }}>{column}</th>
-              ))}
+              {LEAVE_TYPE_COLUMNS.map((column, columnIndex) => {
+                const sortable = columnIndex < LEAVE_TYPE_COLUMNS.length - 1;
+                const active = sortConfig?.index === columnIndex;
+
+                return (
+                  <th key={column} style={{ ...th(colors), minWidth: column.length >= 6 ? 136 : 100 }}>
+                    {sortable ? (
+                      <SortableHeaderButton
+                        label={column}
+                        active={active}
+                        direction={active ? sortConfig?.direction : undefined}
+                        colors={colors}
+                        onClick={() => setSortConfig(current => getNextSortConfig(current, columnIndex))}
+                      />
+                    ) : (
+                      column
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
-            {TYPE_ROWS.map((row, index) => (
+            {sortedTypeRows.map(({ row }, index) => (
               <tr key={row.name} style={{ backgroundColor: index % 2 === 0 ? colors.cardBg : colors.tableStripe }}>
                 <td style={td(colors)}>☰</td>
                 <td style={td(colors)}>{row.name}</td>
@@ -429,8 +671,8 @@ function LeaveTypeView({
                 <td style={td(colors)}>{row.editor}</td>
                 <td style={td(colors)}>{row.editedAt}</td>
                 <td style={td(colors)}>
-                  <button onClick={() => showActionFeedback(`修改假期类型：${row.name}`)} style={textActionBtn(colors)}>修改</button>
-                  <button onClick={() => showActionFeedback(`删除假期类型：${row.name}`)} style={textActionBtn(colors)}>删除</button>
+                  <button onClick={() => editLeaveType(row)} style={textActionBtn(colors)}>修改</button>
+                  <button onClick={() => deleteLeaveType(row)} style={textActionBtn(colors)}>删除</button>
                 </td>
               </tr>
             ))}
@@ -450,6 +692,20 @@ function LeaveSchemeView({
   showMore: boolean;
   onToggleMore: () => void;
 }) {
+  const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
+  const [schemeRows, setSchemeRows] = useState<Array<Array<React.ReactNode>>>([]);
+  const addScheme = () => {
+    const name = window.prompt('请输入假期方案名称', `新增假期方案${schemeRows.length + 1}`);
+    if (name === null) return;
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      window.alert('方案名称不能为空');
+      return;
+    }
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    setSchemeRows(current => [[trimmedName, '年假', '按规则控制', '启用额度控制', '全部员工', String(current.length + 1), '当前用户', now, '当前用户', now, '查看'], ...current]);
+  };
+
   return (
     <>
       <div style={filterBar(colors)}>
@@ -474,16 +730,24 @@ function LeaveSchemeView({
       </div>
 
       <div style={toolbarStyle(colors)}>
-        <button onClick={() => showActionFeedback('新增假期方案')} style={primaryBtn(colors)}>新增假期方案</button>
+        <button onClick={addScheme} style={primaryBtn(colors)}>新增假期方案</button>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button onClick={() => showActionFeedback('使用指引')} style={linkBtn(colors)}>
+          <button onClick={() => window.alert('使用指引\n新增假期方案后会立即加入列表，可继续通过表头排序查看优先级。')} style={linkBtn(colors)}>
             <HelpCircle size={12} />
             使用指引
           </button>
         </div>
       </div>
 
-      <TableShell columns={LEAVE_SCHEME_COLUMNS} colors={colors} emptyText="暂无内容" />
+      <TableShell
+        columns={LEAVE_SCHEME_COLUMNS}
+        rows={schemeRows}
+        colors={colors}
+        emptyText="暂无内容"
+        sortConfig={sortConfig}
+        nonSortableColumnIndices={[LEAVE_SCHEME_COLUMNS.length - 1]}
+        onSortChange={(index) => setSortConfig(current => getNextSortConfig(current, index))}
+      />
     </>
   );
 }
@@ -504,24 +768,160 @@ function InfoBanner({ colors, messages }: { colors: any; messages: string[] }) {
   );
 }
 
-function TableShell({ columns, colors, emptyText }: { columns: string[]; colors: any; emptyText: string }) {
+function StatusFilterBar({ items, activeKey, onChange, colors }: { items: Array<{ key: string; label: string; count: number }>; activeKey: string; onChange: (key: string) => void; colors: any }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, padding: '8px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0, flexWrap: 'wrap' }}>
+      {items.map(item => {
+        const active = activeKey === item.key;
+        return <button key={item.key} onClick={() => onChange(item.key)} style={{ padding: '4px 10px', fontSize: '12px', border: `1px solid ${active ? colors.primary : colors.inputBorder}`, borderRadius: 12, cursor: 'pointer', backgroundColor: active ? `${colors.primary}12` : 'transparent', color: active ? colors.primary : colors.textMuted }}>{item.label} <strong>{item.count}</strong></button>;
+      })}
+    </div>
+  );
+}
+
+function getNextSortConfig(current: SortConfig | null, index: number): SortConfig {
+  if (!current || current.index !== index) return { index, direction: 'asc' };
+  return { index, direction: current.direction === 'asc' ? 'desc' : 'asc' };
+}
+
+function compareSortableValues(left: unknown, right: unknown, direction: SortConfig['direction']) {
+  const factor = direction === 'asc' ? 1 : -1;
+  const aValue = String(left ?? '');
+  const bValue = String(right ?? '');
+  const aNumber = Number(aValue.replace(/[^\d.-]/g, ''));
+  const bNumber = Number(bValue.replace(/[^\d.-]/g, ''));
+
+  if (Number.isFinite(aNumber) && Number.isFinite(bNumber) && aValue !== '' && bValue !== '') {
+    return (aNumber - bNumber) * factor;
+  }
+
+  return aValue.localeCompare(bValue, 'zh-CN', { numeric: true, sensitivity: 'base' }) * factor;
+}
+
+function getTypeSortValue(row: LeaveTypeRow, order: number, columnIndex: number): string | number {
+  const values = [
+    order + 1,
+    row.name,
+    row.short,
+    row.enabled ? 1 : 0,
+    row.unit,
+    row.paid,
+    row.negative,
+    row.note,
+    row.before,
+    row.reason,
+    row.attachment,
+    row.attachmentNote,
+    row.creator,
+    row.createdAt,
+    row.editor,
+    row.editedAt,
+    '',
+  ];
+
+  return values[columnIndex] ?? '';
+}
+
+function SortableHeaderButton({
+  label,
+  active,
+  direction,
+  colors,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  direction?: SortConfig['direction'];
+  colors: any;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        border: 'none',
+        background: 'transparent',
+        padding: 0,
+        margin: 0,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        color: active ? colors.primary : colors.textMuted,
+        cursor: 'pointer',
+        fontSize: '12px',
+        fontWeight: 500,
+      }}
+    >
+      {label}
+      <span style={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 0.7 }}>
+        <ChevronUp size={10} style={{ color: active && direction === 'asc' ? colors.primary : colors.textMuted }} />
+        <ChevronDown size={10} style={{ color: active && direction === 'desc' ? colors.primary : colors.textMuted }} />
+      </span>
+    </button>
+  );
+}
+
+function TableShell({
+  columns,
+  rows = [],
+  colors,
+  emptyText,
+  sortConfig,
+  onSortChange,
+  nonSortableColumnIndices = [],
+}: {
+  columns: string[];
+  rows?: Array<Array<React.ReactNode>>;
+  colors: any;
+  emptyText: string;
+  sortConfig?: SortConfig | null;
+  onSortChange?: (index: number) => void;
+  nonSortableColumnIndices?: number[];
+}) {
+
   return (
     <div style={{ flex: 1, overflow: 'auto', backgroundColor: colors.cardBg }}>
       <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ backgroundColor: colors.tableHeaderBg, position: 'sticky', top: 0, zIndex: 2 }}>
             <th style={{ ...th(colors), width: 42 }}><input type="checkbox" style={{ accentColor: colors.primary }} /></th>
-            {columns.map(column => (
-              <th key={column} style={{ ...th(colors), minWidth: column.length >= 6 ? 132 : 108 }}>{column}</th>
-            ))}
+            {columns.map((column, columnIndex) => {
+              const sortable = Boolean(onSortChange) && !nonSortableColumnIndices.includes(columnIndex);
+              const active = sortConfig?.index === columnIndex;
+
+              return (
+                <th key={column} style={{ ...th(colors), minWidth: column.length >= 6 ? 132 : 108 }}>
+                  {sortable ? (
+                    <SortableHeaderButton
+                      label={column}
+                      active={active}
+                      direction={active ? sortConfig?.direction : undefined}
+                      colors={colors}
+                      onClick={() => onSortChange?.(columnIndex)}
+                    />
+                  ) : (
+                    column
+                  )}
+                </th>
+              );
+            })}
           </tr>
         </thead>
+
         <tbody>
-          <tr>
-            <td colSpan={columns.length + 1} style={{ padding: '96px 0 120px', textAlign: 'center', borderBottom: `1px solid ${colors.tableBorder}` }}>
-              <EmptyState colors={colors} text={emptyText} />
-            </td>
-          </tr>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={columns.length + 1} style={{ padding: '96px 0 120px', textAlign: 'center', borderBottom: `1px solid ${colors.tableBorder}` }}>
+                <EmptyState colors={colors} text={emptyText} />
+              </td>
+            </tr>
+          ) : rows.map((row, index) => (
+            <tr key={index} style={{ backgroundColor: index % 2 === 0 ? colors.cardBg : colors.tableStripe, borderBottom: `1px solid ${colors.tableBorder}` }}>
+              <td style={{ ...td(colors), textAlign: 'center' }}><input type="checkbox" style={{ accentColor: colors.primary }} /></td>
+              {row.map((cell, cellIndex) => <td key={cellIndex} style={td(colors)}>{cellIndex === 0 || cellIndex === row.length - 2 ? <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: 10, backgroundColor: cell === '已通过' ? colors.badgeGreenBg : cell === '审批中' ? colors.badgeBlueBg : cell === '已拒绝' ? colors.badgeRedBg : colors.badgeGrayBg, color: cell === '已通过' ? colors.badgeGreenText : cell === '审批中' ? colors.badgeBlueText : cell === '已拒绝' ? colors.badgeRedText : colors.badgeGrayText }}>{cell}</span> : cell}</td>)}
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -592,7 +992,10 @@ function DropdownButton({
   );
 }
 
-function DateRangeField({ label, colors, width = 236, required = false }: { label: string; colors: any; width?: number; required?: boolean }) {
+function DateRangeField({ label, colors, width = 236, required = false, value, onChange }: { label: string; colors: any; width?: number; required?: boolean; value?: { start: string; end: string }; onChange?: (value: { start: string; end: string }) => void }) {
+  const [innerValue, setInnerValue] = useState({ start: '2026-05-01', end: '2026-05-31' });
+  const current = value ?? innerValue;
+  const setCurrent = (next: { start: string; end: string }) => onChange ? onChange(next) : setInnerValue(next);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ fontSize: '12px', color: colors.text, whiteSpace: 'nowrap' }}>
@@ -601,20 +1004,23 @@ function DateRangeField({ label, colors, width = 236, required = false }: { labe
       </span>
       <div style={fieldShell(colors, width)}>
         <Calendar size={12} style={{ color: colors.textMuted }} />
-        <input type="date" defaultValue="2026-05-01" style={dateInput(colors)} />
+        <input type="date" value={current.start} onChange={e => setCurrent({ ...current, start: e.target.value })} style={dateInput(colors)} />
         <span style={{ fontSize: '12px', color: colors.textMuted }}>—</span>
-        <input type="date" defaultValue="2026-05-31" style={dateInput(colors)} />
+        <input type="date" value={current.end} onChange={e => setCurrent({ ...current, end: e.target.value })} style={dateInput(colors)} />
       </div>
     </div>
   );
 }
 
-function SearchField({ label, placeholder, colors, width = 170, showUserIcon = false }: { label: string; placeholder: string; colors: any; width?: number; showUserIcon?: boolean }) {
+function SearchField({ label, placeholder, colors, width = 170, showUserIcon = false, value, onChange }: { label: string; placeholder: string; colors: any; width?: number; showUserIcon?: boolean; value?: string; onChange?: (value: string) => void }) {
+  const [innerValue, setInnerValue] = useState('');
+  const current = value ?? innerValue;
+  const setCurrent = (next: string) => onChange ? onChange(next) : setInnerValue(next);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ fontSize: '12px', color: colors.text, whiteSpace: 'nowrap' }}>{label}</span>
       <div style={fieldShell(colors, width)}>
-        <input placeholder={placeholder} style={textInput(colors)} />
+        <input value={current} onChange={e => setCurrent(e.target.value)} placeholder={placeholder} style={textInput(colors)} />
         {showUserIcon ? <Users size={12} style={{ color: colors.textMuted }} /> : null}
         <Search size={12} style={{ color: colors.textMuted }} />
       </div>
@@ -622,12 +1028,18 @@ function SearchField({ label, placeholder, colors, width = 170, showUserIcon = f
   );
 }
 
-function SelectField({ label, placeholder, colors, width = 140 }: { label: string; placeholder: string; colors: any; width?: number }) {
+function SelectField({ label, placeholder, colors, width = 140, options = [], value, onChange }: { label: string; placeholder: string; colors: any; width?: number; options?: string[]; value?: string; onChange?: (value: string) => void }) {
+  const [innerValue, setInnerValue] = useState('');
+  const current = value ?? innerValue;
+  const setCurrent = (next: string) => onChange ? onChange(next) : setInnerValue(next);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ fontSize: '12px', color: colors.text, whiteSpace: 'nowrap' }}>{label}</span>
       <div style={fieldShell(colors, width)}>
-        <span style={{ fontSize: '12px', color: colors.textMuted, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{placeholder}</span>
+        <select value={current} onChange={e => setCurrent(e.target.value)} style={{ ...textInput(colors), color: current ? colors.text : colors.textMuted }}>
+          <option value="">{placeholder}</option>
+          {options.map(option => <option key={option} value={option}>{option}</option>)}
+        </select>
         <ChevronDown size={12} style={{ color: colors.textMuted }} />
       </div>
     </div>

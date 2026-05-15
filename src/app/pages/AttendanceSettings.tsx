@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
+import { fetchSettingsFace, fetchSettingsPeople, fetchSettingsShifts } from '../api/realData';
 import {
   AlertCircle,
   Calendar,
@@ -33,16 +34,20 @@ type SettingView =
 
 type RouteTab = { key: SettingView; label: string; path: string };
 type OverviewCard = { title: string; desc: string; extra: string; path: string; badge: string };
-
-function showActionFeedback(action: string) {
-  window.alert(`考勤设置：${action}（交互已接通）`);
-}
+type TableSortConfig = { index: number; direction: 'asc' | 'desc' };
 
 type TableProps = {
   columns: string[];
   rows: React.ReactNode[][];
   colors: any;
   withSelection?: boolean;
+  rowIds?: string[];
+  selectedRowIds?: Set<string>;
+  onToggleRow?: (rowId: string) => void;
+  onToggleAll?: () => void;
+  sortConfig?: TableSortConfig | null;
+  onSortChange?: (index: number) => void;
+  nonSortableColumnIndices?: number[];
   emptyText?: string;
   footerText?: string;
 };
@@ -130,7 +135,7 @@ const PEOPLE_ROWS = [
   ['牛润颖', 'ZY26602', '新人培训组', '销售运营', '2026-05-06', '-', '-', '全职', '试用', '-', '生产组', '-', '华北大区', '默认方案'],
   ['张子七', 'CP26057', '饮酒运营中心', '餐厅运营', '2026-04-28', '-', '-', '全职', '试用', '-', '中控运营设计', '-', '华北大区', '默认方案'],
   ['王海', 'ZY26599', '新人培训组', '生产组专员', '2026-04-25', '-', '-', '全职', '试用', '-', '生产组', '-', '华北大区', '默认方案'],
-];
+].slice(0, 5);
 
 const CARD_RULE_ROWS = [
   ['无规则打卡', '无规则打卡', '无规则打卡', '棠乐', '2026-04-15 09:54:58', '棠乐', '2026-04-15 09:54:58'],
@@ -198,6 +203,32 @@ export default function AttendanceSettings() {
     globalRule: true,
     fixedOvertime: false,
   });
+  const [shiftRows, setShiftRows] = useState<string[][]>(SHIFT_ROWS);
+  const [peopleRows, setPeopleRows] = useState<string[][]>(PEOPLE_ROWS);
+  const [faceRows, setFaceRows] = useState<string[][]>(FACE_ROWS);
+  const [sourceInfo, setSourceInfo] = useState('');
+  const [loadError, setLoadError] = useState('');
+
+  const loadSettingsData = useCallback(async () => {
+    try {
+      const [shifts, people, face] = await Promise.all([
+        fetchSettingsShifts(),
+        fetchSettingsPeople(),
+        fetchSettingsFace(),
+      ]);
+      if (shifts.rows?.length) setShiftRows(shifts.rows);
+      if (people.rows?.length) setPeopleRows(people.rows);
+      if (face.rows?.length) setFaceRows(face.rows);
+      setSourceInfo(`班次：${shifts.sourceFile}；人员：${people.sourceFile}；人脸：${face.sourceFile}`);
+      setLoadError('');
+    } catch (_error) {
+      setLoadError('真实设置数据连接失败，当前展示静态数据');
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSettingsData();
+  }, [loadSettingsData]);
 
   const activeView = useMemo<SettingView>(() => {
     if (location.pathname === '/attendance/settings') return 'overview';
@@ -218,7 +249,7 @@ export default function AttendanceSettings() {
         {ROUTE_TABS.map(tab => (
           <TopTab key={tab.key} label={tab.label} active={activeView === tab.key} onClick={() => navigate(tab.path)} colors={colors} />
         ))}
-        <button style={{ marginLeft: 4, padding: '2px 10px', fontSize: '12px', border: `1px solid ${colors.cardBorder}`, borderRadius: 4, cursor: 'default', background: 'transparent', color: colors.textMuted, flexShrink: 0 }}>×</button>
+        <button onClick={() => navigate('/attendance/settings')} title="返回配置总览" style={{ marginLeft: 4, padding: '2px 10px', fontSize: '12px', border: `1px solid ${colors.cardBorder}`, borderRadius: 4, cursor: 'pointer', background: 'transparent', color: colors.textMuted, flexShrink: 0 }}>×</button>
       </div>
 
       {activeView === 'overview' && (
@@ -231,12 +262,12 @@ export default function AttendanceSettings() {
         />
       )}
       {activeView === 'groups' && <GroupsView colors={colors} showMore={!!showMore.groups} onToggleMore={() => toggleMore('groups')} />}
-      {activeView === 'shifts' && <ShiftsView colors={colors} showMore={!!showMore.shifts} onToggleMore={() => toggleMore('shifts')} />}
-      {activeView === 'people' && <PeopleView colors={colors} showMore={!!showMore.people} onToggleMore={() => toggleMore('people')} />}
+      {activeView === 'shifts' && <ShiftsView colors={colors} showMore={!!showMore.shifts} onToggleMore={() => toggleMore('shifts')} shiftRows={shiftRows} sourceInfo={sourceInfo} loadError={loadError} />}
+      {activeView === 'people' && <PeopleView colors={colors} showMore={!!showMore.people} onToggleMore={() => toggleMore('people')} peopleRows={peopleRows} sourceInfo={sourceInfo} loadError={loadError} />}
       {activeView === 'card-rules' && <CardRulesView colors={colors} />}
       {activeView === 'mobile-clock' && <MobileClockView colors={colors} />}
       {activeView === 'location' && <LocationView colors={colors} showMore={!!showMore.location} onToggleMore={() => toggleMore('location')} />}
-      {activeView === 'face' && <FaceView colors={colors} showMore={!!showMore.face} onToggleMore={() => toggleMore('face')} />}
+      {activeView === 'face' && <FaceView colors={colors} showMore={!!showMore.face} onToggleMore={() => toggleMore('face')} faceRows={faceRows} sourceInfo={sourceInfo} loadError={loadError} />}
       {activeView === 'devices' && <DevicesView colors={colors} />}
       {activeView === 'holiday' && <HolidayView colors={colors} />}
       {activeView === 'calendar' && <CalendarView colors={colors} />}
@@ -260,6 +291,40 @@ function OverviewView({
   onOpen: (view: SettingView) => void;
   onOpenPath: (path: string) => void;
 }) {
+  const [periodRows, setPeriodRows] = useState([
+    {
+      period: '当月1日至当月最后一天为【当月】的考勤统计周期',
+      calendars: '双休、两连班',
+      scheme: '默认方案',
+    },
+  ]);
+  const [skipOverview, setSkipOverview] = useState(false);
+
+  const addPeriod = () => {
+    setPeriodRows(current => [
+      ...current,
+      {
+        period: `新增考勤周期${current.length + 1}：每月1日至月末`,
+        calendars: '双休',
+        scheme: '默认方案',
+      },
+    ]);
+  };
+
+  const editPeriod = (index: number) => {
+    const current = periodRows[index];
+    const nextName = window.prompt('请输入考勤周期名称', current?.period ?? '');
+    if (nextName === null) return;
+    const trimmed = nextName.trim();
+    if (!trimmed) return;
+    setPeriodRows(rows => rows.map((row, rowIndex) => rowIndex === index ? { ...row, period: trimmed } : row));
+  };
+
+  const deletePeriod = (index: number) => {
+    if (!window.confirm('确认删除该考勤周期？')) return;
+    setPeriodRows(rows => rows.filter((_, rowIndex) => rowIndex !== index));
+  };
+
   return (
     <div style={{ flex: 1, overflow: 'auto', padding: '16px 16px 24px' }}>
       <div style={{ background: `linear-gradient(135deg, ${withAlpha(colors.primary, 0.16)} 0%, ${withAlpha(colors.primary, 0.08)} 66%, ${withAlpha(colors.primary, 0.12)} 100%)`, border: `1px solid ${withAlpha(colors.primary, 0.16)}`, borderRadius: 12, padding: '18px 20px 22px', marginBottom: 16, position: 'relative', overflow: 'hidden' }}>
@@ -278,17 +343,24 @@ function OverviewView({
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td style={td(colors)}>当月1日至当月最后一天为【当月】的考勤统计周期</td>
-                    <td style={td(colors)}><button style={textLink(colors)}>双休、两连班</button></td>
-                    <td style={td(colors)}><button style={textLink(colors)}>默认方案</button></td>
-                    <td style={td(colors)}>{actionLinks(colors, ['修改', '删除'])}</td>
-                  </tr>
+                  {periodRows.map((row, index) => (
+                    <tr key={`${row.period}-${index}`}>
+                      <td style={td(colors)}>{row.period}</td>
+                      <td style={td(colors)}><button onClick={() => onOpen('calendar')} style={textLink(colors)}>{row.calendars}</button></td>
+                      <td style={td(colors)}><button onClick={() => onOpen('stat-schemes')} style={textLink(colors)}>{row.scheme}</button></td>
+                      <td style={td(colors)}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <button onClick={() => editPeriod(index)} style={textLink(colors)}>修改</button>
+                          <button onClick={() => deletePeriod(index)} style={textLink(colors)}>删除</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
             <div style={{ paddingTop: 10 }}>
-              <button style={linkBtn(colors)}>
+              <button onClick={addPeriod} style={linkBtn(colors)}>
                 <Plus size={13} />
                 添加考勤周期
               </button>
@@ -334,7 +406,7 @@ function OverviewView({
           ))}
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12, fontSize: '12px', color: colors.textMuted }}>
-          <input type="checkbox" style={{ accentColor: colors.primary }} />
+          <input type="checkbox" checked={skipOverview} onChange={event => setSkipOverview(event.target.checked)} style={{ accentColor: colors.primary }} />
           我已完成配置，下次不再默认进入本页面
         </label>
       </SectionCard>
@@ -343,142 +415,504 @@ function OverviewView({
 }
 
 function GroupsView({ colors, showMore, onToggleMore }: { colors: any; showMore: boolean; onToggleMore: () => void }) {
-  const rows = GROUP_ROWS.map(row => [...row, actionLinks(colors, ['修改', '排班', '...'])]);
+  const [rowsData, setRowsData] = useState<string[][]>(GROUP_ROWS);
+  const [draftFilters, setDraftFilters] = useState({ name: '', types: ['排班制'] });
+  const [appliedFilters, setAppliedFilters] = useState(draftFilters);
+  const [peopleMode, setPeopleMode] = useState<'schedule' | 'shift'>('schedule');
+
+  const filteredRows = useMemo(() => {
+    const nameKeyword = appliedFilters.name.trim().toLowerCase();
+    return rowsData.filter(row => {
+      const matchName = !nameKeyword || String(row[0] ?? '').toLowerCase().includes(nameKeyword);
+      const matchType = !appliedFilters.types.length || appliedFilters.types.includes(String(row[1] ?? ''));
+      const matchMode = peopleMode === 'schedule' || String(row[3] ?? '').includes('/');
+      return matchName && matchType && matchMode;
+    });
+  }, [appliedFilters, peopleMode, rowsData]);
+
+  const resetFilters = () => {
+    const next = { name: '', types: ['排班制'] };
+    setDraftFilters(next);
+    setAppliedFilters(next);
+  };
+
+  const addGroup = (source = '手动创建') => {
+    const name = window.prompt('请输入考勤组名称', `新建考勤组${rowsData.length + 1}`);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setRowsData(current => [[trimmed, '排班制', '部门：待配置', '早九晚六', source, nowText(), source, nowText()], ...current]);
+  };
+
+  const importGroups = () => {
+    setRowsData(current => [
+      [`导入考勤组${current.length + 1}`, '排班制', '部门：导入组织', '早十晚七', '导入', nowText(), '导入', nowText()],
+      ...current,
+    ]);
+  };
+
+  const handleAction = (label: string, row: string[]) => {
+    const rowId = createRowId(row);
+    if (label === '修改') {
+      const nextName = window.prompt('请输入考勤组名称', row[0] ?? '');
+      if (nextName === null) return;
+      const trimmed = nextName.trim();
+      if (!trimmed) return;
+      setRowsData(current => current.map(item => createRowId(item) === rowId ? setRowCell(item, 0, trimmed) : item));
+      return;
+    }
+    if (label === '排班') {
+      setRowsData(current => current.map(item => createRowId(item) === rowId ? setRowCell(item, 3, '已更新排班') : item));
+      return;
+    }
+    window.alert(`考勤组：${row[0] ?? '-'}`);
+  };
+
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['修改', '排班', '...'], label => handleAction(label, row))]);
   return (
     <ListPage colors={colors}>
       <FilterBar colors={colors}>
-        <SearchField label="考勤组名称" placeholder="请输入" colors={colors} width={180} />
-        <CheckboxGroup label="考勤类型" items={['固定班制', '排班制', '自由工时']} colors={colors} />
+        <SearchField label="考勤组名称" placeholder="请输入" colors={colors} width={180} value={draftFilters.name} onChange={value => setDraftFilters(current => ({ ...current, name: value }))} />
+        <CheckboxGroup label="考勤类型" items={['固定班制', '排班制', '自由工时']} colors={colors} value={draftFilters.types} onChange={types => setDraftFilters(current => ({ ...current, types }))} />
         <div style={rightActionRow}>
-          <button style={outlineBtn(colors)}>重置</button>
-          <button style={primaryBtn(colors)}>查询</button>
+          <button onClick={resetFilters} style={outlineBtn(colors)}>重置</button>
+          <button onClick={() => setAppliedFilters(draftFilters)} style={primaryBtn(colors)}>查询</button>
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button style={primaryBtn(colors)}>新建考勤组</button>
-        <button style={outlineBtn(colors)}>重新导入</button>
+        <button onClick={() => addGroup()} style={primaryBtn(colors)}>新建考勤组</button>
+        <button onClick={importGroups} style={outlineBtn(colors)}>重新导入</button>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <TagPill colors={colors} label="排班人员" count="24" active />
-          <TagPill colors={colors} label="班次人员" count="0" />
+          <TagPill colors={colors} label="排班人员" count={String(rowsData.length)} active={peopleMode === 'schedule'} onClick={() => setPeopleMode('schedule')} />
+          <TagPill colors={colors} label="班次人员" count={String(rowsData.filter(row => String(row[3] ?? '').includes('/')).length)} active={peopleMode === 'shift'} onClick={() => setPeopleMode('shift')} />
         </div>
       </Toolbar>
-      <DataTable columns={GROUP_COLUMNS} rows={rows} colors={colors} footerText="共24条" />
+      <DataTable columns={GROUP_COLUMNS} rows={rows} colors={colors} footerText={`共${filteredRows.length}条 / 总${rowsData.length}条`} />
     </ListPage>
   );
 }
 
-function ShiftsView({ colors, showMore, onToggleMore }: { colors: any; showMore: boolean; onToggleMore: () => void }) {
-  const rows = SHIFT_ROWS.map(row => [...row, actionLinks(colors, ['详情', '修改', '...'])]);
+function SourceNotice({ sourceInfo, loadError }: { sourceInfo?: string; loadError?: string }) {
+  if (!sourceInfo && !loadError) return null;
+  return <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>{sourceInfo ? `已连接真实数据源：${sourceInfo}` : ''}{loadError ? ` ${loadError}` : ''}</div>;
+}
+
+function ShiftsView({ colors, showMore, onToggleMore, shiftRows, sourceInfo, loadError }: { colors: any; showMore: boolean; onToggleMore: () => void; shiftRows: string[][]; sourceInfo?: string; loadError?: string }) {
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [rowsData, setRowsData] = useState<string[][]>(shiftRows);
+  const [draftFilters, setDraftFilters] = useState({ name: '', tag: '' });
+  const [appliedFilters, setAppliedFilters] = useState({ name: '', tag: '' });
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+  const [tagOptions, setTagOptions] = useState<string[]>([]);
+  const [newTagName, setNewTagName] = useState('');
+  const [sortConfig, setSortConfig] = useState<TableSortConfig | null>(null);
+
+  useEffect(() => {
+    setRowsData(shiftRows);
+    setSelectedRowIds(new Set());
+  }, [shiftRows]);
+
+  useEffect(() => {
+    setTagOptions(current => {
+      const next = uniqueShiftTags(rowsData);
+      return Array.from(new Set([...current, ...next]));
+    });
+  }, [rowsData]);
+
+  const filteredRows = useMemo(() => {
+    const nameKeyword = appliedFilters.name.trim().toLowerCase();
+    return rowsData.filter(row => {
+      const matchName = !nameKeyword || String(row[0] ?? '').toLowerCase().includes(nameKeyword);
+      const matchTag = !appliedFilters.tag || String(row[3] ?? '') === appliedFilters.tag;
+      return matchName && matchTag;
+    });
+  }, [appliedFilters, rowsData]);
+
+  const sortedRows = useMemo(() => {
+    if (!sortConfig) return filteredRows;
+    return [...filteredRows].sort((left, right) => compareTableValues(left[sortConfig.index], right[sortConfig.index], sortConfig.direction));
+  }, [filteredRows, sortConfig]);
+
+  const rowIds = sortedRows.map(getShiftRowId);
+  const rows = sortedRows.map(row => [
+    ...row,
+    shiftActionLinks(colors, row, {
+      onDetail: () => window.alert(`班次详情\n名称：${row[0] ?? '-'}\n出勤时间：${row[5] ?? '-'}\n适用考勤组：${row[7] ?? '-'}`),
+      onEdit: () => {
+        const nextName = window.prompt('请输入新的班次名称', String(row[0] ?? ''));
+        if (nextName === null) return;
+        const trimmedName = nextName.trim();
+        if (!trimmedName) {
+          window.alert('班次名称不能为空');
+          return;
+        }
+        setRowsData(current => current.map(item => getShiftRowId(item) === getShiftRowId(row) ? [trimmedName, ...item.slice(1)] : item));
+      },
+      onMore: () => window.alert(`更多操作\n可对「${row[0] ?? '-'}」执行复制、停用或查看引用。`),
+    }),
+  ]);
+
+  const resetFilters = () => {
+    setDraftFilters({ name: '', tag: '' });
+    setAppliedFilters({ name: '', tag: '' });
+  };
+
+  const toggleRow = (rowId: string) => {
+    setSelectedRowIds(current => {
+      const next = new Set(current);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    setSelectedRowIds(current => {
+      const allSelected = rowIds.length > 0 && rowIds.every(rowId => current.has(rowId));
+      if (allSelected) return new Set([...current].filter(rowId => !rowIds.includes(rowId)));
+      return new Set([...current, ...rowIds]);
+    });
+  };
+
+  const deleteSelected = () => {
+    const visibleSelectedIds = rowIds.filter(rowId => selectedRowIds.has(rowId));
+    if (!visibleSelectedIds.length) {
+      window.alert('请先选择要删除的班次');
+      return;
+    }
+    if (!window.confirm(`确认删除选中的 ${visibleSelectedIds.length} 个班次？`)) return;
+    setRowsData(current => current.filter(row => !selectedRowIds.has(getShiftRowId(row))));
+    setSelectedRowIds(new Set());
+  };
+
+  const addShift = () => {
+    const name = window.prompt('请输入班次名称', `新建班次${rowsData.length + 1}`);
+    if (name === null) return;
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      window.alert('班次名称不能为空');
+      return;
+    }
+    const shortName = window.prompt('请输入班次简称', trimmedName.slice(0, 8))?.trim() || trimmedName.slice(0, 8);
+    setRowsData(current => [[trimmedName, shortName, '正常出勤', '-', '通用', '09:00', '8.00小时/天', '-', '手动创建'], ...current]);
+  };
+
+  const addTag = () => {
+    const trimmedTag = newTagName.trim();
+    if (!trimmedTag) {
+      window.alert('请输入标签名称');
+      return;
+    }
+    setTagOptions(current => current.includes(trimmedTag) ? current : [...current, trimmedTag]);
+    const targetIds = rowIds.filter(rowId => selectedRowIds.has(rowId));
+    const effectiveTargetIds = targetIds.length ? targetIds : rowIds;
+    if (effectiveTargetIds.length) {
+      setRowsData(current => current.map(row => effectiveTargetIds.includes(getShiftRowId(row)) ? setShiftRowCell(row, 3, trimmedTag) : row));
+      window.alert(`已将标签「${trimmedTag}」添加到 ${effectiveTargetIds.length} 个班次`);
+    } else {
+      window.alert(`已新增标签「${trimmedTag}」`);
+    }
+    setNewTagName('');
+  };
+
+  const removeTag = (tag: string) => {
+    if (rowsData.some(row => row[3] === tag)) {
+      window.alert('该标签正在被班次使用，不能删除');
+      return;
+    }
+    setTagOptions(current => current.filter(item => item !== tag));
+    if (draftFilters.tag === tag) setDraftFilters(current => ({ ...current, tag: '' }));
+    if (appliedFilters.tag === tag) setAppliedFilters(current => ({ ...current, tag: '' }));
+  };
+
+  const exportRows = () => {
+    const selectedRows = sortedRows.filter(row => selectedRowIds.has(getShiftRowId(row)));
+    const exportData = selectedRows.length ? selectedRows : sortedRows;
+    if (!exportData.length) {
+      window.alert('没有可导出的班次数据');
+      return;
+    }
+    const csv = toCsv([SHIFT_COLUMNS.slice(0, -1), ...exportData]);
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = selectedRows.length ? '班次管理-选中数据.csv' : '班次管理-筛选结果.csv';
+    link.click();
+    window.URL.revokeObjectURL(url);
+    window.alert(`已导出${selectedRows.length ? '选中' : '当前筛选'}数据：${exportData.length} 条`);
+  };
+
+  const importRows = async (file: File) => {
+    try {
+      const importedRows = await readShiftImportFile(file);
+      if (!importedRows.length) {
+        window.alert('未识别到可导入的班次数据');
+        return;
+      }
+      setRowsData(current => [...importedRows, ...current]);
+      window.alert(`导入成功：${importedRows.length} 条班次`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : '导入失败，请检查文件格式');
+    } finally {
+      if (importInputRef.current) importInputRef.current.value = '';
+    }
+  };
+
   return (
     <ListPage colors={colors}>
+      <SourceNotice sourceInfo={sourceInfo} loadError={loadError} />
       <InfoBanner colors={colors} messages={['设置每天上下班时间、打卡时间和出勤班次将有助于考勤统计。']} />
       <FilterBar colors={colors}>
-        <SearchField label="班次名称" placeholder="请输入" colors={colors} width={180} />
-        <SelectField label="标签名称" placeholder="请选择标签" colors={colors} width={160} />
+        <SearchField label="班次名称" placeholder="请输入" colors={colors} width={180} value={draftFilters.name} onChange={value => setDraftFilters(current => ({ ...current, name: value }))} />
+        <SelectField label="标签名称" placeholder="请选择标签" colors={colors} width={160} options={tagOptions} value={draftFilters.tag} onChange={value => setDraftFilters(current => ({ ...current, tag: value }))} />
         <div style={rightActionRow}>
-          <button style={outlineBtn(colors)}>重置</button>
-          <button style={primaryBtn(colors)}>查询</button>
+          <button onClick={resetFilters} style={outlineBtn(colors)}>重置</button>
+          <button onClick={() => setAppliedFilters(draftFilters)} style={primaryBtn(colors)}>查询</button>
           <button onClick={onToggleMore} style={toggleBtn(colors, showMore)}>
             标签管理
             {showMore ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           </button>
         </div>
+        {showMore && (
+          <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8 }}>
+            <span style={{ fontSize: '12px', color: colors.textMuted }}>标签</span>
+            {tagOptions.length ? tagOptions.map(tag => (
+              <button key={tag} onClick={() => removeTag(tag)} title="点击删除未使用标签" style={{ ...toggleBtn(colors, appliedFilters.tag === tag), height: 26 }}>
+                {tag} ×
+              </button>
+            )) : <span style={{ fontSize: '12px', color: colors.textMuted }}>暂无标签</span>}
+            <input value={newTagName} onChange={event => setNewTagName(event.target.value)} placeholder="新增标签" style={{ ...textInput(colors), flex: '0 0 140px', height: 28, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '0 8px' }} />
+            <button onClick={addTag} style={outlineBtn(colors)}>新增标签</button>
+          </div>
+        )}
       </FilterBar>
       <Toolbar colors={colors}>
-        <button style={primaryBtn(colors)}>新建班次</button>
-        <button style={outlineBtn(colors)}>导入排入</button>
-        <button style={outlineBtn(colors)}>导出</button>
-        <button style={outlineBtn(colors)}>删除</button>
+        <button onClick={addShift} style={primaryBtn(colors)}>新建班次</button>
+        <button onClick={() => importInputRef.current?.click()} style={outlineBtn(colors)}>导入排入</button>
+        <button onClick={exportRows} style={outlineBtn(colors)}>导出</button>
+        <button
+          onClick={deleteSelected}
+          style={selectedRowIds.size ? outlineBtn(colors) : { ...outlineBtn(colors), color: colors.textMuted, cursor: 'not-allowed', opacity: 0.55 }}
+          disabled={!selectedRowIds.size}
+        >
+          删除
+        </button>
+        <input ref={importInputRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={event => {
+          const file = event.target.files?.[0];
+          if (file) void importRows(file);
+        }} />
       </Toolbar>
-      <DataTable columns={SHIFT_COLUMNS} rows={rows} colors={colors} withSelection footerText="共25条" />
+      <DataTable
+        columns={SHIFT_COLUMNS}
+        rows={rows}
+        colors={colors}
+        withSelection
+        rowIds={rowIds}
+        selectedRowIds={selectedRowIds}
+        onToggleRow={toggleRow}
+        onToggleAll={toggleAll}
+        sortConfig={sortConfig}
+        onSortChange={index => setSortConfig(current => getNextTableSortConfig(current, index))}
+        nonSortableColumnIndices={[SHIFT_COLUMNS.length - 1]}
+        footerText={`共${sortedRows.length}条 / 总${rowsData.length}条`}
+      />
     </ListPage>
   );
 }
 
-function PeopleView({ colors, showMore, onToggleMore }: { colors: any; showMore: boolean; onToggleMore: () => void }) {
-  const rows = PEOPLE_ROWS.map(row => [...row, actionLinks(colors, ['详情', '...'])]);
+function PeopleView({ colors, showMore, onToggleMore, peopleRows, sourceInfo, loadError }: { colors: any; showMore: boolean; onToggleMore: () => void; peopleRows: string[][]; sourceInfo?: string; loadError?: string }) {
+  const [rowsData, setRowsData] = useState<string[][]>(peopleRows);
+  const [draftFilters, setDraftFilters] = useState({ keyword: '', dept: '', group: '', scheme: '' });
+  const [appliedFilters, setAppliedFilters] = useState(draftFilters);
+  const [peopleMode, setPeopleMode] = useState<'all' | 'scheduled'>('all');
+  const [hideDeparted, setHideDeparted] = useState(false);
+  const [syncVisible, setSyncVisible] = useState(false);
+
+  useEffect(() => {
+    setRowsData(peopleRows);
+  }, [peopleRows]);
+
+  const filteredRows = useMemo(() => {
+    const keyword = appliedFilters.keyword.trim().toLowerCase();
+    return rowsData.filter(row => {
+      const matchKeyword = !keyword || [row[0], row[1]].some(value => String(value ?? '').toLowerCase().includes(keyword));
+      const matchDept = !appliedFilters.dept || row[2] === appliedFilters.dept;
+      const matchGroup = !appliedFilters.group || row[12] === appliedFilters.group;
+      const matchScheme = !appliedFilters.scheme || row[13] === appliedFilters.scheme;
+      const matchMode = peopleMode === 'all' || Boolean(row[5] && row[5] !== '-');
+      const matchStatus = !hideDeparted || row[8] !== '离职';
+      return matchKeyword && matchDept && matchGroup && matchScheme && matchMode && matchStatus;
+    });
+  }, [appliedFilters, hideDeparted, peopleMode, rowsData]);
+
+  const resetFilters = () => {
+    const next = { keyword: '', dept: '', group: '', scheme: '' };
+    setDraftFilters(next);
+    setAppliedFilters(next);
+  };
+
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['详情', '...'], label => window.alert(`${label}\n姓名：${row[0] ?? '-'}\n考勤组：${row[12] ?? '-'}`))]);
+  const deptOptions = uniqueOptions(rowsData, 2);
+  const groupOptions = uniqueOptions(rowsData, 12);
+  const schemeOptions = uniqueOptions(rowsData, 13);
+
   return (
     <ListPage colors={colors}>
+      <SourceNotice sourceInfo={sourceInfo} loadError={loadError} />
       <FilterBar colors={colors}>
-        <SearchField label="姓名/员工工号" placeholder="请输入姓名/员工工号" colors={colors} width={210} showUserIcon />
-        <SelectField label="部门" placeholder="请选择" colors={colors} width={150} />
-        <SelectField label="考勤组" placeholder="请选择" colors={colors} width={150} />
-        <SelectField label="统计方案" placeholder="请选择" colors={colors} width={150} />
+        <SearchField label="姓名/员工工号" placeholder="请输入姓名/员工工号" colors={colors} width={210} showUserIcon value={draftFilters.keyword} onChange={value => setDraftFilters(current => ({ ...current, keyword: value }))} />
+        <SelectField label="部门" placeholder="请选择" colors={colors} width={150} options={deptOptions} value={draftFilters.dept} onChange={value => setDraftFilters(current => ({ ...current, dept: value }))} />
+        <SelectField label="考勤组" placeholder="请选择" colors={colors} width={150} options={groupOptions} value={draftFilters.group} onChange={value => setDraftFilters(current => ({ ...current, group: value }))} />
+        <SelectField label="统计方案" placeholder="请选择" colors={colors} width={150} options={schemeOptions} value={draftFilters.scheme} onChange={value => setDraftFilters(current => ({ ...current, scheme: value }))} />
         <div style={rightActionRow}>
-          <button style={outlineBtn(colors)}>重置</button>
-          <button style={primaryBtn(colors)}>查询</button>
+          <button onClick={resetFilters} style={outlineBtn(colors)}>重置</button>
+          <button onClick={() => setAppliedFilters(draftFilters)} style={primaryBtn(colors)}>查询</button>
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <TagPill colors={colors} label="全部人员" count="1165" active />
-        <TagPill colors={colors} label="排班人员" count="635" />
+        <TagPill colors={colors} label="全部人员" count={String(rowsData.length)} active={peopleMode === 'all'} onClick={() => setPeopleMode('all')} />
+        <TagPill colors={colors} label="排班人员" count={String(rowsData.filter(row => row[5] && row[5] !== '-').length)} active={peopleMode === 'scheduled'} onClick={() => setPeopleMode('scheduled')} />
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '12px', color: colors.textMuted }}>
-            <input type="checkbox" style={{ accentColor: colors.primary }} />
+            <input type="checkbox" checked={hideDeparted} onChange={event => setHideDeparted(event.target.checked)} style={{ accentColor: colors.primary }} />
             不显示离职员工
           </label>
-          <button style={textLink(colors)}>CRM同步记录</button>
+          <button onClick={() => setSyncVisible(current => !current)} style={textLink(colors)}>CRM同步记录</button>
           <button onClick={onToggleMore} style={toggleBtn(colors, showMore)}>
             更多筛选
             {showMore ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           </button>
         </div>
       </Toolbar>
-      <DataTable columns={PEOPLE_COLUMNS} rows={rows} colors={colors} footerText="共1165笔" />
+      {syncVisible ? <InlineNotice colors={colors} text={`最近同步：${nowText()}，新增0人，更新${rowsData.length}人，失败0人。`} /> : null}
+      <DataTable columns={PEOPLE_COLUMNS} rows={rows} colors={colors} footerText={`共${filteredRows.length}笔 / 总${rowsData.length}笔`} />
     </ListPage>
   );
 }
 
 function CardRulesView({ colors }: { colors: any }) {
-  const rows = CARD_RULE_ROWS.map(row => [...row, actionLinks(colors, ['修改', '删除'])]);
+  const [rowsData, setRowsData] = useState<string[][]>(CARD_RULE_ROWS);
+  const [draftName, setDraftName] = useState('');
+  const [appliedName, setAppliedName] = useState('');
+  const filteredRows = useMemo(() => filterRowsByText(rowsData, appliedName, [0, 1, 2]), [appliedName, rowsData]);
+  const addRule = () => {
+    const name = window.prompt('请输入打卡规则名称', `新增打卡规则${rowsData.length + 1}`);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setRowsData(current => [[trimmed, '允许移动端与考勤机打卡', '默认考勤组', '手动创建', nowText(), '手动创建', nowText()], ...current]);
+  };
+  const handleAction = (label: string, row: string[]) => mutateNamedRow(label, row, rowsData, setRowsData, 0);
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['修改', '删除'], label => handleAction(label, row))]);
   return (
     <ListPage colors={colors}>
       <FilterBar colors={colors}>
-        <SearchField label="规则名称" placeholder="请输入规则名称" colors={colors} width={200} />
+        <SearchField label="规则名称" placeholder="请输入规则名称" colors={colors} width={200} value={draftName} onChange={setDraftName} />
         <div style={rightActionRow}>
-          <button style={outlineBtn(colors)}>重置</button>
-          <button style={primaryBtn(colors)}>查询</button>
+          <button onClick={() => { setDraftName(''); setAppliedName(''); }} style={outlineBtn(colors)}>重置</button>
+          <button onClick={() => setAppliedName(draftName)} style={primaryBtn(colors)}>查询</button>
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button style={primaryBtn(colors)}>新增打卡规则</button>
+        <button onClick={addRule} style={primaryBtn(colors)}>新增打卡规则</button>
       </Toolbar>
-      <DataTable columns={CARD_RULE_COLUMNS} rows={rows} colors={colors} footerText="共2笔" />
+      <DataTable columns={CARD_RULE_COLUMNS} rows={rows} colors={colors} footerText={`共${filteredRows.length}笔`} />
     </ListPage>
   );
 }
 
 function MobileClockView({ colors }: { colors: any }) {
+  const [rowsData, setRowsData] = useState<string[][]>(MOBILE_ROWS);
+  const [draftName, setDraftName] = useState('');
+  const [appliedName, setAppliedName] = useState('');
+  const filteredRows = useMemo(() => filterRowsByText(rowsData, appliedName, [0, 1, 2]), [appliedName, rowsData]);
+  const addScheme = () => {
+    const name = window.prompt('请输入移动打卡方案名称', `移动打卡方案${rowsData.length + 1}`);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setRowsData(current => [[trimmed, 'GPS/Wi-Fi/蓝牙均可打卡', '默认考勤组', '手动创建', nowText(), '手动创建', nowText()], ...current]);
+  };
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['修改', '删除'], label => mutateNamedRow(label, row, rowsData, setRowsData, 0))]);
   return (
     <ListPage colors={colors}>
       <FilterBar colors={colors}>
-        <SearchField label="方案名称" placeholder="请输入方案名称" colors={colors} width={210} />
+        <SearchField label="方案名称" placeholder="请输入方案名称" colors={colors} width={210} value={draftName} onChange={setDraftName} />
         <div style={rightActionRow}>
-          <button style={outlineBtn(colors)}>重置</button>
-          <button style={primaryBtn(colors)}>查询</button>
+          <button onClick={() => { setDraftName(''); setAppliedName(''); }} style={outlineBtn(colors)}>重置</button>
+          <button onClick={() => setAppliedName(draftName)} style={primaryBtn(colors)}>查询</button>
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button style={primaryBtn(colors)}>新建方案</button>
+        <button onClick={addScheme} style={primaryBtn(colors)}>新建方案</button>
       </Toolbar>
-      <DataTable columns={MOBILE_COLUMNS} rows={[]} colors={colors} emptyText="暂无内容" footerText="共0笔" />
+      <DataTable columns={MOBILE_COLUMNS} rows={rows} colors={colors} emptyText="暂无内容" footerText={`共${filteredRows.length}笔`} />
     </ListPage>
   );
 }
 
 function LocationView({ colors, showMore, onToggleMore }: { colors: any; showMore: boolean; onToggleMore: () => void }) {
-  const rows = LOCATION_ROWS.map(row => [...row, actionLinks(colors, ['修改', '删除'])]);
+  const [rowsData, setRowsData] = useState<string[][]>(LOCATION_ROWS);
+  const [draftFilters, setDraftFilters] = useState({ name: '', gps: '', wifi: '', bluetooth: '', mobile: '' });
+  const [appliedFilters, setAppliedFilters] = useState(draftFilters);
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+
+  const filteredRows = useMemo(() => rowsData.filter(row => {
+    return textIncludes(row[0], appliedFilters.name)
+      && textIncludes(row[2], appliedFilters.gps)
+      && textIncludes(row[4], appliedFilters.wifi)
+      && textIncludes(row[3], appliedFilters.bluetooth)
+      && textIncludes(row[5], appliedFilters.mobile);
+  }), [appliedFilters, rowsData]);
+  const rowIds = filteredRows.map(createRowId);
+
+  const resetFilters = () => {
+    const next = { name: '', gps: '', wifi: '', bluetooth: '', mobile: '' };
+    setDraftFilters(next);
+    setAppliedFilters(next);
+  };
+
+  const addLocation = (source = '手动创建') => {
+    const name = window.prompt('请输入上班地点名称', `上班地点${rowsData.length + 1}`);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setRowsData(current => [[trimmed, '默认考勤组', '上海市静安区南京西路', '蓝牙-A1', 'Office-WiFi', '默认移动打卡方案', source, nowText(), source, nowText()], ...current]);
+  };
+
+  const importLocation = () => {
+    setRowsData(current => [[`导入地点${current.length + 1}`, '华北大区', '杭州市西湖区', '蓝牙-IMPORT', 'Guest-WiFi', '导入移动方案', '导入', nowText(), '导入', nowText()], ...current]);
+  };
+
+  const deleteSelected = () => {
+    const visibleSelectedIds = rowIds.filter(rowId => selectedRowIds.has(rowId));
+    if (!visibleSelectedIds.length) {
+      window.alert('请先选择要删除的上班地点');
+      return;
+    }
+    if (!window.confirm(`确认删除选中的 ${visibleSelectedIds.length} 个上班地点？`)) return;
+    setRowsData(current => current.filter(row => !visibleSelectedIds.includes(createRowId(row))));
+    setSelectedRowIds(new Set());
+  };
+
+  const exportRows = () => {
+    const selectedRows = filteredRows.filter(row => selectedRowIds.has(createRowId(row)));
+    downloadCsv(LOCATION_COLUMNS.slice(0, -1), selectedRows.length ? selectedRows : filteredRows, selectedRows.length ? '上班地点-选中数据.csv' : '上班地点-筛选结果.csv');
+  };
+
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['修改', '删除'], label => mutateNamedRow(label, row, rowsData, setRowsData, 0))]);
   return (
     <ListPage colors={colors}>
       <FilterBar colors={colors}>
-        <SearchField label="上班地点" placeholder="请输入" colors={colors} width={180} />
-        <SearchField label="GPS打卡地址" placeholder="请输入" colors={colors} width={180} />
-        <SearchField label="打卡Wi-Fi" placeholder="请输入" colors={colors} width={160} />
-        <SearchField label="打卡蓝牙" placeholder="请输入" colors={colors} width={160} />
-        <SearchField label="移动打卡方案" placeholder="请输入" colors={colors} width={180} />
+        <SearchField label="上班地点" placeholder="请输入" colors={colors} width={180} value={draftFilters.name} onChange={value => setDraftFilters(current => ({ ...current, name: value }))} />
+        <SearchField label="GPS打卡地址" placeholder="请输入" colors={colors} width={180} value={draftFilters.gps} onChange={value => setDraftFilters(current => ({ ...current, gps: value }))} />
+        <SearchField label="打卡Wi-Fi" placeholder="请输入" colors={colors} width={160} value={draftFilters.wifi} onChange={value => setDraftFilters(current => ({ ...current, wifi: value }))} />
+        <SearchField label="打卡蓝牙" placeholder="请输入" colors={colors} width={160} value={draftFilters.bluetooth} onChange={value => setDraftFilters(current => ({ ...current, bluetooth: value }))} />
+        <SearchField label="移动打卡方案" placeholder="请输入" colors={colors} width={180} value={draftFilters.mobile} onChange={value => setDraftFilters(current => ({ ...current, mobile: value }))} />
         <div style={rightActionRow}>
-          <button style={outlineBtn(colors)}>重置</button>
-          <button style={primaryBtn(colors)}>查询</button>
+          <button onClick={resetFilters} style={outlineBtn(colors)}>重置</button>
+          <button onClick={() => setAppliedFilters(draftFilters)} style={primaryBtn(colors)}>查询</button>
           <button onClick={onToggleMore} style={toggleBtn(colors, showMore)}>
             更多筛选
             {showMore ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -486,70 +920,181 @@ function LocationView({ colors, showMore, onToggleMore }: { colors: any; showMor
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button style={primaryBtn(colors)}>新建上班地点</button>
-        <button style={outlineBtn(colors)}>导入</button>
-        <button style={outlineBtn(colors)}>导出</button>
-        <button style={outlineBtn(colors)}>批量删除</button>
+        <button onClick={() => addLocation()} style={primaryBtn(colors)}>新建上班地点</button>
+        <button onClick={importLocation} style={outlineBtn(colors)}>导入</button>
+        <button onClick={exportRows} style={outlineBtn(colors)}>导出</button>
+        <button onClick={deleteSelected} disabled={!selectedRowIds.size} style={selectedRowIds.size ? outlineBtn(colors) : disabledBtn(colors)}>批量删除</button>
       </Toolbar>
-      <DataTable columns={LOCATION_COLUMNS} rows={rows} colors={colors} withSelection emptyText="暂无内容" footerText="共0笔" />
+      <DataTable
+        columns={LOCATION_COLUMNS}
+        rows={rows}
+        colors={colors}
+        withSelection
+        rowIds={rowIds}
+        selectedRowIds={selectedRowIds}
+        onToggleRow={rowId => toggleSelectedRow(setSelectedRowIds, rowId)}
+        onToggleAll={() => toggleAllVisibleRows(setSelectedRowIds, rowIds)}
+        emptyText="暂无内容"
+        footerText={`共${filteredRows.length}笔`}
+      />
     </ListPage>
   );
 }
 
-function FaceView({ colors, showMore, onToggleMore }: { colors: any; showMore: boolean; onToggleMore: () => void }) {
-  const rows = FACE_ROWS.map(row => [...row, actionLinks(colors, ['详情', '发送录入提醒'])]);
+function FaceView({ colors, showMore, onToggleMore, faceRows, sourceInfo, loadError }: { colors: any; showMore: boolean; onToggleMore: () => void; faceRows: string[][]; sourceInfo?: string; loadError?: string }) {
+  const [rowsData, setRowsData] = useState<string[][]>(faceRows);
+  const [draftFilters, setDraftFilters] = useState({ employee: '', dept: '', group: '', status: '', start: '', end: '' });
+  const [appliedFilters, setAppliedFilters] = useState(draftFilters);
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+  const [hideDeparted, setHideDeparted] = useState(false);
+  const [reminderRecords, setReminderRecords] = useState<string[]>([]);
+  const [showReminderRecords, setShowReminderRecords] = useState(false);
+
+  useEffect(() => {
+    setRowsData(faceRows);
+    setSelectedRowIds(new Set());
+  }, [faceRows]);
+
+  const filteredRows = useMemo(() => rowsData.filter(row => {
+    const employeeKeyword = appliedFilters.employee.trim().toLowerCase();
+    const matchEmployee = !employeeKeyword || [row[0], row[1]].some(value => String(value ?? '').toLowerCase().includes(employeeKeyword));
+    const matchDept = !appliedFilters.dept || row[2] === appliedFilters.dept;
+    const matchGroup = !appliedFilters.group || row[4] === appliedFilters.group;
+    const matchStatus = !appliedFilters.status || row[6] === appliedFilters.status;
+    const matchDate = inDateRange(row[5], appliedFilters.start, appliedFilters.end);
+    const matchDeparted = !hideDeparted || !String(row[7] ?? '').includes('离职');
+    return matchEmployee && matchDept && matchGroup && matchStatus && matchDate && matchDeparted;
+  }), [appliedFilters, hideDeparted, rowsData]);
+  const rowIds = filteredRows.map(createRowId);
+  const selectedVisibleRows = filteredRows.filter(row => selectedRowIds.has(createRowId(row)));
+  const targetRows = selectedVisibleRows.length ? selectedVisibleRows : filteredRows;
+
+  const resetFilters = () => {
+    const next = { employee: '', dept: '', group: '', status: '', start: '', end: '' };
+    setDraftFilters(next);
+    setAppliedFilters(next);
+  };
+
+  const importFaces = () => {
+    const targetIds = new Set(targetRows.map(createRowId));
+    setRowsData(current => current.map(row => targetIds.has(createRowId(row)) ? setRowCell(setRowCell(row, 6, '已录入'), 9, '批量导入') : row));
+  };
+
+  const addReminderRecord = (message: string) => {
+    setReminderRecords(current => [`${nowText()} ${message}`, ...current]);
+    setShowReminderRecords(true);
+  };
+
+  const refreshFaces = () => {
+    const targetIds = new Set(targetRows.map(createRowId));
+    setRowsData(current => current.map(row => targetIds.has(createRowId(row)) ? setRowCell(row, 8, '已重刷') : row));
+  };
+
+  const deleteSelected = () => {
+    const visibleSelectedIds = rowIds.filter(rowId => selectedRowIds.has(rowId));
+    if (!visibleSelectedIds.length) {
+      window.alert('请先选择要删除的人脸记录');
+      return;
+    }
+    if (!window.confirm(`确认删除选中的 ${visibleSelectedIds.length} 条人脸记录？`)) return;
+    setRowsData(current => current.filter(row => !visibleSelectedIds.includes(createRowId(row))));
+    setSelectedRowIds(new Set());
+  };
+
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['详情', '发送录入提醒'], label => {
+    if (label === '发送录入提醒') {
+      addReminderRecord(`已向${row[0] ?? '-'}发送录入提醒`);
+      return;
+    }
+    window.alert(`人脸详情\n姓名：${row[0] ?? '-'}\n录入状态：${row[6] ?? '-'}`);
+  })]);
+  const deptOptions = uniqueOptions(rowsData, 2);
+  const groupOptions = uniqueOptions(rowsData, 4);
+  const statusOptions = uniqueOptions(rowsData, 6);
+
   return (
     <ListPage colors={colors}>
+      <SourceNotice sourceInfo={sourceInfo} loadError={loadError} />
       <InfoBanner colors={colors} messages={['员工打卡进件时，若【打卡】或【设置】-【人脸管理】未录入人脸，则看开启人脸识别打卡。若开启人脸识别打卡，首班打卡前须录入人脸。']} />
       <FilterBar colors={colors}>
-        <SearchField label="员工" placeholder="请输入姓名或员工号" colors={colors} width={200} showUserIcon />
-        <SelectField label="部门" placeholder="请选择" colors={colors} width={150} />
-        <SelectField label="考勤组" placeholder="请选择" colors={colors} width={150} />
-        <DateRangeField label="入职日期" colors={colors} width={240} />
-        <SelectField label="录入状态" placeholder="请选择" colors={colors} width={150} />
+        <SearchField label="员工" placeholder="请输入姓名或员工号" colors={colors} width={200} showUserIcon value={draftFilters.employee} onChange={value => setDraftFilters(current => ({ ...current, employee: value }))} />
+        <SelectField label="部门" placeholder="请选择" colors={colors} width={150} options={deptOptions} value={draftFilters.dept} onChange={value => setDraftFilters(current => ({ ...current, dept: value }))} />
+        <SelectField label="考勤组" placeholder="请选择" colors={colors} width={150} options={groupOptions} value={draftFilters.group} onChange={value => setDraftFilters(current => ({ ...current, group: value }))} />
+        <DateRangeField label="入职日期" colors={colors} width={240} start={draftFilters.start} end={draftFilters.end} onChange={(start, end) => setDraftFilters(current => ({ ...current, start, end }))} />
+        <SelectField label="录入状态" placeholder="请选择" colors={colors} width={150} options={statusOptions} value={draftFilters.status} onChange={value => setDraftFilters(current => ({ ...current, status: value }))} />
         <div style={rightActionRow}>
-          <button style={outlineBtn(colors)}>重置</button>
-          <button style={primaryBtn(colors)}>查询</button>
+          <button onClick={resetFilters} style={outlineBtn(colors)}>重置</button>
+          <button onClick={() => setAppliedFilters(draftFilters)} style={primaryBtn(colors)}>查询</button>
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button style={primaryBtn(colors)}>批量导入人脸</button>
-        <button style={outlineBtn(colors)}>配置录入提醒</button>
-        <button style={outlineBtn(colors)}>批量重刷</button>
-        <button style={outlineBtn(colors)}>批量删除</button>
+        <button onClick={importFaces} style={primaryBtn(colors)}>批量导入人脸</button>
+        <button onClick={() => addReminderRecord(`已配置录入提醒：覆盖${targetRows.length}人`)} style={outlineBtn(colors)}>配置录入提醒</button>
+        <button onClick={refreshFaces} style={outlineBtn(colors)}>批量重刷</button>
+        <button onClick={deleteSelected} disabled={!selectedRowIds.size} style={selectedRowIds.size ? outlineBtn(colors) : disabledBtn(colors)}>批量删除</button>
         <button onClick={onToggleMore} style={toggleBtn(colors, showMore)}>
           管理组织分组
           {showMore ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
         </button>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button style={textLink(colors)}>录入提醒记录</button>
+          <button onClick={() => setShowReminderRecords(current => !current)} style={textLink(colors)}>录入提醒记录</button>
           <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '12px', color: colors.textMuted }}>
-            <input type="checkbox" style={{ accentColor: colors.primary }} />
-            仅看待审核
+            <input type="checkbox" checked={hideDeparted} onChange={event => setHideDeparted(event.target.checked)} style={{ accentColor: colors.primary }} />
+            不显示离职员工
           </label>
         </div>
       </Toolbar>
-      <DataTable columns={FACE_COLUMNS} rows={rows} colors={colors} withSelection footerText="共1027笔" />
+      {showReminderRecords ? <InlineNotice colors={colors} text={reminderRecords.length ? reminderRecords.join('；') : '暂无录入提醒记录'} /> : null}
+      <DataTable
+        columns={FACE_COLUMNS}
+        rows={rows}
+        colors={colors}
+        withSelection
+        rowIds={rowIds}
+        selectedRowIds={selectedRowIds}
+        onToggleRow={rowId => toggleSelectedRow(setSelectedRowIds, rowId)}
+        onToggleAll={() => toggleAllVisibleRows(setSelectedRowIds, rowIds)}
+        footerText={`共${filteredRows.length}笔 / 总${rowsData.length}笔`}
+      />
     </ListPage>
   );
 }
 
 function DevicesView({ colors }: { colors: any }) {
+  const [selectedDevices, setSelectedDevices] = useState<Array<{ brand: string; model: string; addedAt: string }>>([]);
+  const addDevice = (brand: string) => {
+    const model = DEVICE_MODELS[brand as keyof typeof DEVICE_MODELS]?.[0] ?? `${brand}默认模板`;
+    setSelectedDevices(current => current.some(item => item.brand === brand && item.model === model) ? current : [{ brand, model, addedAt: nowText() }, ...current]);
+  };
+
   return (
     <div style={{ flex: 1, overflow: 'auto', padding: '14px 16px 20px' }}>
       <div style={{ backgroundColor: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, padding: '14px 16px', marginBottom: 14 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '6px 0 16px' }}>
-          <div style={{ width: 42, height: 42, borderRadius: '50%', backgroundColor: '#FFF3DA', color: '#F59E0B', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: 700 }}>!</div>
-          <div style={{ fontSize: '14px', color: colors.text, fontWeight: 600 }}>暂未选择考勤机</div>
-          <div style={{ fontSize: '12px', color: colors.textMuted }}>可添加以下4个品牌的考勤机</div>
-        </div>
+        {selectedDevices.length ? (
+          <div style={{ padding: '4px 0 16px' }}>
+            <div style={{ fontSize: '14px', color: colors.text, fontWeight: 600, marginBottom: 10 }}>已选择考勤机</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {selectedDevices.map(device => (
+                <span key={`${device.brand}-${device.model}`} style={{ padding: '6px 10px', borderRadius: 6, backgroundColor: colors.tableHeaderBg, color: colors.text, fontSize: '12px' }}>
+                  {device.brand} / {device.model} / {device.addedAt}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '6px 0 16px' }}>
+            <div style={{ width: 42, height: 42, borderRadius: '50%', backgroundColor: '#FFF3DA', color: '#F59E0B', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: 700 }}>!</div>
+            <div style={{ fontSize: '14px', color: colors.text, fontWeight: 600 }}>暂未选择考勤机</div>
+            <div style={{ fontSize: '12px', color: colors.textMuted }}>可添加以下4个品牌的考勤机</div>
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(180px, 1fr))', gap: 12 }}>
           {DEVICE_BRANDS.map(brand => (
             <div key={brand.name} style={{ border: `1px solid ${colors.tableBorder}`, borderRadius: 10, padding: '12px 14px', backgroundColor: colors.cardBg }}>
               <div style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: colors.tableHeaderBg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color: colors.text, marginBottom: 10 }}>{brand.name.slice(0, 2)}</div>
               <div style={{ fontSize: '13px', fontWeight: 600, color: colors.text, marginBottom: 6 }}>{brand.name}</div>
               <div style={{ fontSize: '12px', lineHeight: 1.6, color: colors.textMuted, minHeight: 48 }}>{brand.desc}</div>
-              <button style={{ ...outlineBtn(colors), marginTop: 10, height: 28, padding: '0 10px' }}>添加</button>
+              <button onClick={() => addDevice(brand.name)} style={{ ...outlineBtn(colors), marginTop: 10, height: 28, padding: '0 10px' }}>添加</button>
             </div>
           ))}
         </div>
@@ -574,105 +1119,165 @@ function DevicesView({ colors }: { colors: any }) {
 }
 
 function HolidayView({ colors }: { colors: any }) {
+  const [rowsData, setRowsData] = useState<string[][]>(HOLIDAY_ROWS);
+  const [draftName, setDraftName] = useState('');
+  const [appliedName, setAppliedName] = useState('');
+  const filteredRows = useMemo(() => filterRowsByText(rowsData, appliedName, [0, 2]), [appliedName, rowsData]);
+  const addHoliday = () => {
+    const name = window.prompt('请输入节假日方案名称', `节假日方案${rowsData.length + 1}`);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setRowsData(current => [[trimmed, '2026', '双休', '手动创建', nowText(), '手动创建', nowText()], ...current]);
+  };
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['编辑', '删除'], label => mutateNamedRow(label, row, rowsData, setRowsData, 0))]);
   return (
     <ListPage colors={colors}>
       <FilterBar colors={colors}>
-        <SearchField label="方案名称" placeholder="请输入方案名称" colors={colors} width={210} />
+        <SearchField label="方案名称" placeholder="请输入方案名称" colors={colors} width={210} value={draftName} onChange={setDraftName} />
         <div style={rightActionRow}>
-          <button style={outlineBtn(colors)}>重置</button>
-          <button style={primaryBtn(colors)}>查询</button>
+          <button onClick={() => { setDraftName(''); setAppliedName(''); }} style={outlineBtn(colors)}>重置</button>
+          <button onClick={() => setAppliedName(draftName)} style={primaryBtn(colors)}>查询</button>
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button style={primaryBtn(colors)}>新增节假日方案</button>
+        <button onClick={addHoliday} style={primaryBtn(colors)}>新增节假日方案</button>
       </Toolbar>
-      <DataTable columns={HOLIDAY_COLUMNS} rows={[]} colors={colors} emptyText="暂无内容" footerText="共0笔" />
+      <DataTable columns={HOLIDAY_COLUMNS} rows={rows} colors={colors} emptyText="暂无内容" footerText={`共${filteredRows.length}笔`} />
     </ListPage>
   );
 }
 
 function CalendarView({ colors }: { colors: any }) {
-  const rows = CALENDAR_ROWS.map(row => [...row, actionLinks(colors, ['编辑', '删除'])]);
+  const [rowsData, setRowsData] = useState<string[][]>(CALENDAR_ROWS);
+  const [draftFilters, setDraftFilters] = useState({ name: '', period: '' });
+  const [appliedFilters, setAppliedFilters] = useState(draftFilters);
+  const filteredRows = useMemo(() => rowsData.filter(row => textIncludes(row[0], appliedFilters.name) && textIncludes(row[1], appliedFilters.period)), [appliedFilters, rowsData]);
+  const addCalendar = () => {
+    const name = window.prompt('请输入司历方案名称', `司历方案${rowsData.length + 1}`);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setRowsData(current => [[trimmed, '当月1日至当月最后一天为【当月】的考勤周期', '周一、周二、周三、周四、周五', '工作日之和为应出勤天数', '默认考勤组', '手动创建', nowText(), '手动创建', nowText()], ...current]);
+  };
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['编辑', '删除'], label => mutateNamedRow(label, row, rowsData, setRowsData, 0))]);
   return (
     <ListPage colors={colors}>
       <FilterBar colors={colors}>
-        <SearchField label="方案名称" placeholder="请输入方案名称" colors={colors} width={210} />
-        <SelectField label="考勤周期" placeholder="请选择考勤周期" colors={colors} width={180} />
+        <SearchField label="方案名称" placeholder="请输入方案名称" colors={colors} width={210} value={draftFilters.name} onChange={value => setDraftFilters(current => ({ ...current, name: value }))} />
+        <SelectField label="考勤周期" placeholder="请选择考勤周期" colors={colors} width={180} options={uniqueOptions(rowsData, 1)} value={draftFilters.period} onChange={value => setDraftFilters(current => ({ ...current, period: value }))} />
         <div style={rightActionRow}>
-          <button style={outlineBtn(colors)}>重置</button>
-          <button style={primaryBtn(colors)}>查询</button>
+          <button onClick={() => { const next = { name: '', period: '' }; setDraftFilters(next); setAppliedFilters(next); }} style={outlineBtn(colors)}>重置</button>
+          <button onClick={() => setAppliedFilters(draftFilters)} style={primaryBtn(colors)}>查询</button>
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button style={primaryBtn(colors)}>新建司历方案</button>
+        <button onClick={addCalendar} style={primaryBtn(colors)}>新建司历方案</button>
       </Toolbar>
-      <DataTable columns={CALENDAR_COLUMNS} rows={rows} colors={colors} footerText="共2笔" />
+      <DataTable columns={CALENDAR_COLUMNS} rows={rows} colors={colors} footerText={`共${filteredRows.length}笔`} />
     </ListPage>
   );
 }
 
 function OvertimeRulesView({ colors }: { colors: any }) {
-  const rows = OVERTIME_RULE_ROWS.map(row => [...row, actionLinks(colors, ['查看', '修改', '删除'])]);
+  const [rowsData, setRowsData] = useState<string[][]>(OVERTIME_RULE_ROWS);
+  const [draftName, setDraftName] = useState('');
+  const [appliedName, setAppliedName] = useState('');
+  const [useDefault, setUseDefault] = useState(true);
+  const filteredRows = useMemo(() => filterRowsByText(rowsData, appliedName, [0, 1, 2]), [appliedName, rowsData]);
+  const importDefault = () => {
+    setRowsData(current => [[`默认加班规则${current.length + 1}`, '工作日/休息日/节假日均按默认口径核算', '默认考勤组', '系统默认', nowText(), '系统默认', nowText()], ...current]);
+    setUseDefault(true);
+  };
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['查看', '修改', '删除'], label => {
+    if (label === '查看') {
+      window.alert(`加班规则\n${row[0] ?? '-'}\n${row[1] ?? '-'}`);
+      return;
+    }
+    mutateNamedRow(label, row, rowsData, setRowsData, 0);
+  })]);
   return (
     <ListPage colors={colors}>
       <InfoBanner colors={colors} messages={['设置加班补偿方式、核算方式，完成后可在考勤管理中使用。']} />
       <FilterBar colors={colors}>
-        <SearchField label="规则名称" placeholder="请输入方案名称" colors={colors} width={210} />
+        <SearchField label="规则名称" placeholder="请输入方案名称" colors={colors} width={210} value={draftName} onChange={setDraftName} />
         <div style={rightActionRow}>
-          <button style={outlineBtn(colors)}>重置</button>
-          <button style={primaryBtn(colors)}>查询</button>
+          <button onClick={() => { setDraftName(''); setAppliedName(''); }} style={outlineBtn(colors)}>重置</button>
+          <button onClick={() => setAppliedName(draftName)} style={primaryBtn(colors)}>查询</button>
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button style={primaryBtn(colors)}>导入默认加班规则</button>
+        <button onClick={importDefault} style={primaryBtn(colors)}>导入默认加班规则</button>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '12px', color: colors.textMuted }}>
-            <ToggleSwitch checked colors={colors} />
+            <ToggleSwitch checked={useDefault} onClick={() => setUseDefault(current => !current)} colors={colors} />
             使用默认规则
           </label>
         </div>
       </Toolbar>
-      <DataTable columns={OVERTIME_RULE_COLUMNS} rows={rows} colors={colors} footerText="共2笔" />
+      <DataTable columns={OVERTIME_RULE_COLUMNS} rows={rows} colors={colors} footerText={`共${filteredRows.length}笔`} />
     </ListPage>
   );
 }
 
 function FieldRulesView({ colors }: { colors: any }) {
-  const rows = FIELD_RULE_ROWS.map(row => [...row, actionLinks(colors, ['修改', '删除'])]);
+  const [rowsData, setRowsData] = useState<string[][]>(FIELD_RULE_ROWS);
+  const [draftName, setDraftName] = useState('');
+  const [appliedName, setAppliedName] = useState('');
+  const filteredRows = useMemo(() => filterRowsByText(rowsData, appliedName, [0, 1, 2]), [appliedName, rowsData]);
+  const addRule = () => {
+    const name = window.prompt('请输入外勤规则名称', `外勤规则${rowsData.length + 1}`);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setRowsData(current => [[trimmed, '外勤打卡已启用 / 外出申请已启用', '默认考勤组', '手动创建', nowText(), '手动创建', nowText()], ...current]);
+  };
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['修改', '删除'], label => mutateNamedRow(label, row, rowsData, setRowsData, 0))]);
   return (
     <ListPage colors={colors}>
       <FilterBar colors={colors}>
-        <SearchField label="外勤规则" placeholder="请输入外勤规则名称" colors={colors} width={210} />
+        <SearchField label="外勤规则" placeholder="请输入外勤规则名称" colors={colors} width={210} value={draftName} onChange={setDraftName} />
         <div style={rightActionRow}>
-          <button style={outlineBtn(colors)}>重置</button>
-          <button style={primaryBtn(colors)}>查询</button>
+          <button onClick={() => { setDraftName(''); setAppliedName(''); }} style={outlineBtn(colors)}>重置</button>
+          <button onClick={() => setAppliedName(draftName)} style={primaryBtn(colors)}>查询</button>
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button style={primaryBtn(colors)}>新增外勤规则</button>
+        <button onClick={addRule} style={primaryBtn(colors)}>新增外勤规则</button>
       </Toolbar>
-      <DataTable columns={FIELD_RULE_COLUMNS} rows={rows} colors={colors} footerText="共1笔" />
+      <DataTable columns={FIELD_RULE_COLUMNS} rows={rows} colors={colors} footerText={`共${filteredRows.length}笔`} />
     </ListPage>
   );
 }
 
 function StatSchemesView({ colors }: { colors: any }) {
-  const rows = STAT_SCHEME_ROWS.map(row => [...row, actionLinks(colors, ['编辑', '复制', '删除'])]);
+  const [rowsData, setRowsData] = useState<string[][]>(STAT_SCHEME_ROWS);
+  const [draftFilters, setDraftFilters] = useState({ name: '', employee: '' });
+  const [appliedFilters, setAppliedFilters] = useState(draftFilters);
+  const filteredRows = useMemo(() => rowsData.filter(row => textIncludes(row[0], appliedFilters.name) && textIncludes(row.join(' '), appliedFilters.employee)), [appliedFilters, rowsData]);
+  const addScheme = () => {
+    const name = window.prompt('请输入统计方案名称', `统计方案${rowsData.length + 1}`);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setRowsData(current => [[trimmed, '当月1日至当月最后一天为【当月】的一个考勤统计周期', '部门：待配置', '部门：待配置', '手动创建', nowText(), '手动创建', nowText()], ...current]);
+  };
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['编辑', '复制', '删除'], label => mutateNamedRow(label, row, rowsData, setRowsData, 0))]);
   return (
     <ListPage colors={colors}>
       <InfoBanner colors={colors} messages={['什么是统计方案？统计方案用于在业务停止计算时配置业务截止周期、出勤统计周期以及考勤汇总统计项。']} />
       <FilterBar colors={colors}>
-        <SearchField label="方案名称" placeholder="请输入方案名称" colors={colors} width={210} />
-        <SearchField label="员工" placeholder="请输入姓名或员工号" colors={colors} width={210} showUserIcon />
+        <SearchField label="方案名称" placeholder="请输入方案名称" colors={colors} width={210} value={draftFilters.name} onChange={value => setDraftFilters(current => ({ ...current, name: value }))} />
+        <SearchField label="员工" placeholder="请输入姓名或员工号" colors={colors} width={210} showUserIcon value={draftFilters.employee} onChange={value => setDraftFilters(current => ({ ...current, employee: value }))} />
         <div style={rightActionRow}>
-          <button style={outlineBtn(colors)}>重置</button>
-          <button style={primaryBtn(colors)}>查询</button>
+          <button onClick={() => { const next = { name: '', employee: '' }; setDraftFilters(next); setAppliedFilters(next); }} style={outlineBtn(colors)}>重置</button>
+          <button onClick={() => setAppliedFilters(draftFilters)} style={primaryBtn(colors)}>查询</button>
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button style={primaryBtn(colors)}>新增方案</button>
+        <button onClick={addScheme} style={primaryBtn(colors)}>新增方案</button>
       </Toolbar>
-      <DataTable columns={STAT_SCHEME_COLUMNS} rows={rows} colors={colors} footerText="共1笔" />
+      <DataTable columns={STAT_SCHEME_COLUMNS} rows={rows} colors={colors} footerText={`共${filteredRows.length}笔`} />
     </ListPage>
   );
 }
@@ -698,17 +1303,67 @@ function Toolbar({ colors, children }: { colors: any; children: React.ReactNode 
   return <div style={{ padding: '8px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, display: 'flex', alignItems: 'center', gap: 8 }}>{children}</div>;
 }
 
-function DataTable({ columns, rows, colors, withSelection = false, emptyText = '暂无内容', footerText }: TableProps) {
+function DataTable({
+  columns,
+  rows,
+  colors,
+  withSelection = false,
+  rowIds = [],
+  selectedRowIds,
+  onToggleRow,
+  onToggleAll,
+  sortConfig,
+  onSortChange,
+  nonSortableColumnIndices = [],
+  emptyText = '暂无内容',
+  footerText,
+}: TableProps) {
+  const [internalSortConfig, setInternalSortConfig] = useState<TableSortConfig | null>(null);
+  const effectiveSortConfig = sortConfig ?? internalSortConfig;
+  const sortableBlocked = new Set([
+    ...nonSortableColumnIndices,
+    ...columns.map((column, index) => column === '操作' ? index : -1).filter(index => index >= 0),
+  ]);
+  const sortedEntries = useMemo(() => {
+    const entries = rows.map((row, index) => ({ row, rowId: rowIds[index] ?? String(index), originalIndex: index }));
+    if (!effectiveSortConfig) return entries;
+    return [...entries].sort((left, right) => {
+      const compared = compareTableValues(left.row[effectiveSortConfig.index], right.row[effectiveSortConfig.index], effectiveSortConfig.direction);
+      return compared || left.originalIndex - right.originalIndex;
+    });
+  }, [effectiveSortConfig, rowIds, rows]);
+  const changeSort = (index: number) => {
+    if (onSortChange) onSortChange(index);
+    else setInternalSortConfig(current => getNextTableSortConfig(current, index));
+  };
   const colSpan = columns.length + (withSelection ? 1 : 0);
+  const visibleRowIds = sortedEntries.map(entry => entry.rowId);
+  const allSelected = sortedEntries.length > 0 && visibleRowIds.every(rowId => selectedRowIds?.has(rowId));
   return (
     <div style={{ backgroundColor: colors.cardBg, overflow: 'auto' }}>
       <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ backgroundColor: colors.tableHeaderBg, position: 'sticky', top: 0, zIndex: 2 }}>
-            {withSelection ? <th style={{ ...th(colors), width: 42 }}><input type="checkbox" style={{ accentColor: colors.primary }} /></th> : null}
-            {columns.map(column => (
-              <th key={column} style={{ ...th(colors), minWidth: column.length >= 6 ? 132 : 108 }}>{column}</th>
-            ))}
+            {withSelection ? <th style={{ ...th(colors), width: 42 }}><input type="checkbox" checked={onToggleAll ? allSelected : undefined} onChange={onToggleAll} style={{ accentColor: colors.primary }} /></th> : null}
+            {columns.map((column, columnIndex) => {
+              const sortable = !sortableBlocked.has(columnIndex);
+              const active = effectiveSortConfig?.index === columnIndex;
+              return (
+                <th key={column} style={{ ...th(colors), minWidth: column.length >= 6 ? 132 : 108 }}>
+                  {sortable ? (
+                    <SortHeaderButton
+                      label={column}
+                      active={active}
+                      direction={active ? effectiveSortConfig?.direction : undefined}
+                      colors={colors}
+                      onClick={() => changeSort(columnIndex)}
+                    />
+                  ) : (
+                    column
+                  )}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
@@ -719,9 +1374,9 @@ function DataTable({ columns, rows, colors, withSelection = false, emptyText = '
               </td>
             </tr>
           ) : (
-            rows.map((row, index) => (
-              <tr key={index} style={{ backgroundColor: index % 2 === 0 ? colors.cardBg : colors.tableStripe }}>
-                {withSelection ? <td style={td(colors)}><input type="checkbox" style={{ accentColor: colors.primary }} /></td> : null}
+            sortedEntries.map(({ row, rowId }, index) => (
+              <tr key={rowId} style={{ backgroundColor: index % 2 === 0 ? colors.cardBg : colors.tableStripe }}>
+                {withSelection ? <td style={td(colors)}><input type="checkbox" checked={onToggleRow ? (selectedRowIds?.has(rowId) ?? false) : undefined} onChange={() => onToggleRow?.(rowId)} style={{ accentColor: colors.primary }} /></td> : null}
                 {row.map((cell, cellIndex) => <td key={cellIndex} style={td(colors)}>{cell}</td>)}
               </tr>
             ))
@@ -741,6 +1396,8 @@ function DataTable({ columns, rows, colors, withSelection = false, emptyText = '
 }
 
 function InfoBanner({ colors, messages }: { colors: any; messages: string[] }) {
+  const [visible, setVisible] = useState(true);
+  if (!visible) return null;
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 16px', backgroundColor: withAlpha(colors.primary, 0.08), borderBottom: `1px solid ${withAlpha(colors.primary, 0.14)}` }}>
       <AlertCircle size={14} style={{ color: colors.primary, marginTop: 1, flexShrink: 0 }} />
@@ -749,7 +1406,7 @@ function InfoBanner({ colors, messages }: { colors: any; messages: string[] }) {
           <span key={index} style={{ fontSize: '12px', color: colors.text }}>{messages.length > 1 ? `${index + 1}. ` : ''}{message}</span>
         ))}
       </div>
-      <button style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: colors.textMuted, cursor: 'pointer' }}>×</button>
+      <button onClick={() => setVisible(false)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: colors.textMuted, cursor: 'pointer' }}>×</button>
     </div>
   );
 }
@@ -762,12 +1419,15 @@ function TopTab({ label, active, onClick, colors }: { label: string; active: boo
   );
 }
 
-function SearchField({ label, placeholder, colors, width = 170, showUserIcon = false }: { label: string; placeholder: string; colors: any; width?: number; showUserIcon?: boolean }) {
+function SearchField({ label, placeholder, colors, width = 170, showUserIcon = false, value, onChange }: { label: string; placeholder: string; colors: any; width?: number; showUserIcon?: boolean; value?: string; onChange?: (value: string) => void }) {
+  const [innerValue, setInnerValue] = useState('');
+  const current = value ?? innerValue;
+  const setCurrent = (next: string) => onChange ? onChange(next) : setInnerValue(next);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ fontSize: '12px', color: colors.text, whiteSpace: 'nowrap' }}>{label}</span>
       <div style={fieldShell(colors, width)}>
-        <input placeholder={placeholder} style={textInput(colors)} />
+        <input value={current} onChange={event => setCurrent(event.target.value)} placeholder={placeholder} style={textInput(colors)} />
         {showUserIcon ? <Users size={12} style={{ color: colors.textMuted }} /> : null}
         <Search size={12} style={{ color: colors.textMuted }} />
       </div>
@@ -775,39 +1435,62 @@ function SearchField({ label, placeholder, colors, width = 170, showUserIcon = f
   );
 }
 
-function SelectField({ label, placeholder, colors, width = 148 }: { label: string; placeholder: string; colors: any; width?: number }) {
+function SelectField({ label, placeholder, colors, width = 148, options = [], value, onChange }: { label: string; placeholder: string; colors: any; width?: number; options?: string[]; value?: string; onChange?: (value: string) => void }) {
+  const [innerValue, setInnerValue] = useState('');
+  const current = value ?? innerValue;
+  const setCurrent = (next: string) => onChange ? onChange(next) : setInnerValue(next);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ fontSize: '12px', color: colors.text, whiteSpace: 'nowrap' }}>{label}</span>
       <div style={fieldShell(colors, width)}>
-        <span style={{ fontSize: '12px', color: colors.textMuted, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{placeholder}</span>
+        {options.length || onChange ? (
+          <select value={current} onChange={event => setCurrent(event.target.value)} style={{ ...textInput(colors), color: current ? colors.text : colors.textMuted }}>
+            <option value="">{placeholder}</option>
+            {options.map(option => <option key={option} value={option}>{option}</option>)}
+          </select>
+        ) : (
+          <span style={{ fontSize: '12px', color: colors.textMuted, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{placeholder}</span>
+        )}
         <ChevronDown size={12} style={{ color: colors.textMuted }} />
       </div>
     </div>
   );
 }
 
-function DateRangeField({ label, colors, width = 236 }: { label: string; colors: any; width?: number }) {
+function DateRangeField({ label, colors, width = 236, start, end, onChange }: { label: string; colors: any; width?: number; start?: string; end?: string; onChange?: (start: string, end: string) => void }) {
+  const [innerStart, setInnerStart] = useState('2026-05-01');
+  const [innerEnd, setInnerEnd] = useState('2026-05-31');
+  const currentStart = start ?? innerStart;
+  const currentEnd = end ?? innerEnd;
+  const setStart = (value: string) => onChange ? onChange(value, currentEnd) : setInnerStart(value);
+  const setEnd = (value: string) => onChange ? onChange(currentStart, value) : setInnerEnd(value);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ fontSize: '12px', color: colors.text, whiteSpace: 'nowrap' }}>{label}</span>
       <div style={fieldShell(colors, width)}>
         <Calendar size={12} style={{ color: colors.textMuted }} />
-        <input type="date" defaultValue="2026-05-01" style={dateInput(colors)} />
+        <input type="date" value={currentStart} onChange={event => setStart(event.target.value)} style={dateInput(colors)} />
         <span style={{ fontSize: '12px', color: colors.textMuted }}>—</span>
-        <input type="date" defaultValue="2026-05-31" style={dateInput(colors)} />
+        <input type="date" value={currentEnd} onChange={event => setEnd(event.target.value)} style={dateInput(colors)} />
       </div>
     </div>
   );
 }
 
-function CheckboxGroup({ label, items, colors }: { label: string; items: string[]; colors: any }) {
+function CheckboxGroup({ label, items, colors, value, onChange }: { label: string; items: string[]; colors: any; value?: string[]; onChange?: (value: string[]) => void }) {
+  const [innerValue, setInnerValue] = useState(items.filter((_, index) => index !== 1));
+  const current = value ?? innerValue;
+  const toggleItem = (item: string) => {
+    const next = current.includes(item) ? current.filter(valueItem => valueItem !== item) : [...current, item];
+    if (onChange) onChange(next);
+    else setInnerValue(next);
+  };
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       <span style={{ fontSize: '12px', color: colors.text, whiteSpace: 'nowrap' }}>{label}</span>
-      {items.map((item, index) => (
+      {items.map(item => (
         <label key={item} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '12px', color: colors.textMuted }}>
-          <input type="checkbox" defaultChecked={index !== 1} style={{ accentColor: colors.primary }} />
+          <input type="checkbox" checked={current.includes(item)} onChange={() => toggleItem(item)} style={{ accentColor: colors.primary }} />
           {item}
         </label>
       ))}
@@ -823,8 +1506,8 @@ function ToggleSwitch({ checked, onClick, colors }: { checked?: boolean; onClick
   );
 }
 
-function TagPill({ colors, label, count, active = false }: { colors: any; label: string; count: string; active?: boolean }) {
-  return <span style={{ padding: '4px 10px', borderRadius: 999, fontSize: '12px', color: active ? '#fff' : colors.textMuted, backgroundColor: active ? colors.primary : colors.tableHeaderBg }}>{label}({count})</span>;
+function TagPill({ colors, label, count, active = false, onClick }: { colors: any; label: string; count: string; active?: boolean; onClick?: () => void }) {
+  return <button onClick={onClick} style={{ border: 'none', padding: '4px 10px', borderRadius: 999, fontSize: '12px', color: active ? '#fff' : colors.textMuted, backgroundColor: active ? colors.primary : colors.tableHeaderBg, cursor: onClick ? 'pointer' : 'default' }}>{label}({count})</button>;
 }
 
 function EmptyState({ colors, text }: { colors: any; text: string }) {
@@ -836,6 +1519,283 @@ function EmptyState({ colors, text }: { colors: any; text: string }) {
       </div>
       <span style={{ fontSize: '12px', color: colors.textMuted }}>{text}</span>
     </div>
+  );
+}
+
+function getShiftRowId(row: string[]) {
+  return [row[0], row[1], row[5], row[7], row[8]].map(value => String(value ?? '')).join('|');
+}
+
+function setShiftRowCell(row: string[], index: number, value: string) {
+  const next = [...row];
+  while (next.length < SHIFT_COLUMNS.length - 1) next.push('-');
+  next[index] = value;
+  return next;
+}
+
+function getNextTableSortConfig(current: TableSortConfig | null, index: number): TableSortConfig {
+  if (!current || current.index !== index) return { index, direction: 'asc' };
+  return { index, direction: current.direction === 'asc' ? 'desc' : 'asc' };
+}
+
+function compareTableValues(left: unknown, right: unknown, direction: TableSortConfig['direction']) {
+  const factor = direction === 'asc' ? 1 : -1;
+  const leftText = String(left ?? '');
+  const rightText = String(right ?? '');
+  const leftNumber = Number(leftText.replace(/[^\d.-]/g, ''));
+  const rightNumber = Number(rightText.replace(/[^\d.-]/g, ''));
+
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && leftText !== '' && rightText !== '') {
+    return (leftNumber - rightNumber) * factor;
+  }
+
+  return leftText.localeCompare(rightText, 'zh-CN', { numeric: true, sensitivity: 'base' }) * factor;
+}
+
+function uniqueShiftTags(rows: string[][]) {
+  return Array.from(new Set(
+    rows
+      .map(row => String(row[3] ?? '').trim())
+      .filter(tag => tag && tag !== '-' && tag !== '●'),
+  ));
+}
+
+function normalizeShiftImportRows(rows: unknown[][]) {
+  return rows
+    .map(row => row.map(cell => String(cell ?? '').trim()))
+    .filter(row => row.some(Boolean))
+    .filter(row => row[0] && row[0] !== SHIFT_COLUMNS[0])
+    .map(row => row.slice(0, SHIFT_COLUMNS.length - 1));
+}
+
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+
+    if (char === '"' && quoted && next === '"') {
+      cell += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === ',' && !quoted) {
+      row.push(cell);
+      cell = '';
+    } else if ((char === '\n' || char === '\r') && !quoted) {
+      if (char === '\r' && next === '\n') index += 1;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += char;
+    }
+  }
+
+  row.push(cell);
+  rows.push(row);
+  return rows;
+}
+
+async function readShiftImportFile(file: File) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+    const XLSX = await import('xlsx');
+    const workbook = XLSX.read(await file.arrayBuffer());
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) return [];
+    const sheetRows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[firstSheetName], { header: 1 });
+    return normalizeShiftImportRows(sheetRows);
+  }
+
+  if (name.endsWith('.csv')) {
+    return normalizeShiftImportRows(parseCsv(await file.text()));
+  }
+
+  throw new Error('导入失败：仅支持 CSV、XLSX 或 XLS 文件');
+}
+
+function toCsv(rows: Array<Array<React.ReactNode>>) {
+  return rows.map(row => row.map(cell => {
+    const value = String(cell ?? '');
+    return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+  }).join(',')).join('\n');
+}
+
+function shiftActionLinks(colors: any, row: string[], handlers: { onDetail: () => void; onEdit: () => void; onMore: () => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <button onClick={handlers.onDetail} style={textLink(colors)}>详情</button>
+      <button onClick={handlers.onEdit} style={textLink(colors)}>修改</button>
+      <button onClick={handlers.onMore} style={textLink(colors)} title={`更多操作：${row[0] ?? ''}`}>...</button>
+    </div>
+  );
+}
+
+function rowActionLinks(colors: any, labels: string[], onAction: (label: string) => void) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {labels.map(label => (
+        <button key={label} onClick={() => onAction(label)} style={textLink(colors)}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+function createRowId(row: string[]) {
+  return row.map(value => String(value ?? '')).join('|');
+}
+
+function setRowCell(row: string[], index: number, value: string) {
+  const next = [...row];
+  while (next.length <= index) next.push('-');
+  next[index] = value;
+  return next;
+}
+
+function mutateNamedRow(
+  label: string,
+  row: string[],
+  _rowsData: string[][],
+  setRowsData: React.Dispatch<React.SetStateAction<string[][]>>,
+  nameIndex: number,
+) {
+  const rowId = createRowId(row);
+  if (label === '删除') {
+    if (!window.confirm(`确认删除「${row[nameIndex] ?? '当前记录'}」？`)) return;
+    setRowsData(current => current.filter(item => createRowId(item) !== rowId));
+    return;
+  }
+
+  if (label === '复制') {
+    setRowsData(current => {
+      const source = current.find(item => createRowId(item) === rowId) ?? row;
+      const copy = [...source];
+      copy[nameIndex] = `${source[nameIndex] ?? '复制记录'}-副本`;
+      return [copy, ...current];
+    });
+    return;
+  }
+
+  if (label === '修改' || label === '编辑') {
+    const nextName = window.prompt(`请输入${label === '编辑' ? '方案' : '记录'}名称`, String(row[nameIndex] ?? ''));
+    if (nextName === null) return;
+    const trimmed = nextName.trim();
+    if (!trimmed) return;
+    setRowsData(current => current.map(item => createRowId(item) === rowId ? setRowCell(item, nameIndex, trimmed) : item));
+    return;
+  }
+
+  window.alert(`${label}\n${row[nameIndex] ?? '当前记录'}`);
+}
+
+function filterRowsByText(rows: string[][], keyword: string, indices: number[]) {
+  const normalized = keyword.trim().toLowerCase();
+  if (!normalized) return rows;
+  return rows.filter(row => indices.some(index => String(row[index] ?? '').toLowerCase().includes(normalized)));
+}
+
+function textIncludes(value: unknown, keyword: string) {
+  const normalized = keyword.trim().toLowerCase();
+  return !normalized || String(value ?? '').toLowerCase().includes(normalized);
+}
+
+function uniqueOptions(rows: string[][], index: number) {
+  return Array.from(new Set(rows.map(row => String(row[index] ?? '').trim()).filter(value => value && value !== '-')));
+}
+
+function nowText() {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
+function toggleSelectedRow(setSelectedRowIds: React.Dispatch<React.SetStateAction<Set<string>>>, rowId: string) {
+  setSelectedRowIds(current => {
+    const next = new Set(current);
+    if (next.has(rowId)) next.delete(rowId);
+    else next.add(rowId);
+    return next;
+  });
+}
+
+function toggleAllVisibleRows(setSelectedRowIds: React.Dispatch<React.SetStateAction<Set<string>>>, rowIds: string[]) {
+  setSelectedRowIds(current => {
+    const allSelected = rowIds.length > 0 && rowIds.every(rowId => current.has(rowId));
+    if (allSelected) return new Set([...current].filter(rowId => !rowIds.includes(rowId)));
+    return new Set([...current, ...rowIds]);
+  });
+}
+
+function downloadCsv(columns: string[], rows: string[][], filename: string) {
+  if (!rows.length) {
+    window.alert('没有可导出的数据');
+    return;
+  }
+  const csv = toCsv([columns, ...rows]);
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.URL.revokeObjectURL(url);
+}
+
+function inDateRange(value: string | undefined, start: string, end: string) {
+  const date = String(value ?? '').slice(0, 10);
+  if (!date || date === '-') return true;
+  if (start && date < start) return false;
+  if (end && date > end) return false;
+  return true;
+}
+
+function InlineNotice({ colors, text }: { colors: any; text: string }) {
+  return <div style={{ margin: '8px 16px', padding: '8px 12px', borderRadius: 6, backgroundColor: colors.tableHeaderBg, border: `1px solid ${colors.tableBorder}`, fontSize: '12px', color: colors.text }}>{text}</div>;
+}
+
+function SortHeaderButton({
+  label,
+  active,
+  direction,
+  colors,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  direction?: TableSortConfig['direction'];
+  colors: any;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        border: 'none',
+        background: 'transparent',
+        padding: 0,
+        margin: 0,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        color: active ? colors.primary : colors.textMuted,
+        cursor: 'pointer',
+        fontSize: '12px',
+        fontWeight: 500,
+      }}
+    >
+      {label}
+      <span style={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 0.7 }}>
+        <ChevronUp size={10} style={{ color: active && direction === 'asc' ? colors.primary : colors.textMuted }} />
+        <ChevronDown size={10} style={{ color: active && direction === 'desc' ? colors.primary : colors.textMuted }} />
+      </span>
+    </button>
   );
 }
 
@@ -881,6 +1841,10 @@ function outlineBtn(colors: any): React.CSSProperties {
   return { height: 30, padding: '0 14px', border: `1px solid ${colors.inputBorder}`, borderRadius: 4, backgroundColor: 'transparent', color: colors.text, fontSize: '12px', cursor: 'pointer' };
 }
 
+function disabledBtn(colors: any): React.CSSProperties {
+  return { ...outlineBtn(colors), color: colors.textMuted, cursor: 'not-allowed', opacity: 0.55 };
+}
+
 function toggleBtn(colors: any, active: boolean): React.CSSProperties {
   return { ...outlineBtn(colors), display: 'flex', alignItems: 'center', gap: 4, color: active ? colors.primary : colors.text, borderColor: active ? colors.primary : colors.inputBorder, backgroundColor: active ? colors.badgeBlueBg : 'transparent' };
 }
@@ -901,12 +1865,3 @@ function td(colors: any): React.CSSProperties {
   return { padding: '9px 12px', fontSize: '12px', color: colors.text, borderBottom: `1px solid ${colors.tableBorder}`, whiteSpace: 'nowrap', verticalAlign: 'top' };
 }
 
-function actionLinks(colors: any, labels: string[]) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      {labels.map(label => (
-        <button key={label} onClick={() => showActionFeedback(label)} style={textLink(colors)}>{label}</button>
-      ))}
-    </div>
-  );
-}

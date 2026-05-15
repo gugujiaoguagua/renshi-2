@@ -1,15 +1,14 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
+import { fetchStatItems, saveStatItems, type StatItemRecord } from '../api/realData';
+
 import {
   Search, X, ChevronLeft, ChevronRight, ChevronDown,
   Plus, Trash2, Edit2, ArrowLeft, Info,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────
-type StatItem = {
-  id: number; name: string; module: string; category: string;
-  desc: string; enabled: boolean; hasFormula: boolean; dataType: string; isCustom: boolean;
-};
+type StatItem = StatItemRecord;
 type Formula = { id: number; name: string; expr: string };
 type View = 'list' | 'edit';
 type EditMode = 'add' | 'edit';
@@ -123,9 +122,14 @@ function SectionCard({ title, children, colors }: { title: string; children: Rea
 }
 
 // ─── Edit Page ────────────────────────────────
-function EditPage({ mode, item, colors, onBack }: {
-  mode: EditMode; item: StatItem | null; colors: any; onBack: () => void;
+function EditPage({ mode, item, colors, onBack, onSave }: {
+  mode: EditMode;
+  item: StatItem | null;
+  colors: any;
+  onBack: () => void;
+  onSave: (next: Omit<StatItem, 'id'> & { id?: number }) => Promise<void>;
 }) {
+
   const [name, setName]               = useState(item?.name ?? '');
   const [module, setModule]           = useState(item?.module ?? '基础考勤');
   const [dataType, setDataType]       = useState(item?.dataType ?? '数值型');
@@ -145,8 +149,40 @@ function EditPage({ mode, item, colors, onBack }: {
   const delFormula = (id: number) => setFormulas(p => p.filter(f => f.id !== id));
   const updateFormula = (id: number, field: 'name' | 'expr', val: string) =>
     setFormulas(p => p.map(f => f.id === id ? { ...f, [field]: val } : f));
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      window.alert('请先填写统计项名称');
+      return;
+    }
+
+    const payload: Omit<StatItem, 'id'> & { id?: number } = {
+      id: item?.id,
+      name: trimmedName,
+      module,
+      category,
+      desc: userDesc.trim() || `自定义统计项：${trimmedName}`,
+      enabled: item?.enabled ?? true,
+      hasFormula: formulas.some(f => f.name.trim() || f.expr.trim()),
+      dataType,
+      isCustom: item?.isCustom ?? true,
+    };
+
+    try {
+      setSaving(true);
+      await onSave(payload);
+      onBack();
+    } catch (_error) {
+      window.alert('保存失败，请检查后端服务');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
+
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: colors.appBg, overflow: 'hidden' }}>
       {/* Header */}
       <div style={{ backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
@@ -246,9 +282,12 @@ function EditPage({ mode, item, colors, onBack }: {
 
       {/* Footer */}
       <div style={{ backgroundColor: colors.cardBg, borderTop: `1px solid ${colors.cardBorder}`, padding: '12px 20px', display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0 }}>
-        <button onClick={onBack} style={oBtn(colors)}>取消</button>
-        <button onClick={onBack} style={pBtn(colors)}>保存</button>
+        <button onClick={onBack} disabled={saving} style={oBtn(colors)}>取消</button>
+        <button onClick={handleSave} disabled={saving} style={{ ...pBtn(colors), opacity: saving ? 0.72 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>
+          {saving ? '保存中...' : '保存'}
+        </button>
       </div>
+
     </div>
   );
 }
@@ -289,12 +328,70 @@ export default function StatItemsManagement() {
   const [pageSize, setPageSize]   = useState(20);
   const [jumpPage, setJumpPage]   = useState('');
   const [deleteTarget, setDeleteTarget] = useState<StatItem | null>(null);
+  const [sourceFile, setSourceFile] = useState('');
+  const [loadError, setLoadError] = useState('');
+
+  const loadStatItems = useCallback(async () => {
+    try {
+      const res = await fetchStatItems();
+      if (res.rows?.length) {
+        setItems(res.rows);
+      }
+      setSourceFile(res.sourceFile || '');
+      setLoadError('');
+    } catch (_error) {
+      setLoadError('真实统计项连接失败，当前展示静态配置');
+    }
+  }, []);
+
+  useEffect(() => {
+    loadStatItems();
+  }, [loadStatItems]);
 
   const openEdit = (item: StatItem) => { setEditItem(item); setEditMode('edit'); setView('edit'); };
   const openAdd = () => { setEditItem(null); setEditMode('add'); setView('edit'); };
 
-  const toggleEnabled = (id: number) => setItems(p => p.map(i => i.id === id ? { ...i, enabled: !i.enabled } : i));
-  const deleteItem = (id: number) => { setItems(p => p.filter(i => i.id !== id)); setDeleteTarget(null); };
+  const persistStatItems = useCallback(async (nextItems: StatItem[]) => {
+    const saved = await saveStatItems(nextItems);
+    setSourceFile(saved.sourceFile || '本地持久化数据 data-store.json');
+    setLoadError('');
+  }, []);
+
+  const handleEditSave = useCallback(async (next: Omit<StatItem, 'id'> & { id?: number }) => {
+    let nextItems: StatItem[] = [];
+
+    setItems(current => {
+      nextItems = next.id
+        ? current.map(item => item.id === next.id ? { ...item, ...next, id: next.id } : item)
+        : [{ ...next, id: Math.max(0, ...current.map(item => item.id)) + 1 }, ...current];
+      return nextItems;
+    });
+
+    await persistStatItems(nextItems);
+  }, [persistStatItems]);
+
+
+  const toggleEnabled = (id: number) => {
+    setItems(current => {
+      const nextItems = current.map(item => item.id === id ? { ...item, enabled: !item.enabled } : item);
+      persistStatItems(nextItems).catch(() => {
+        setLoadError('统计项保存失败，请检查后端服务');
+      });
+      return nextItems;
+    });
+  };
+
+  const deleteItem = (id: number) => {
+    setItems(current => {
+      const nextItems = current.filter(item => item.id !== id);
+      persistStatItems(nextItems).catch(() => {
+        setLoadError('统计项保存失败，请检查后端服务');
+      });
+      return nextItems;
+    });
+    setDeleteTarget(null);
+  };
+
 
   const filtered = items.filter(i => {
     if (category !== '全部' && i.category !== category) return false;
@@ -317,7 +414,18 @@ export default function StatItemsManagement() {
   const getPages = (): (number | '...')[] =>
     totalPages <= 7 ? Array.from({ length: totalPages }, (_, i) => i + 1) : [1, 2, 3, '...', totalPages];
 
-  if (view === 'edit') return <EditPage mode={editMode} item={editItem} colors={colors} onBack={() => setView('list')}/>;
+  if (view === 'edit') {
+    return (
+      <EditPage
+        mode={editMode}
+        item={editItem}
+        colors={colors}
+        onSave={handleEditSave}
+        onBack={() => setView('list')}
+      />
+    );
+  }
+
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: colors.appBg, overflow: 'hidden' }}>
@@ -345,6 +453,13 @@ export default function StatItemsManagement() {
           </div>
         </div>
       </div>
+
+      {(sourceFile || loadError) && (
+        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>
+          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
+          {loadError ? ` ${loadError}` : ''}
+        </div>
+      )}
 
       {/* ── Action bar ───────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0, flexWrap: 'wrap' }}>

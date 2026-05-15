@@ -47,6 +47,7 @@ export const router = createBrowserRouter([
       { path: 'attendance/reports',         Component: UnderDevelopment },
       { path: 'attendance/stat-items',      Component: StatItemsManagement },
       { path: 'attendance/external-data',   Component: ExternalDataManagement },
+      { path: 'external-data-management', element: <Navigate to="/attendance/external-data" replace /> },
       { path: 'attendance/anomaly', Component: AnomalyManagement },
       { path: 'attendance/anomaly-biz', Component: AnomalyManagement },
       { path: 'attendance/clock-records', Component: ClockInRecords },

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
+import { fetchDailyAttendanceEmployees, saveDailyAttendanceEmployees, type DailyAttendanceEmployee as RealDailyEmployee } from '../api/realData';
 import {
   Calendar, Search, ChevronDown, ChevronLeft, ChevronRight,
   ChevronUp, X, Settings2, Filter, Upload, Plus, Trash2,
@@ -12,15 +13,7 @@ type ViewMode = 'main' | 'import';
 type ImportStep = 1 | 2 | 3;
 type ModalType = 'clock-patch' | 'field-trip' | 'leave' | 'overtime' | 'field-out' | 'calc-range' | null;
 
-type DailyEmployee = {
-  name: string; confirmStatus: '已确认' | '未确认';
-  empId: string; date: string; dept: string; position: string;
-  bizGroup: string; deptFullPath: string; regularDate: string;
-  attendGroup: string; shiftName: string; dateType: string; weekday: string;
-  attendResult: '正常' | '异常' | '休息';
-  anomalyDesc: string;
-  taskSummary: string; normalHours: number; lateMinutes: number;
-};
+type DailyEmployee = RealDailyEmployee;
 
 type Trip = { id: number; fromCity: string; toCity: string; startDate: string; startTime: string; endDate: string; endTime: string; tripType: '往返' | '单程' };
 
@@ -96,7 +89,7 @@ const EMPLOYEES: DailyEmployee[] = [
   { name: '周誓',   confirmStatus: '已确认', empId: 'CP25021', date: '2026-05-06', dept: '工艺开发部',   position: '高级工艺工程师',     bizGroup: '', deptFullPath: '产品研发中心/工艺', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
   { name: '赵继磊', confirmStatus: '已确认', empId: 'CP25022', date: '2026-05-06', dept: '技术服务组',   position: '中级技术工程师',     bizGroup: '', deptFullPath: '产品研发中心/技术', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
   { name: '行健磊', confirmStatus: '未确认', empId: 'CP25023', date: '2026-05-06', dept: '技术服务组',   position: '业务技术工程师',     bizGroup: '', deptFullPath: '产品研发中心/技术', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '正常', anomalyDesc: '',    taskSummary: '正常', normalHours: 8,  lateMinutes: 0 },
-];
+].slice(0, 5);
 
 // ─── Hooks ───────────────────────────────────
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, cb: () => void) {
@@ -372,23 +365,28 @@ function ColPanel({ colors, colOrder, onColOrderChange, freezeCount, onFreezeCha
 }
 
 // ─── Shared filter select ─────────────────────
-function FilterSelect({ label, options, colors }: { label: string; options: string[]; colors: any }) {
+function FilterSelect({ label, options, colors, value, onChange }: { label: string; options: string[]; colors: any; value?: string; onChange?: (value: string) => void }) {
   const [open, setOpen] = useState(false);
-  const [val, setVal] = useState('');
+  const [innerValue, setInnerValue] = useState('');
+  const val = value ?? innerValue;
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(ref, () => setOpen(false));
+  const setValue = (next: string) => {
+    if (onChange) onChange(next);
+    else setInnerValue(next);
+  };
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <div onClick={() => setOpen(v => !v)} style={inputBox(colors, open)}>
         {label && <span style={{ color: colors.text, fontSize: '12px', whiteSpace: 'nowrap' }}>{label}</span>}
         <span style={{ flex: 1, color: val ? colors.text : colors.textMuted, marginLeft: label ? 4 : 0, fontSize: '12px' }}>{val || '请选择'}</span>
-        {val ? <X size={11} style={{ color: colors.textMuted }} onClick={e => { e.stopPropagation(); setVal(''); }} />
+        {val ? <X size={11} style={{ color: colors.textMuted }} onClick={e => { e.stopPropagation(); setValue(''); }} />
           : <ChevronDown size={11} style={{ color: colors.textMuted }} />}
       </div>
       {open && (
         <div style={ddBox(colors)}>
           {options.map(opt => (
-            <div key={opt} onClick={() => { setVal(opt); setOpen(false); }} style={ddItem(colors, val === opt)}
+            <div key={opt} onClick={() => { setValue(opt); setOpen(false); }} style={ddItem(colors, val === opt)}
               onMouseEnter={e => { if (val !== opt) (e.currentTarget as HTMLElement).style.backgroundColor = colors.tableRowHover; }}
               onMouseLeave={e => { if (val !== opt) (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}>
               {opt}
@@ -757,6 +755,37 @@ export default function DailyAttendanceStats() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
   const [jumpPage, setJumpPage] = useState('');
+  const [activeStatFilter, setActiveStatFilter] = useState<string | null>(null);
+  const [employees, setEmployees] = useState<DailyEmployee[]>(EMPLOYEES);
+  const [sourceFile, setSourceFile] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [initialDateRange, setInitialDateRange] = useState({ start: '2026-05-06', end: '2026-05-06' });
+
+  const loadDailyAttendance = useCallback(async (syncDateRange = false) => {
+    try {
+      const res = await fetchDailyAttendanceEmployees();
+      if (res.rows?.length) {
+        setEmployees(res.rows);
+        const dates = res.rows.map(row => row.date).filter(Boolean).sort();
+        if (dates.length) {
+          const range = { start: dates[0], end: dates[dates.length - 1] };
+          setInitialDateRange(range);
+          if (syncDateRange) {
+            setDateStart(range.start);
+            setDateEnd(range.end);
+          }
+        }
+      }
+      setSourceFile(res.sourceFile || '');
+      setLoadError('');
+    } catch (_error) {
+      setLoadError('真实数据连接失败，当前展示静态数据');
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDailyAttendance(true);
+  }, [loadDailyAttendance]);
 
   const DEFAULT_FILTERS: DailyFilters = {
     dept: '',
@@ -790,22 +819,30 @@ export default function DailyAttendanceStats() {
   const resetFilters = () => {
     setDraftFilters(DEFAULT_FILTERS);
     setAppliedFilters(DEFAULT_FILTERS);
-    setDateStart('2026-05-06');
-    setDateEnd('2026-05-06');
+    setActiveStatFilter(null);
+    setDateStart(initialDateRange.start);
+    setDateEnd(initialDateRange.end);
+    setSortCol(null);
+    setSortDir('asc');
     setCurrentPage(1);
     setJumpPage('');
     setCheckedRows(new Set());
   };
 
-  const handleRefresh = () => {
-    setAppliedFilters({ ...draftFilters });
+  const handleRefresh = async () => {
+    await loadDailyAttendance(true);
+    setDraftFilters(DEFAULT_FILTERS);
+    setAppliedFilters(DEFAULT_FILTERS);
+    setActiveStatFilter(null);
+    setSortCol(null);
+    setSortDir('asc');
     setCurrentPage(1);
     setJumpPage('');
     setCheckedRows(new Set());
     setShowColPanel(false);
   };
 
-  const filteredEmployees = EMPLOYEES.filter(emp => {
+  const baseFilteredEmployees = employees.filter(emp => {
     const keyword = appliedFilters.empSearch.trim().toLowerCase();
     const matchKeyword = !keyword || emp.name.toLowerCase().includes(keyword) || emp.empId.toLowerCase().includes(keyword);
     const matchDept = !appliedFilters.dept || emp.dept === appliedFilters.dept;
@@ -820,6 +857,22 @@ export default function DailyAttendanceStats() {
 
     return matchKeyword && matchDept && matchGroup && matchShift && matchDateType && matchResult && matchLock && matchConfirm && matchDateRange && matchResigned;
   });
+
+  const matchesStatFilter = (emp: DailyEmployee) => {
+    if (!activeStatFilter || activeStatFilter === 'all') return true;
+    if (activeStatFilter === 'normal') return emp.attendResult === '正常';
+    if (activeStatFilter === 'unplanned') return emp.anomalyDesc.includes('未排班') || emp.shiftName.includes('未排班');
+    if (activeStatFilter === 'absent') return emp.anomalyDesc.includes('旷工');
+    if (activeStatFilter === 'late') return emp.lateMinutes > 0 || emp.anomalyDesc.includes('迟到');
+    return true;
+  };
+  const filteredEmployees = baseFilteredEmployees.filter(matchesStatFilter);
+  const applyStatFilter = (key: string) => {
+    setActiveStatFilter(current => current === key ? null : key);
+    setCurrentPage(1);
+    setJumpPage('');
+    setCheckedRows(new Set());
+  };
 
   const sortedEmployees = [...filteredEmployees].sort((a, b) => {
     if (!sortCol) return 0;
@@ -859,6 +912,47 @@ export default function DailyAttendanceStats() {
   const getPages = (): (number | '...')[] => totalPages <= 7 ? Array.from({ length: totalPages }, (_, i) => i + 1) : [1, 2, 3, 4, 5, '...', totalPages];
 
   const colDefs = colOrder.map(k => SETTABLE_COLS.find(c => c.key === k)!).filter(Boolean);
+
+  const selectedEmpIds = checkedRows.size ? checkedRows : new Set(pagedEmployees.map(emp => emp.empId));
+  const persistEmployees = (nextRows: DailyEmployee[]) => {
+    saveDailyAttendanceEmployees(nextRows).then(res => {
+      setSourceFile(res.sourceFile || '本地持久化数据 data-store.json');
+      setLoadError('');
+    }).catch(() => setLoadError('保存失败：持久化服务不可用'));
+  };
+  const updateEmployeesPersistently = (producer: (current: DailyEmployee[]) => DailyEmployee[]) => {
+    setEmployees(current => {
+      const next = producer(current);
+      persistEmployees(next);
+      return next;
+    });
+    setCheckedRows(new Set());
+  };
+  const mutateTargetRows = (updater: (emp: DailyEmployee) => DailyEmployee) => {
+    updateEmployeesPersistently(current => current.map(emp => selectedEmpIds.has(emp.empId) ? updater(emp) : emp));
+  };
+  const lockRows = (scope: 'page' | 'all') => {
+    const ids = new Set((scope === 'all' ? sortedEmployees : pagedEmployees).map(emp => emp.empId));
+    updateEmployeesPersistently(current => current.map(emp => ids.has(emp.empId) ? { ...emp, confirmStatus: '已确认' } : emp));
+  };
+  const unlockRows = () => mutateTargetRows(emp => ({ ...emp, confirmStatus: '未确认' }));
+  const clearDeduction = (keyword: string) => mutateTargetRows(emp => ({ ...emp, anomalyDesc: emp.anomalyDesc.replace(keyword, '').trim(), lateMinutes: keyword === '迟到' ? 0 : emp.lateMinutes }));
+  const deleteTargetRows = () => {
+    updateEmployeesPersistently(current => current.filter(emp => !selectedEmpIds.has(emp.empId)));
+  };
+  const exportRows = (targetRows: DailyEmployee[]) => {
+    const headers = colDefs.map(col => col.label);
+    const csv = [headers, ...targetRows.map(emp => colDefs.map(col => String((emp as any)[col.key] ?? '')))]
+      .map(row => row.map(cell => /[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell).join(','))
+      .join('\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = '日考勤统计.csv';
+    link.click();
+    window.URL.revokeObjectURL(url);
+  };
 
   const renderCell = (emp: DailyEmployee, key: string): React.ReactNode => {
     if (key === 'name') return <span style={{ color: colors.primary, cursor: 'pointer', fontWeight: 500 }}>{emp.name}</span>;
@@ -931,38 +1025,48 @@ export default function DailyAttendanceStats() {
         )}
       </div>
 
+      {(sourceFile || loadError) && (
+        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>
+          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
+          {loadError ? ` ${loadError}` : ''}
+        </div>
+      )}
+
       {/* ── Stats bar ────────────────────── */}
       <div style={{ backgroundColor: colors.statCardBg, borderBottom: `1px solid ${colors.divider}`, padding: '7px 16px', flexShrink: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
         {[
-          { label: '总人数(人次)', value: filteredEmployees.length, color: colors.text },
-          { label: '打卡', value: filteredEmployees.filter(emp => emp.attendResult === '正常').length, color: '#059669' },
-          { label: '未排班', value: filteredEmployees.filter(emp => emp.anomalyDesc.includes('未排班')).length, color: colors.textMuted },
-          { label: '旷工', value: filteredEmployees.filter(emp => emp.anomalyDesc.includes('旷工')).length, color: '#DC2626' },
-          { label: '迟到', value: filteredEmployees.filter(emp => emp.lateMinutes > 0).length, color: colors.primary },
-        ].map((s, i, arr) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 4, paddingRight: 16, marginRight: 16, borderRight: i < arr.length - 1 ? `1px solid ${colors.divider}` : 'none' }}>
-            <span style={{ fontSize: '12px', color: colors.textMuted }}>{s.label}</span>
-            <span style={{ fontSize: '15px', fontWeight: 700, color: s.color }}>{s.value}</span>
-          </div>
-        ))}
+          { key: 'all', label: '总人数(人次)', value: baseFilteredEmployees.length, color: colors.text },
+          { key: 'normal', label: '打卡', value: baseFilteredEmployees.filter(emp => emp.attendResult === '正常').length, color: '#059669' },
+          { key: 'unplanned', label: '未排班', value: baseFilteredEmployees.filter(emp => emp.anomalyDesc.includes('未排班') || emp.shiftName.includes('未排班')).length, color: colors.textMuted },
+          { key: 'absent', label: '旷工', value: baseFilteredEmployees.filter(emp => emp.anomalyDesc.includes('旷工')).length, color: '#DC2626' },
+          { key: 'late', label: '迟到', value: baseFilteredEmployees.filter(emp => emp.lateMinutes > 0 || emp.anomalyDesc.includes('迟到')).length, color: colors.primary },
+        ].map((s, i, arr) => {
+          const active = activeStatFilter === s.key || (!activeStatFilter && s.key === 'all');
+          return (
+            <div key={i} onClick={() => applyStatFilter(s.key)} style={{ display: 'flex', alignItems: 'baseline', gap: 4, padding: '2px 8px', marginRight: 8, borderRight: i < arr.length - 1 ? `1px solid ${colors.divider}` : 'none', cursor: 'pointer', borderRadius: 4, backgroundColor: active ? `${colors.primary}12` : 'transparent' }}>
+              <span style={{ fontSize: '12px', color: active ? colors.primary : colors.textMuted }}>{s.label}</span>
+              <span style={{ fontSize: '15px', fontWeight: 700, color: s.color }}>{s.value}</span>
+            </div>
+          );
+        })}
       </div>
 
       {/* ── Toolbar ──────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0, flexWrap: 'wrap' }}>
         <NestedDropdown label="核算考勤" tooltip="对当天人员考勤情况进行统计，包含打卡，早退等，敬请期待" colors={colors} items={[
-          { label: '补卡',     children: [{ label: '添加记录', action: () => setModal('clock-patch') }, { label: '发起流程' }] },
-          { label: '请假',     children: [{ label: '添加记录', action: () => setModal('leave') }, { label: '发起流程' }] },
-          { label: '外出',     children: [{ label: '添加记录', action: () => setModal('field-out') }, { label: '发起流程' }] },
-          { label: '出差',     children: [{ label: '添加记录', action: () => setModal('field-trip') }, { label: '发起流程' }] },
-          { label: '变更班次', children: [{ label: '单人变更' }, { label: '批量变更' }] },
-          { label: '核销异常', action: () => {} },
+          { label: '补卡',     children: [{ label: '添加记录', action: () => setModal('clock-patch') }, { label: '发起流程', action: () => setModal('clock-patch') }] },
+          { label: '请假',     children: [{ label: '添加记录', action: () => setModal('leave') }, { label: '发起流程', action: () => setModal('leave') }] },
+          { label: '外出',     children: [{ label: '添加记录', action: () => setModal('field-out') }, { label: '发起流程', action: () => setModal('field-out') }] },
+          { label: '出差',     children: [{ label: '添加记录', action: () => setModal('field-trip') }, { label: '发起流程', action: () => setModal('field-trip') }] },
+          { label: '变更班次', children: [{ label: '单人变更', action: () => mutateTargetRows(emp => ({ ...emp, shiftName: '已变更班次' })) }, { label: '批量变更', action: () => mutateTargetRows(emp => ({ ...emp, shiftName: '已批量变更班次' })) }] },
+          { label: '核销异常', action: () => mutateTargetRows(emp => ({ ...emp, anomalyDesc: '', attendResult: '正常' })) },
         ]} />
-        <FlatDropdown label="处理异常" colors={colors} items={[{ label: '加记异常' }, { label: '请假申请', action: () => setModal('leave') }, { label: '出差申请', action: () => setModal('field-trip') }, { label: '加班申请', action: () => setModal('overtime') }, { label: '外出申请', action: () => setModal('field-out') }, { label: '补卡申请', action: () => setModal('clock-patch') }]} />
-        <FlatDropdown label="锁定" colors={colors} items={[{ label: '锁定当前页' }, { label: '锁定全部' }]} />
-        <FlatDropdown label="解扣" colors={colors} items={[{ label: '解除迟到扣除' }, { label: '解除早退扣除' }, { label: '解除旷工扣除' }]} />
+        <FlatDropdown label="处理异常" colors={colors} items={[{ label: '加记异常', action: () => mutateTargetRows(emp => ({ ...emp, anomalyDesc: '手动加记异常', attendResult: '异常' })) }, { label: '请假申请', action: () => setModal('leave') }, { label: '出差申请', action: () => setModal('field-trip') }, { label: '加班申请', action: () => setModal('overtime') }, { label: '外出申请', action: () => setModal('field-out') }, { label: '补卡申请', action: () => setModal('clock-patch') }]} />
+        <FlatDropdown label="锁定" colors={colors} items={[{ label: '锁定当前页', action: () => lockRows('page') }, { label: '锁定全部', action: () => lockRows('all') }]} />
+        <FlatDropdown label="解扣" colors={colors} items={[{ label: '解除迟到扣除', action: () => clearDeduction('迟到') }, { label: '解除早退扣除', action: () => clearDeduction('早退') }, { label: '解除旷工扣除', action: () => clearDeduction('旷工') }]} />
         <button style={outlineBtn(colors)} onClick={() => setViewMode('import')}>导入</button>
-        <FlatDropdown label="导出" colors={colors} items={[{ label: '全部导出' }, { label: '自定义导出' }]} />
-        <FlatDropdown label="更多操作" colors={colors} items={[{ label: '批量确认' }, { label: '批量撤销确认' }, { label: '批量删除记录' }]} />
+        <FlatDropdown label="导出" colors={colors} items={[{ label: '全部导出', action: () => exportRows(sortedEmployees) }, { label: '自定义导出', action: () => exportRows(pagedEmployees) }]} />
+        <FlatDropdown label="更多操作" colors={colors} items={[{ label: '批量确认', action: () => mutateTargetRows(emp => ({ ...emp, confirmStatus: '已确认' })) }, { label: '批量撤销确认', action: () => unlockRows() }, { label: '批量删除记录', action: () => deleteTargetRows() }]} />
 
         {/* Right controls */}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -977,7 +1081,7 @@ export default function DailyAttendanceStats() {
             不看离职人员
           </label>
           {/* Filter list icon */}
-          <button style={{ ...iconBtnSq(colors), color: colors.textMuted }}>
+          <button onClick={() => setShowMoreFilter(v => !v)} style={{ ...iconBtnSq(colors), color: showMoreFilter ? colors.primary : colors.textMuted, borderColor: showMoreFilter ? colors.primary : colors.inputBorder }} title="筛选设置">
             <Filter size={13} />
           </button>
           {/* Column settings */}
@@ -1043,8 +1147,8 @@ export default function DailyAttendanceStats() {
 
       {/* ── Bottom bar ───────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 16px', backgroundColor: colors.cardBg, borderTop: `1px solid ${colors.cardBorder}`, flexShrink: 0 }}>
-        <button style={outlineBtn(colors)}>校算考勤</button>
-        <button style={outlineBtn(colors)}>告知</button>
+        <button onClick={() => setModal('calc-range')} style={outlineBtn(colors)}>校算考勤</button>
+        <button onClick={() => mutateTargetRows(emp => ({ ...emp, confirmStatus: '已确认' }))} style={outlineBtn(colors)}>告知</button>
         <span style={{ marginLeft: 'auto', fontSize: '12px', color: colors.textMuted }}>共{totalCount}人 共{totalCount}条</span>
         <button style={pagBtn(colors, false)} onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}><ChevronLeft size={12} /></button>
         {getPages().map((p, i) =>

@@ -643,6 +643,16 @@ function sendLinkedRows(res, sheetName, rows, extra = {}) {
   });
 }
 
+function getOnboardedEmployeeNoSet() {
+  return new Set(getOnboardedEmployees().map((employee) => asRawText(employee.employeeNo)).filter(Boolean));
+}
+
+function filterRowsToOnboardedEmployees(rows) {
+  const employeeNos = getOnboardedEmployeeNoSet();
+  if (!employeeNos.size) return [];
+  return rows.filter((row) => employeeNos.has(asRawText(row.employeeNo || row.empId || row.employeeId)));
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, dataDir: DATA_DIR, files: listExcelFiles().map((f) => f.name) });
 });
@@ -653,8 +663,11 @@ app.get('/api/data-sources', (_req, res) => {
 });
 
 app.get('/api/attendance-stats', (_req, res) => {
-  const mobileRows = mapMobileClockRowsToAttendanceStats(getMobileRows('mobileClockRecords', []));
-  const onboardedRows = getOnboardedEmployees().map(onboardedEmployeeToAttendanceStatsRow);
+  const mobileRows = mapMobileClockRowsToAttendanceStats(filterRowsToOnboardedEmployees(getMobileRows('mobileClockRecords', [])));
+  const mobileEmployeeNos = new Set(mobileRows.map((row) => asRawText(row.empId)).filter(Boolean));
+  const onboardedRows = getOnboardedEmployees()
+    .filter((employee) => !mobileEmployeeNos.has(asRawText(employee.employeeNo)))
+    .map(onboardedEmployeeToAttendanceStatsRow);
   const rows = limitDemoPeople([...mobileRows, ...onboardedRows]);
   return sendLinkedRows(res, 'attendanceStats', rows);
 });
@@ -691,12 +704,12 @@ app.put('/api/monthly-summary', (req, res) => {
 
 
 app.get('/api/clock-records', (_req, res) => {
-  const mobileRows = mapMobileClockRowsToAdmin(getMobileRows('mobileClockRecords', []));
+  const mobileRows = mapMobileClockRowsToAdmin(filterRowsToOnboardedEmployees(getMobileRows('mobileClockRecords', [])));
   return sendLinkedRows(res, 'mobileClockRecords', limitDemoPeople(mobileRows));
 });
 
 app.get('/api/attendance-anomalies', (_req, res) => {
-  const mobileRows = mapMobileAnomalyRowsToAdmin(getMobileRows('mobileAnomalies', []));
+  const mobileRows = mapMobileAnomalyRowsToAdmin(filterRowsToOnboardedEmployees(getMobileRows('mobileAnomalies', [])));
   return sendLinkedRows(res, 'mobileAnomalies', mobileRows);
 });
 
@@ -1195,22 +1208,24 @@ app.get('/api/mobile/clock-records', (req, res) => {
 });
 
 app.get('/api/clock-makeup-records', (_req, res) => {
-  const rows = mapMobileMakeupRowsToAdmin(getMobileRows('mobileMakeupRequests', []));
+  const rows = mapMobileMakeupRowsToAdmin(filterRowsToOnboardedEmployees(getMobileRows('mobileMakeupRequests', [])));
   res.json({
-    sourceFile: '小程序移动端 mock API',
+    sourceFile: '员工主数据 + 小程序移动端 API',
     sheetName: 'mobileMakeupRequests',
     total: rows.length,
     rows,
+    linkedOnly: true,
   });
 });
 
 app.get('/api/photo-clock-records', (_req, res) => {
-  const rows = mapMobileClockRowsToPhoto(getMobileRows('mobileClockRecords', []));
+  const rows = mapMobileClockRowsToPhoto(filterRowsToOnboardedEmployees(getMobileRows('mobileClockRecords', [])));
   res.json({
-    sourceFile: '小程序移动端 mock API',
+    sourceFile: '员工主数据 + 小程序移动端 API',
     sheetName: 'mobileClockRecords',
     total: rows.length,
     rows,
+    linkedOnly: true,
   });
 });
 

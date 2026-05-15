@@ -16,6 +16,8 @@ const HOST = process.env.DATA_SERVER_HOST || '0.0.0.0';
 const MOBILE_ALLOW_OUT_OF_RANGE = process.env.MOBILE_ALLOW_OUT_OF_RANGE === 'true';
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(WORKSPACE_DIR, '资料'));
 const STORE_FILE = path.join(SERVER_DIR, 'data-store.json');
+const MOBILE_TEST_USERS_FILE = path.join(SERVER_DIR, 'mobile-test-users.json');
+const TIME_ZONE = 'Asia/Shanghai';
 const DEMO_PERSON_LIMIT = 5;
 
 
@@ -34,6 +36,15 @@ function readStore() {
 function writeStore(store) {
   fs.mkdirSync(path.dirname(STORE_FILE), { recursive: true });
   fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2), 'utf-8');
+}
+
+function readJsonFile(filePath, fallback) {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch (_error) {
+    return fallback;
+  }
 }
 
 function getStoredRows(key) {
@@ -131,9 +142,33 @@ function extractDate(value) {
 }
 
 function weekdayFromDate(dateText) {
-  const date = new Date(dateText);
+  const date = new Date(`${dateText}T00:00:00+08:00`);
   if (Number.isNaN(date.getTime())) return '';
   return ['日', '一', '二', '三', '四', '五', '六'][date.getDay()];
+}
+
+function dateTimeParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
+}
+
+function currentDateText(date = new Date()) {
+  const parts = dateTimeParts(date);
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function currentWeekdayText(dateText = currentDateText()) {
+  const weekday = weekdayFromDate(dateText);
+  return weekday ? `星期${weekday}` : '';
 }
 
 function inferPeriodFromFileName(name) {
@@ -655,17 +690,6 @@ app.get('/api/external-records', (_req, res) => {
   }
 });
 
-const MOBILE_EMPLOYEE = {
-  id: 'emp_demo_001',
-  userId: 'wecom_demo_001',
-  name: '魏晓丽',
-  employeeNo: 'ZY26609',
-  department: '新人培训组',
-  attendanceGroupId: 'group_huatuo',
-  attendanceGroupName: '华托大厦',
-  faceStatus: '未录入',
-};
-
 const MOBILE_OFFICE = {
   id: 'loc_huatuo',
   name: '华托大厦',
@@ -681,7 +705,88 @@ const MOBILE_SHIFT = {
   clockOutTime: '18:00',
 };
 
-const MOBILE_DATE = '2026-05-13';
+const DEFAULT_MOBILE_EMPLOYEE = {
+  id: 'emp_cp25003',
+  userId: 'wecom_demo_001',
+  name: '林娜',
+  employeeNo: 'CP25003',
+  department: '产品研发中心',
+  position: '产品研发中心总监',
+  attendanceGroupId: 'group_huatuo',
+  attendanceGroupName: '华托大厦',
+  shiftId: MOBILE_SHIFT.id,
+  shiftName: MOBILE_SHIFT.name,
+  faceStatus: '已录入',
+  office: MOBILE_OFFICE,
+};
+
+function normalizeMobileEmployee(input = {}) {
+  const employeeNo = asRawText(input.employeeNo || input.empId || DEFAULT_MOBILE_EMPLOYEE.employeeNo);
+  const userId = asRawText(input.userId || `wecom_${employeeNo}` || DEFAULT_MOBILE_EMPLOYEE.userId);
+  const office = input.office && typeof input.office === 'object' ? input.office : MOBILE_OFFICE;
+  return {
+    ...DEFAULT_MOBILE_EMPLOYEE,
+    ...input,
+    id: asRawText(input.id || `emp_${employeeNo}`),
+    userId,
+    name: asText(input.name, DEFAULT_MOBILE_EMPLOYEE.name),
+    employeeNo,
+    department: asText(input.department || input.dept, DEFAULT_MOBILE_EMPLOYEE.department),
+    attendanceGroupId: asText(input.attendanceGroupId, DEFAULT_MOBILE_EMPLOYEE.attendanceGroupId),
+    attendanceGroupName: asText(input.attendanceGroupName || input.attendGroup, DEFAULT_MOBILE_EMPLOYEE.attendanceGroupName),
+    shiftId: asText(input.shiftId, MOBILE_SHIFT.id),
+    shiftName: asText(input.shiftName || input.shift, MOBILE_SHIFT.name),
+    faceStatus: asText(input.faceStatus, DEFAULT_MOBILE_EMPLOYEE.faceStatus),
+    office: {
+      ...MOBILE_OFFICE,
+      ...office,
+      latitude: Number(office.latitude ?? MOBILE_OFFICE.latitude),
+      longitude: Number(office.longitude ?? MOBILE_OFFICE.longitude),
+      radius: Number(office.radius ?? MOBILE_OFFICE.radius),
+    },
+  };
+}
+
+function readMobileUsers() {
+  const configured = readJsonFile(MOBILE_TEST_USERS_FILE, null);
+  const users = Array.isArray(configured) && configured.length ? configured : [DEFAULT_MOBILE_EMPLOYEE];
+  return users.map(normalizeMobileEmployee);
+}
+
+function getDefaultMobileEmployee() {
+  const preferredNo = asRawText(process.env.MOBILE_TEST_EMPLOYEE_NO);
+  const users = readMobileUsers();
+  return users.find((user) => preferredNo && user.employeeNo === preferredNo) || users[0] || DEFAULT_MOBILE_EMPLOYEE;
+}
+
+function tokenForEmployee(employee) {
+  return `mock-mobile-token:${encodeURIComponent(employee.userId)}`;
+}
+
+function employeeFromToken(token) {
+  const prefix = 'mock-mobile-token:';
+  if (!token || !token.startsWith(prefix)) return null;
+  const userId = decodeURIComponent(token.slice(prefix.length));
+  return readMobileUsers().find((user) => user.userId === userId) || null;
+}
+
+function getRequestEmployee(req) {
+  const auth = asRawText(req.headers?.authorization);
+  const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+  return employeeFromToken(token) || getDefaultMobileEmployee();
+}
+
+function getEmployeeShift(employee) {
+  return {
+    ...MOBILE_SHIFT,
+    id: asText(employee.shiftId, MOBILE_SHIFT.id),
+    name: asText(employee.shiftName, MOBILE_SHIFT.name),
+  };
+}
+
+function getEmployeeOffice(employee) {
+  return employee.office || MOBILE_OFFICE;
+}
 
 function getMobileRows(key, fallback = []) {
   return getStoredRows(key) || fallback;
@@ -693,11 +798,12 @@ function setMobileRows(key, rows) {
 }
 
 function nowText() {
-  return new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const parts = dateTimeParts();
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
 }
 
-function todayRecordSummary(records) {
-  const todayRows = records.filter((record) => record.date === MOBILE_DATE && record.employeeId === MOBILE_EMPLOYEE.id);
+function todayRecordSummary(records, employee, dateText = currentDateText()) {
+  const todayRows = records.filter((record) => record.date === dateText && record.employeeId === employee.id);
   const clockIn = todayRows.find((record) => record.type === 'clockIn');
   const clockOut = todayRows.find((record) => record.type === 'clockOut');
   return {
@@ -733,10 +839,10 @@ function mobileAnomalyDefaults() {
 function mapMobileClockRowsToAdmin(rows) {
   return rows.map((row, index) => ({
     id: 900000 + index + 1,
-    name: asText(row.employeeName, MOBILE_EMPLOYEE.name),
-    empId: asText(row.employeeNo, MOBILE_EMPLOYEE.employeeNo),
-    dept: asText(row.dept, MOBILE_EMPLOYEE.department),
-    date: asText(row.date, MOBILE_DATE),
+    name: asText(row.employeeName, DEFAULT_MOBILE_EMPLOYEE.name),
+    empId: asText(row.employeeNo, DEFAULT_MOBILE_EMPLOYEE.employeeNo),
+    dept: asText(row.dept, DEFAULT_MOBILE_EMPLOYEE.department),
+    date: asText(row.date, currentDateText()),
     time: asText(row.time, ''),
     source: '企业微信小程序',
     device: '企业微信小程序',
@@ -756,14 +862,14 @@ function mapMobileClockRowsToAttendanceStats(rows) {
   const grouped = new Map();
 
   for (const row of rows) {
-    const key = asText(row.employeeNo || row.employeeId, MOBILE_EMPLOYEE.employeeNo);
+    const key = asText(row.employeeNo || row.employeeId, DEFAULT_MOBILE_EMPLOYEE.employeeNo);
     const existing = grouped.get(key) || {
-      name: asText(row.employeeName, MOBILE_EMPLOYEE.name),
+      name: asText(row.employeeName, DEFAULT_MOBILE_EMPLOYEE.name),
       empId: key,
-      attendGroup: asText(row.workLocation, MOBILE_EMPLOYEE.attendanceGroupName),
-      dept: asText(row.dept, MOBILE_EMPLOYEE.department),
-      deptFull: asText(row.dept, MOBILE_EMPLOYEE.department),
-      shift: MOBILE_SHIFT.name,
+      attendGroup: asText(row.attendanceGroupName || row.workLocation, DEFAULT_MOBILE_EMPLOYEE.attendanceGroupName),
+      dept: asText(row.dept, DEFAULT_MOBILE_EMPLOYEE.department),
+      deptFull: asText(row.dept, DEFAULT_MOBILE_EMPLOYEE.department),
+      shift: asText(row.shiftName, MOBILE_SHIFT.name),
       type: '移动端打卡',
       attendance: '已出勤',
       status: '已出勤',
@@ -800,10 +906,10 @@ function mapMobileClockRowsToPhoto(rows) {
     .filter((row) => row.photoFileId || row.faceVerifyId)
     .map((row, index) => ({
       id: 910000 + index + 1,
-      name: asText(row.employeeName, MOBILE_EMPLOYEE.name),
-      empId: asText(row.employeeNo, MOBILE_EMPLOYEE.employeeNo),
-      dept: asText(row.dept, MOBILE_EMPLOYEE.department),
-      date: asText(row.date, MOBILE_DATE),
+      name: asText(row.employeeName, DEFAULT_MOBILE_EMPLOYEE.name),
+      empId: asText(row.employeeNo, DEFAULT_MOBILE_EMPLOYEE.employeeNo),
+      dept: asText(row.dept, DEFAULT_MOBILE_EMPLOYEE.department),
+      date: asText(row.date, currentDateText()),
       clockTime: asText(row.time, ''),
       locateTime: asText(row.time, ''),
       completeTime: asText(row.serverTime, ''),
@@ -818,14 +924,14 @@ function mapMobileMakeupRowsToAdmin(rows) {
   return rows.map((row, index) => ({
     id: 920000 + index + 1,
     status: row.status === 'pending' ? '审批中' : asText(row.status, '审批中'),
-    applicant: asText(row.employeeName, MOBILE_EMPLOYEE.name),
-    applicantId: MOBILE_EMPLOYEE.employeeNo,
-    applicantDept: MOBILE_EMPLOYEE.department,
+    applicant: asText(row.employeeName, DEFAULT_MOBILE_EMPLOYEE.name),
+    applicantId: asText(row.employeeNo, DEFAULT_MOBILE_EMPLOYEE.employeeNo),
+    applicantDept: asText(row.dept, DEFAULT_MOBILE_EMPLOYEE.department),
     makeupDate: asText(row.date, ''),
     makeupTime: asText(row.time, ''),
     reason: asText(row.reason, ''),
-    initiator: asText(row.employeeName, MOBILE_EMPLOYEE.name),
-    initiatorId: MOBILE_EMPLOYEE.employeeNo,
+    initiator: asText(row.employeeName, DEFAULT_MOBILE_EMPLOYEE.name),
+    initiatorId: asText(row.employeeNo, DEFAULT_MOBILE_EMPLOYEE.employeeNo),
     initiateTime: asText(row.createTime, ''),
     completeTime: '',
     hasPhoto: Boolean(row.attachmentName),
@@ -839,12 +945,12 @@ function mapMobileAnomalyRowsToAdmin(rows) {
     const handled = Boolean(row.handled);
     return {
       id: 930000 + index + 1,
-      name: MOBILE_EMPLOYEE.name,
-      empId: MOBILE_EMPLOYEE.employeeNo,
-      dept: MOBILE_EMPLOYEE.department,
-      date: asText(row.date, MOBILE_DATE),
-      weekday: weekdayFromDate(asText(row.date, MOBILE_DATE)),
-      shift: MOBILE_SHIFT.name,
+      name: asText(row.employeeName, DEFAULT_MOBILE_EMPLOYEE.name),
+      empId: asText(row.employeeNo, DEFAULT_MOBILE_EMPLOYEE.employeeNo),
+      dept: asText(row.dept, DEFAULT_MOBILE_EMPLOYEE.department),
+      date: asText(row.date, currentDateText()),
+      weekday: weekdayFromDate(asText(row.date, currentDateText())),
+      shift: asText(row.shiftName, MOBILE_SHIFT.name),
       type: classifyAnomalyType(desc),
       desc,
       clock: '移动端打卡',
@@ -862,34 +968,39 @@ app.post('/api/wecom/login', (req, res) => {
   if (!code) {
     return res.status(400).json({ message: '缺少企业微信登录code' });
   }
+  const employee = getDefaultMobileEmployee();
   return res.json({
-    token: 'mock-mobile-token',
-    employee: MOBILE_EMPLOYEE,
+    token: tokenForEmployee(employee),
+    employee,
   });
 });
 
-app.get('/api/mobile/me', (_req, res) => {
+app.get('/api/mobile/me', (req, res) => {
+  const employee = getRequestEmployee(req);
   res.json({
-    employee: MOBILE_EMPLOYEE,
+    employee,
     attendanceGroup: {
-      id: MOBILE_EMPLOYEE.attendanceGroupId,
-      name: MOBILE_EMPLOYEE.attendanceGroupName,
-      location: MOBILE_OFFICE,
+      id: employee.attendanceGroupId,
+      name: employee.attendanceGroupName,
+      location: getEmployeeOffice(employee),
     },
     version: '0.1.0',
   });
 });
 
-app.get('/api/mobile/today', (_req, res) => {
+app.get('/api/mobile/today', (req, res) => {
+  const employee = getRequestEmployee(req);
+  const date = currentDateText();
   const records = getMobileRows('mobileClockRecords', []);
-  const status = todayRecordSummary(records);
-  const pendingAnomalies = getMobileRows('mobileAnomalies', mobileAnomalyDefaults()).filter((item) => !item.handled).length;
+  const status = todayRecordSummary(records, employee, date);
+  const pendingAnomalies = getMobileRows('mobileAnomalies', mobileAnomalyDefaults())
+    .filter((item) => (!item.employeeId || item.employeeId === employee.id) && !item.handled).length;
   res.json({
-    date: MOBILE_DATE,
-    weekday: '星期三',
-    employee: MOBILE_EMPLOYEE,
-    shift: MOBILE_SHIFT,
-    location: MOBILE_OFFICE,
+    date,
+    weekday: currentWeekdayText(date),
+    employee,
+    shift: getEmployeeShift(employee),
+    location: getEmployeeOffice(employee),
     status,
     pendingAnomalies,
   });
@@ -906,6 +1017,9 @@ app.post('/api/mobile/face-verify', (_req, res) => {
 });
 
 app.post('/api/mobile/clock', (req, res) => {
+  const employee = getRequestEmployee(req);
+  const office = getEmployeeOffice(employee);
+  const shift = getEmployeeShift(employee);
   const type = req.body?.type;
   if (!['clockIn', 'clockOut'].includes(type)) {
     return res.status(400).json({ message: 'type必须是clockIn或clockOut' });
@@ -920,27 +1034,29 @@ app.post('/api/mobile/clock', (req, res) => {
     return res.status(400).json({ message: '缺少人脸核验结果' });
   }
 
-  const distance = distanceInMeters({ latitude, longitude }, MOBILE_OFFICE);
-  const inRange = distance <= MOBILE_OFFICE.radius;
+  const distance = distanceInMeters({ latitude, longitude }, office);
+  const inRange = distance <= office.radius;
   const preciseEnough = !accuracy || accuracy <= 100;
   const locationAccepted = inRange || MOBILE_ALLOW_OUT_OF_RANGE;
   const records = getMobileRows('mobileClockRecords', []);
   const serverTime = nowText();
   const record = {
     id: `clock_${Date.now()}`,
-    employeeId: MOBILE_EMPLOYEE.id,
-    employeeName: MOBILE_EMPLOYEE.name,
-    employeeNo: MOBILE_EMPLOYEE.employeeNo,
-    dept: MOBILE_EMPLOYEE.department,
-    date: MOBILE_DATE,
+    employeeId: employee.id,
+    employeeName: employee.name,
+    employeeNo: employee.employeeNo,
+    dept: employee.department,
+    attendanceGroupName: employee.attendanceGroupName,
+    shiftName: shift.name,
+    date: currentDateText(),
     type,
     time: serverTime.slice(11, 16),
     serverTime,
     latitude,
     longitude,
     accuracy,
-    address: asText(req.body?.address, MOBILE_OFFICE.name),
-    workLocation: MOBILE_OFFICE.name,
+    address: asText(req.body?.address, office.name),
+    workLocation: office.name,
     distance: Math.round(distance),
     faceVerifyId: req.body.faceVerifyId,
     photoFileId: req.body?.photoFileId || '',
@@ -956,7 +1072,12 @@ app.post('/api/mobile/clock', (req, res) => {
     const nextId = anomalies.reduce((max, item) => Math.max(max, Number(item.id) || 0), 0) + 1;
     setMobileRows('mobileAnomalies', [{
       id: nextId,
-      date: MOBILE_DATE,
+      employeeId: employee.id,
+      employeeName: employee.name,
+      employeeNo: employee.employeeNo,
+      dept: employee.department,
+      shiftName: shift.name,
+      date: currentDateText(),
       type: 'clock',
       desc: !locationAccepted ? '定位范围外打卡' : '定位精度异常',
       status: 'pending',
@@ -974,8 +1095,9 @@ app.post('/api/mobile/clock', (req, res) => {
   });
 });
 
-app.get('/api/mobile/clock-records', (_req, res) => {
-  const records = getMobileRows('mobileClockRecords', []);
+app.get('/api/mobile/clock-records', (req, res) => {
+  const employee = getRequestEmployee(req);
+  const records = getMobileRows('mobileClockRecords', []).filter((record) => record.employeeId === employee.id);
   res.json({ total: records.length, rows: records });
 });
 
@@ -1000,13 +1122,15 @@ app.get('/api/photo-clock-records', (_req, res) => {
 });
 
 app.get('/api/mobile/anomalies', (req, res) => {
+  const employee = getRequestEmployee(req);
   const type = asRawText(req.query?.type);
   const rows = getMobileRows('mobileAnomalies', mobileAnomalyDefaults())
-    .filter((item) => !type || item.type === type);
+    .filter((item) => (!item.employeeId || item.employeeId === employee.id) && (!type || item.type === type));
   res.json({ total: rows.length, rows });
 });
 
 app.post('/api/mobile/makeup-request', (req, res) => {
+  const employee = getRequestEmployee(req);
   const date = asRawText(req.body?.date);
   const time = asRawText(req.body?.time);
   const clockType = asRawText(req.body?.type);
@@ -1018,8 +1142,10 @@ app.post('/api/mobile/makeup-request', (req, res) => {
   const requests = getMobileRows('mobileMakeupRequests', []);
   const request = {
     id: `makeup_${Date.now()}`,
-    employeeId: MOBILE_EMPLOYEE.id,
-    employeeName: MOBILE_EMPLOYEE.name,
+    employeeId: employee.id,
+    employeeName: employee.name,
+    employeeNo: employee.employeeNo,
+    dept: employee.department,
     date,
     time,
     type: clockType,

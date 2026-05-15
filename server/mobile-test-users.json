@@ -1,0 +1,21 @@
+[
+  {
+    "userId": "wecom_demo_001",
+    "name": "林娜",
+    "employeeNo": "CP25003",
+    "department": "产品研发中心",
+    "position": "产品研发中心总监",
+    "attendanceGroupId": "group_huatuo",
+    "attendanceGroupName": "华托大厦",
+    "shiftId": "shift_0900_1800",
+    "shiftName": "早九晚六",
+    "faceStatus": "已录入",
+    "office": {
+      "id": "loc_huatuo",
+      "name": "华托大厦",
+      "latitude": 31.2304,
+      "longitude": 121.4737,
+      "radius": 300
+    }
+  }
+]

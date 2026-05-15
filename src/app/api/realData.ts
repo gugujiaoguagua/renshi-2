@@ -1,4 +1,4 @@
-const API_BASE = (import.meta as any).env?.VITE_DATA_API_BASE || 'http://localhost:3199';
+const API_BASE = (import.meta as any).env?.VITE_DATA_API_BASE || 'https://api.shayugua.dpdns.org';
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, init);

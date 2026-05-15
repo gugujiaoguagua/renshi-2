@@ -63,30 +63,7 @@ type Employee = {
   cin3: string; cout3: string;
 };
 
-const EMPLOYEES: Employee[] = [
-  { name: '李碧芳', empId: '', attendGroup: '', dept: '综合人员', shift: '', type: '休息', attendance: '休息', status: '休息', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '林姐',   empId: '', attendGroup: '', dept: '综合人员', shift: '', type: '休息', attendance: '休息', status: '休息', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '王秀芬', empId: '', attendGroup: '', dept: '综合人员', shift: '', type: '休息', attendance: '休息', status: '休息', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '唐秀华', empId: '', attendGroup: '', dept: '综合人员', shift: '', type: '休息', attendance: '休息', status: '休息', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '张旭',   empId: '', attendGroup: '', dept: '综合人员', shift: '', type: '休息', attendance: '休息', status: '休息', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '卢文恒', empId: '', attendGroup: '', dept: '综合人员', shift: '', type: '休息', attendance: '休息', status: '休息', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '杨洁',   empId: '', attendGroup: '', dept: '综合人员', shift: '', type: '休息', attendance: '休息', status: '休息', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '张海平', empId: '', attendGroup: '', dept: '综合人员', shift: '', type: '休息', attendance: '休息', status: '休息', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '林鑫',   empId: 'CP25003', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '产品研发中心', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '曹文部', empId: 'CP25004', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '产品运营部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '徐徐明', empId: 'CP25005', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '产品运营部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '连接仪', empId: 'CP25006', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '产品运营部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '张芸通', empId: 'CP25007', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '研发设计一部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '张持乃', empId: 'CP25008', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '研发设计一部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '李新成', empId: 'CP25009', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '研发设计一部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '林建勋', empId: 'CP25010', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '研发设计二部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '吴洪富', empId: 'CP25011', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '直营渠道组', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '程秀薇', empId: 'CP25012', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '工艺开发部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '姚钦均', empId: 'CP25013', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '工艺开发部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '崔晴洁', empId: 'CP25014', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '工艺开发部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '谢梅',   empId: 'CP25015', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '工艺开发部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-  { name: '方责',   empId: 'CP25016', attendGroup: '华旺大厦', dept: '华旺大厦', shift: '工艺开发部', type: '未排班', attendance: '未出勤', status: '未出勤', anomaly: '-', leave: '-', fieldTrip: '-', cin1: '-', cout1: '-', cin2: '-', cout2: '-', cin3: '-', cout3: '-' },
-].slice(0, 5);
+const EMPLOYEES: Employee[] = [];
 
 const FILTER_DEPTS = Array.from(new Set(EMPLOYEES.map(emp => emp.dept).filter(Boolean))).map((label, index) => ({
   id: `dept-${index + 1}`,
@@ -337,7 +314,7 @@ function SimpleDropdown({ label, options, value, onChange, colors }: { label: st
 // ─────────────────────────────────────────────
 export default function AttendanceStats() {
   const { colors } = useTheme();
-  const [employees, setEmployees] = useState<Employee[]>(EMPLOYEES);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [sourceFile, setSourceFile] = useState('');
   const [loadError, setLoadError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -362,7 +339,7 @@ export default function AttendanceStats() {
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {
-      setLoadError('真实数据连接失败，当前展示静态数据');
+      setLoadError('真实数据连接失败，当前不展示本地静态人员');
     } finally {
       setIsLoading(false);
     }

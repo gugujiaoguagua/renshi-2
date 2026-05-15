@@ -15,10 +15,10 @@ const quickCards = [
 ];
 
 const stats = [
-  { label: '今日应出勤', value: '1027', unit: '人', change: '+3', positive: true },
-  { label: '已出勤', value: '4', unit: '人', change: '+1', positive: true },
-  { label: '考勤异常', value: '22', unit: '条', change: '+5', positive: false },
-  { label: '未打卡', value: '983', unit: '人', change: '-12', positive: true },
+  { label: '今日应出勤', value: '0', unit: '人', change: '0', positive: true },
+  { label: '已出勤', value: '0', unit: '人', change: '0', positive: true },
+  { label: '考勤异常', value: '0', unit: '条', change: '0', positive: true },
+  { label: '未打卡', value: '0', unit: '人', change: '0', positive: true },
 ];
 
 export default function Home() {
@@ -135,13 +135,7 @@ export default function Home() {
       {/* Recent activity */}
       <div style={{ backgroundColor: colors.cardBg, borderRadius: '8px', border: `1px solid ${colors.cardBorder}`, padding: '16px 20px' }}>
         <div style={{ fontSize: '14px', fontWeight: 600, color: colors.text, marginBottom: '12px' }}>最近异常记录</div>
-        {[
-          { name: '李俊', type: '漏打卡', dept: '加盟售后部', time: '2026-05-07 09:05', color: '#F59E0B' },
-          { name: '杨绍涵', type: '迟到 15分钟', dept: '加盟售后部', time: '2026-05-07 08:45', color: '#EF4444' },
-          { name: '王秀芬', type: '早退', dept: '综合人员', time: '2026-05-06 17:20', color: '#8B5CF6' },
-          { name: '张芸通', type: '未打卡', dept: '华旺大厦', time: '2026-05-06 09:00', color: '#6B7280' },
-          { name: '郑伟楷', type: '漏打卡', dept: 'PMC部', time: '2026-05-05 18:30', color: '#F59E0B' },
-        ].map((item, i) => (
+        {[].map((item: { name: string; type: string; dept: string; time: string; color: string }, i) => (
           <div
             key={i}
             style={{

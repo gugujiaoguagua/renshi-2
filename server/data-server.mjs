@@ -510,6 +510,402 @@ function onboardedEmployeeToAttendanceStatsRow(employee) {
   };
 }
 
+function linkedDemoEmployees() {
+  return getOnboardedEmployees().map(normalizeOnboardedEmployee);
+}
+
+function clockRowsForEmployee(employee) {
+  return getMobileRows('mobileClockRecords', [])
+    .filter((row) => asRawText(row.employeeNo) === asRawText(employee.employeeNo));
+}
+
+function clockInText(employee) {
+  const row = clockRowsForEmployee(employee).find((item) => item.type === 'clockIn');
+  return asText(row?.time, '09:12');
+}
+
+function clockOutText(employee) {
+  const row = clockRowsForEmployee(employee).find((item) => item.type === 'clockOut');
+  return asText(row?.time, '-');
+}
+
+function demoDate(offsetDays = 0) {
+  const date = new Date(`${currentDateText()}T00:00:00+08:00`);
+  date.setDate(date.getDate() + offsetDays);
+  return currentDateText(date);
+}
+
+function employeeBase(employee) {
+  return {
+    name: employee.name,
+    empId: employee.employeeNo,
+    dept: employee.department,
+    deptPath: employee.deptFullPath,
+    position: employee.position,
+    attendGroup: employee.attendanceGroupName,
+    shiftName: employee.shiftName,
+  };
+}
+
+function buildLinkedAttendanceStatsRows() {
+  return linkedDemoEmployees().map((employee) => {
+    const base = onboardedEmployeeToAttendanceStatsRow(employee);
+    const hasClock = clockRowsForEmployee(employee).length > 0;
+    return {
+      ...base,
+      type: '移动端打卡',
+      attendance: hasClock ? '已出勤' : '未出勤',
+      status: '异常',
+      anomaly: '联动演示：迟到待处理',
+      leave: '病假1天',
+      fieldTrip: '外出4小时/出差2天',
+      cin1: hasClock ? clockInText(employee) : '09:12',
+      cout1: clockOutText(employee),
+    };
+  });
+}
+
+function buildLinkedDailyRows() {
+  return linkedDemoEmployees().map((employee) => {
+    const base = employeeBase(employee);
+    return {
+      name: base.name,
+      confirmStatus: '已确认',
+      empId: base.empId,
+      date: currentDateText(),
+      dept: base.dept,
+      position: base.position,
+      bizGroup: employee.businessGroup,
+      deptFullPath: base.deptPath,
+      regularDate: '-',
+      attendGroup: base.attendGroup,
+      shiftName: base.shiftName,
+      dateType: '工作日',
+      weekday: currentWeekdayText().replace('星期', ''),
+      attendResult: '异常',
+      anomalyDesc: '联动演示：迟到、请假、外出、加班均已关联',
+      taskSummary: '打卡1次 / 病假1天 / 外出4小时 / 加班2小时',
+      normalHours: 8,
+      lateMinutes: 12,
+    };
+  });
+}
+
+function buildLinkedMonthlyRows() {
+  const today = Number(currentDateText().slice(8, 10)) || 15;
+  return linkedDemoEmployees().map((employee) => {
+    const base = employeeBase(employee);
+    return {
+      name: base.name,
+      empId: base.empId,
+      dept: base.dept,
+      position: base.position,
+      attendGroup: base.attendGroup,
+      deptFullPath: base.deptPath,
+      bizGroup: employee.businessGroup,
+      dayResults: {
+        [String(Math.max(1, today - 4))]: '病假',
+        [String(Math.max(1, today - 3))]: '外出',
+        [String(Math.max(1, today - 2))]: '出差',
+        [String(Math.max(1, today - 1))]: '加班',
+        [String(today)]: '异常',
+      },
+    };
+  });
+}
+
+function buildLinkedMonthlySummaryRows() {
+  return linkedDemoEmployees().map((employee, index) => {
+    const base = employeeBase(employee);
+    return {
+      id: index + 1,
+      name: base.name,
+      lockStatus: '未锁定',
+      empId: base.empId,
+      dept: base.dept,
+      position: base.position,
+      hireDate: employee.hireDate,
+      resignDate: '',
+      deptFullPath: base.deptPath,
+      bizGroup: employee.businessGroup,
+      attendGroup: base.attendGroup,
+      shouldWorkDays: 22,
+      actualWorkDays: 1,
+      absentDays: 0,
+      tripDays: 2,
+      scheduleDays: 22,
+      normalHours: 8,
+      lateMinutes: 12,
+      earlyLeaveMinutes: 0,
+      confirmStatus: '已发送',
+    };
+  });
+}
+
+function buildLinkedAnomalyRows() {
+  const mobileRows = mapMobileAnomalyRowsToAdmin(filterRowsToOnboardedEmployees(getMobileRows('mobileAnomalies', [])));
+  const hasByEmp = new Set(mobileRows.map((row) => asRawText(row.empId)));
+  const demoRows = linkedDemoEmployees()
+    .filter((employee) => !hasByEmp.has(asRawText(employee.employeeNo)))
+    .map((employee, index) => ({
+      id: 930100 + index + 1,
+      name: employee.name,
+      empId: employee.employeeNo,
+      dept: employee.department,
+      date: currentDateText(),
+      weekday: weekdayFromDate(currentDateText()),
+      shift: employee.shiftName,
+      type: '迟到',
+      desc: '联动演示：小程序打卡时间晚于班次开始，等待管理员处理',
+      clock: `${clockInText(employee)} / ${clockOutText(employee)}`,
+      reminder: '已提醒',
+      handled: false,
+      writeOff: '未核销',
+      remark: '由同一员工主数据联动生成',
+      remarkUpdatedAt: '',
+    }));
+  return [...mobileRows, ...demoRows];
+}
+
+function buildLinkedWorkDataRows() {
+  let id = 1;
+  const date = currentDateText();
+  return linkedDemoEmployees().flatMap((employee) => {
+    const base = employeeBase(employee);
+    const common = {
+      applicant: base.name,
+      applicantId: base.empId,
+      applicantDept: base.dept,
+      initiator: base.name,
+      initiatorId: base.empId,
+      cancelStatus: '未申请取消',
+    };
+    return [
+      {
+        id: id++,
+        ...common,
+        applyType: '加班',
+        initiateTime: `${date} 17:50`,
+        completeTime: `${date} 18:00`,
+        bizDate: date,
+        summary: '联动演示：工作日加班2小时，生成调休额度',
+        approvalStatus: '已通过',
+      },
+      {
+        id: id++,
+        ...common,
+        applyType: '外勤',
+        initiateTime: `${date} 09:00`,
+        completeTime: `${date} 13:10`,
+        bizDate: date,
+        summary: '联动演示：客户现场支持4小时，关联外勤打卡',
+        approvalStatus: '已通过',
+      },
+      {
+        id: id++,
+        ...common,
+        applyType: '出差',
+        initiateTime: `${demoDate(-2)} 10:00`,
+        completeTime: `${demoDate(-2)} 10:30`,
+        bizDate: `${demoDate(-1)} ~ ${date}`,
+        summary: '联动演示：上海-苏州出差2天',
+        approvalStatus: '审批中',
+      },
+      {
+        id: id++,
+        ...common,
+        applyType: '病假',
+        initiateTime: `${demoDate(-1)} 07:30`,
+        completeTime: `${demoDate(-1)} 08:00`,
+        bizDate: demoDate(-1),
+        summary: '联动演示：病假1天，进入业务异常复核',
+        approvalStatus: '审批中',
+      },
+      {
+        id: id++,
+        ...common,
+        applyType: '补卡',
+        initiateTime: `${date} 10:05`,
+        completeTime: '',
+        bizDate: date,
+        summary: '联动演示：上班打卡补卡申请',
+        approvalStatus: '审批中',
+      },
+    ];
+  });
+}
+
+function buildLinkedOvertimeRows() {
+  return linkedDemoEmployees().map((employee, index) => {
+    const base = employeeBase(employee);
+    return {
+      id: 940000 + index + 1,
+      status: '已通过',
+      name: base.name,
+      empId: base.empId,
+      dept: base.dept,
+      deptPath: base.deptPath,
+      date: currentDateText(),
+      start: '18:00',
+      end: '20:00',
+      applyHours: '2小时',
+      finalHours: '2小时',
+      type: '工作日加班',
+      compensate: '调休假',
+      toLeave: '是',
+      convert: '按实际时长',
+      rule: '联动演示规则',
+      flowStatus: '已通过',
+    };
+  });
+}
+
+function buildLinkedFieldOutRows() {
+  return linkedDemoEmployees().map((employee, index) => {
+    const base = employeeBase(employee);
+    return {
+      id: 950000 + index + 1,
+      status: '已通过',
+      name: base.name,
+      empId: base.empId,
+      dept: base.dept,
+      deptPath: base.deptPath,
+      effect: '已生效',
+      source: '移动端申请',
+      values: [
+        base.name,
+        base.empId,
+        '移动端申请',
+        `${currentDateText()} 09:00`,
+        `${currentDateText()} 13:00`,
+        '4小时',
+        '有',
+        '联动演示：客户现场支持',
+        `${currentDateText()} 08:55`,
+      ],
+      flowStatus: '已通过',
+    };
+  });
+}
+
+function buildLinkedFieldTripRows() {
+  return linkedDemoEmployees().map((employee, index) => {
+    const base = employeeBase(employee);
+    return {
+      id: 960000 + index + 1,
+      status: '审批中',
+      name: base.name,
+      empId: base.empId,
+      dept: base.dept,
+      deptPath: base.deptPath,
+      effect: '待生效',
+      source: '移动端申请',
+      values: [
+        '移动端申请',
+        '往返',
+        '上海-苏州',
+        `${demoDate(-1)} ~ ${currentDateText()}`,
+        '有',
+        '2',
+        '联动演示：供应商拜访',
+        `${demoDate(-2)} 10:00`,
+        '',
+      ],
+      flowStatus: '审批中',
+    };
+  });
+}
+
+function buildLinkedLeaveRows() {
+  return linkedDemoEmployees().map((employee, index) => {
+    const base = employeeBase(employee);
+    return [
+      '审批中',
+      base.name,
+      base.empId,
+      base.dept,
+      base.deptPath,
+      base.name,
+      base.empId,
+      '员工发起',
+      '病假',
+      `${demoDate(-1)} 09:00`,
+      `${demoDate(-1)} 18:00`,
+      '1天',
+      '联动演示：病假申请，关联业务异常',
+      `${demoDate(-1)} 07:30`,
+      '',
+      '审批中',
+      '查看',
+      index + 1,
+    ];
+  });
+}
+
+function buildLinkedLeaveBalanceRows() {
+  return linkedDemoEmployees().map((employee) => {
+    const base = employeeBase(employee);
+    return [
+      base.name,
+      base.empId,
+      base.dept,
+      base.deptPath,
+      employee.hireDate,
+      5,
+      2,
+      10,
+      0,
+      0,
+      3,
+      0,
+    ];
+  });
+}
+
+function buildLinkedLeaveDetailRows() {
+  return linkedDemoEmployees().flatMap((employee) => {
+    const base = employeeBase(employee);
+    const year = currentDateText().slice(0, 4);
+    return [
+      [base.name, base.empId, base.dept, base.deptPath, employee.hireDate, year, '年假', 5, 5, 5, 0, 0, 0, 5, `${year}-01-01`, `${year}-12-31`, employee.hireDate, '查看'],
+      [base.name, base.empId, base.dept, base.deptPath, employee.hireDate, year, '病假', 3, 3, 3, 0, 0, 1, 2, `${year}-01-01`, `${year}-12-31`, employee.hireDate, '查看'],
+    ];
+  });
+}
+
+function buildLinkedMakeupRows() {
+  const mobileRows = mapMobileMakeupRowsToAdmin(filterRowsToOnboardedEmployees(getMobileRows('mobileMakeupRequests', [])));
+  const hasByEmp = new Set(mobileRows.map((row) => asRawText(row.applicantId)));
+  const demoRows = linkedDemoEmployees()
+    .filter((employee) => !hasByEmp.has(asRawText(employee.employeeNo)))
+    .map((employee, index) => ({
+      id: 920100 + index + 1,
+      status: '审批中',
+      applicant: employee.name,
+      applicantId: employee.employeeNo,
+      applicantDept: employee.department,
+      makeupDate: currentDateText(),
+      makeupTime: '09:00',
+      reason: '联动演示：小程序上班卡补卡申请',
+      initiator: employee.name,
+      initiatorId: employee.employeeNo,
+      initiateTime: `${currentDateText()} 10:05`,
+      completeTime: '',
+      hasPhoto: true,
+      archiveStatus: '未归档',
+    }));
+  return [...mobileRows, ...demoRows];
+}
+
+function buildLinkedExternalRows() {
+  let id = 1;
+  return linkedDemoEmployees().flatMap((employee) => [
+    { id: id++, module: '考勤统计', attendDate: currentDateText(), period: currentDateText().slice(0, 7), statItem: '联动员工', statValue: employee.employeeNo, creator: '系统联动', createTime: nowText(), modifier: '', modifyTime: '' },
+    { id: id++, module: '假期管理', attendDate: demoDate(-1), period: currentDateText().slice(0, 7), statItem: '病假天数', statValue: 1, creator: '系统联动', createTime: nowText(), modifier: '', modifyTime: '' },
+    { id: id++, module: '加班管理', attendDate: currentDateText(), period: currentDateText().slice(0, 7), statItem: '调休加班小时', statValue: 2, creator: '系统联动', createTime: nowText(), modifier: '', modifyTime: '' },
+  ]);
+}
+
 function mapStatItemRows(rows) {
   const sample = rows[0] || {};
   return Object.keys(sample).map((name, index) => {
@@ -663,17 +1059,12 @@ app.get('/api/data-sources', (_req, res) => {
 });
 
 app.get('/api/attendance-stats', (_req, res) => {
-  const mobileRows = mapMobileClockRowsToAttendanceStats(filterRowsToOnboardedEmployees(getMobileRows('mobileClockRecords', [])));
-  const mobileEmployeeNos = new Set(mobileRows.map((row) => asRawText(row.empId)).filter(Boolean));
-  const onboardedRows = getOnboardedEmployees()
-    .filter((employee) => !mobileEmployeeNos.has(asRawText(employee.employeeNo)))
-    .map(onboardedEmployeeToAttendanceStatsRow);
-  const rows = limitDemoPeople([...mobileRows, ...onboardedRows]);
+  const rows = limitDemoPeople(buildLinkedAttendanceStatsRows());
   return sendLinkedRows(res, 'attendanceStats', rows);
 });
 
 app.get('/api/daily-attendance', (_req, res) => {
-  return sendLinkedRows(res, 'dailyAttendance', []);
+  return sendLinkedRows(res, 'dailyAttendance', buildLinkedDailyRows());
 });
 
 app.put('/api/daily-attendance', (req, res) => {
@@ -686,11 +1077,11 @@ app.put('/api/daily-attendance', (req, res) => {
 });
 
 app.get('/api/monthly-attendance', (_req, res) => {
-  return sendLinkedRows(res, 'monthlyAttendance', []);
+  return sendLinkedRows(res, 'monthlyAttendance', buildLinkedMonthlyRows());
 });
 
 app.get('/api/monthly-summary', (_req, res) => {
-  return sendLinkedRows(res, 'monthlySummary', []);
+  return sendLinkedRows(res, 'monthlySummary', buildLinkedMonthlySummaryRows());
 });
 
 app.put('/api/monthly-summary', (req, res) => {
@@ -709,8 +1100,7 @@ app.get('/api/clock-records', (_req, res) => {
 });
 
 app.get('/api/attendance-anomalies', (_req, res) => {
-  const mobileRows = mapMobileAnomalyRowsToAdmin(filterRowsToOnboardedEmployees(getMobileRows('mobileAnomalies', [])));
-  return sendLinkedRows(res, 'mobileAnomalies', mobileRows);
+  return sendLinkedRows(res, 'mobileAnomalies', buildLinkedAnomalyRows());
 });
 
 app.put('/api/attendance-anomalies', (req, res) => {
@@ -724,7 +1114,31 @@ app.put('/api/attendance-anomalies', (req, res) => {
 
 
 app.get('/api/work-data', (_req, res) => {
-  return sendLinkedRows(res, 'workData', []);
+  return sendLinkedRows(res, 'workData', buildLinkedWorkDataRows());
+});
+
+app.get('/api/overtime-records', (_req, res) => {
+  return sendLinkedRows(res, 'overtimeRecords', buildLinkedOvertimeRows());
+});
+
+app.get('/api/field-out-records', (_req, res) => {
+  return sendLinkedRows(res, 'fieldOutRecords', buildLinkedFieldOutRows());
+});
+
+app.get('/api/field-trip-records', (_req, res) => {
+  return sendLinkedRows(res, 'fieldTripRecords', buildLinkedFieldTripRows());
+});
+
+app.get('/api/leave-records', (_req, res) => {
+  return sendLinkedRows(res, 'leaveRecords', buildLinkedLeaveRows());
+});
+
+app.get('/api/leave-balances', (_req, res) => {
+  return sendLinkedRows(res, 'leaveBalances', buildLinkedLeaveBalanceRows());
+});
+
+app.get('/api/leave-details', (_req, res) => {
+  return sendLinkedRows(res, 'leaveDetails', buildLinkedLeaveDetailRows());
 });
 
 app.get('/api/settings-shifts', (_req, res) => {
@@ -774,7 +1188,7 @@ app.put('/api/stat-items', (req, res) => {
 
 
 app.get('/api/external-records', (_req, res) => {
-  return sendLinkedRows(res, 'externalRecords', []);
+  return sendLinkedRows(res, 'externalRecords', buildLinkedExternalRows());
 });
 
 const MOBILE_OFFICE = {
@@ -1208,7 +1622,7 @@ app.get('/api/mobile/clock-records', (req, res) => {
 });
 
 app.get('/api/clock-makeup-records', (_req, res) => {
-  const rows = mapMobileMakeupRowsToAdmin(filterRowsToOnboardedEmployees(getMobileRows('mobileMakeupRequests', [])));
+  const rows = buildLinkedMakeupRows();
   res.json({
     sourceFile: '员工主数据 + 小程序移动端 API',
     sheetName: 'mobileMakeupRequests',

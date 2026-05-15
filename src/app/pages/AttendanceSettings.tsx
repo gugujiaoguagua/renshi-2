@@ -128,14 +128,7 @@ const SHIFT_ROWS = [
   ['早九点到五点', '9-5', '通用', '●', '通用', '09:00-17:00(正常出勤)', '8小时', '何山', '2025-08-28 10:23:08', '何山', '2026-04-21 16:46'],
 ];
 
-const PEOPLE_ROWS = [
-  ['魏晓丽', 'ZY26609', '新人培训组', '新品培训组', '2026-05-07', '-', '-', '全职', '试用', '-', '生产组', '-', '华北大区', '默认方案'],
-  ['林万', 'ZY26600', '新人培训组', '营运设计师', '2026-05-06', '-', '-', '全职', '试用', '-', '生产组', '-', '华北大区', '默认方案'],
-  ['李梓宁', 'ZY26601', '新人培训组', '产品设计师', '2026-05-06', '-', '-', '全职', '试用', '-', '生产组', '-', '华北大区', '默认方案'],
-  ['牛润颖', 'ZY26602', '新人培训组', '销售运营', '2026-05-06', '-', '-', '全职', '试用', '-', '生产组', '-', '华北大区', '默认方案'],
-  ['张子七', 'CP26057', '饮酒运营中心', '餐厅运营', '2026-04-28', '-', '-', '全职', '试用', '-', '中控运营设计', '-', '华北大区', '默认方案'],
-  ['王海', 'ZY26599', '新人培训组', '生产组专员', '2026-04-25', '-', '-', '全职', '试用', '-', '生产组', '-', '华北大区', '默认方案'],
-].slice(0, 5);
+const PEOPLE_ROWS = [];
 
 const CARD_RULE_ROWS = [
   ['无规则打卡', '无规则打卡', '无规则打卡', '棠乐', '2026-04-15 09:54:58', '棠乐', '2026-04-15 09:54:58'],
@@ -145,13 +138,7 @@ const CARD_RULE_ROWS = [
 const LOCATION_ROWS: string[][] = [];
 const MOBILE_ROWS: string[][] = [];
 
-const FACE_ROWS = [
-  ['魏晓丽', 'ZY26609', '新人培训组', '上海拉蜜克家具有限公司 / 上与直营管理', '华北大区', '2026-05-07', '未录入', '-', '-', '拉蜜克'],
-  ['林万', 'ZY26600', '新人培训组', '上海拉蜜克家具有限公司 / 上与直营管理', '华北大区', '2026-05-06', '未录入', '-', '-', '拉蜜克'],
-  ['李梓宁', 'ZY26601', '新人培训组', '上海拉蜜克家具有限公司 / 上与直营管理', '华北大区', '2026-05-06', '未录入', '-', '-', '拉蜜克'],
-  ['牛润颖', 'ZY26602', '新人培训组', '上海拉蜜克家具有限公司 / 上与直营管理', '华北大区', '2026-05-06', '未录入', '-', '-', '拉蜜克'],
-  ['张子七', 'CP26057', '饮酒运营中心', '上海拉蜜克家具有限公司 / 九方商务部', '华北大区', '2026-04-28', '未录入', '-', '-', '导入'],
-];
+const FACE_ROWS = [];
 
 const HOLIDAY_ROWS: string[][] = [];
 
@@ -203,9 +190,9 @@ export default function AttendanceSettings() {
     globalRule: true,
     fixedOvertime: false,
   });
-  const [shiftRows, setShiftRows] = useState<string[][]>(SHIFT_ROWS);
-  const [peopleRows, setPeopleRows] = useState<string[][]>(PEOPLE_ROWS);
-  const [faceRows, setFaceRows] = useState<string[][]>(FACE_ROWS);
+  const [shiftRows, setShiftRows] = useState<string[][]>([]);
+  const [peopleRows, setPeopleRows] = useState<string[][]>([]);
+  const [faceRows, setFaceRows] = useState<string[][]>([]);
   const [sourceInfo, setSourceInfo] = useState('');
   const [loadError, setLoadError] = useState('');
 
@@ -222,7 +209,7 @@ export default function AttendanceSettings() {
       setSourceInfo(`班次：${shifts.sourceFile}；人员：${people.sourceFile}；人脸：${face.sourceFile}`);
       setLoadError('');
     } catch (_error) {
-      setLoadError('真实设置数据连接失败，当前展示静态数据');
+      setLoadError('真实设置数据连接失败，当前不展示本地静态人员');
     }
   }, []);
 

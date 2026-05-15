@@ -1,6 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
-import { fetchAttendanceAnomalies, saveAttendanceAnomalies, type AttendanceAnomalyRecord as RealAnomalyRecord } from '../api/realData';
+import {
+  fetchAttendanceAnomalies,
+  fetchWorkDataRecords,
+  saveAttendanceAnomalies,
+  type AttendanceAnomalyRecord as RealAnomalyRecord,
+} from '../api/realData';
 
 import { useLocation } from 'react-router';
 import {
@@ -62,28 +67,11 @@ const BIZ_COLS_DEFAULT: ColDef[] = [
 ];
 
 // ─── Mock Data ────────────────────────────────
-const ANOMALY_RECORDS: AnomalyRecord[] = [
-  { id:1, name:'曹文瑶', empId:'CP25004', dept:'产品运营部',   date:'2026-05-06', weekday:'三', shift:'早九点到六点',    type:'迟到',  desc:'上班迟到32分钟',     clock:'09:32 / 18:08', reminder:'已提醒', handled:false, writeOff:'未核销' },
-  { id:2, name:'孟佳玫', empId:'CP25006', dept:'产品运营部',   date:'2026-05-06', weekday:'三', shift:'早九点到六点',    type:'旷工',  desc:'全天缺勤未请假',     clock:'— / —',         reminder:'未提醒', handled:false, writeOff:'未核销' },
-  { id:3, name:'吴洛富', empId:'CP25011', dept:'直营建连店',   date:'2026-05-06', weekday:'三', shift:'早七点半到五点半', type:'迟到', desc:'上班迟到18分钟',     clock:'07:48 / 17:30', reminder:'未提醒', handled:false, writeOff:'未核销' },
-  { id:4, name:'荣誉',   empId:'CP25015', dept:'工艺开发部',   date:'2026-05-06', weekday:'三', shift:'早九点到六点',    type:'早退',  desc:'下班提前离岗25分钟', clock:'09:02 / 17:35', reminder:'未提醒', handled:false, writeOff:'未核销' },
-  { id:5, name:'邹智旭', empId:'CP25014', dept:'工艺开发部',   date:'2026-05-07', weekday:'四', shift:'早九点到六点',    type:'旷工',  desc:'全天缺勤，未提交请假',clock:'— / —',        reminder:'未提醒', handled:false, writeOff:'未核销' },
-  { id:6, name:'尤国强', empId:'CP25019', dept:'技术支持部',   date:'2026-05-05', weekday:'二', shift:'早九点到六点',    type:'迟到',  desc:'上班迟到45分钟',     clock:'09:45 / 18:00', reminder:'已提醒', handled:false, writeOff:'未核销' },
-  { id:7, name:'朱苗建', empId:'CP25020', dept:'直营建连店',   date:'2026-05-05', weekday:'二', shift:'早七点半到五点半', type:'未打卡',desc:'上班未打卡',         clock:'— / 17:30',     reminder:'已提醒', handled:true,  writeOff:'已核销' },
-  { id:8, name:'曹文瑶', empId:'CP25004', dept:'产品运营部',   date:'2026-05-05', weekday:'二', shift:'早九点到六点',    type:'迟到',  desc:'上班迟到12分钟',     clock:'09:12 / 18:05', reminder:'已提醒', handled:true,  writeOff:'已核销' },
-  { id:9, name:'劲善达', empId:'CP25017', dept:'工艺开发部',   date:'2026-05-04', weekday:'一', shift:'早九点到六点',    type:'迟到',  desc:'上班迟到8分钟',      clock:'09:08 / 18:02', reminder:'未提醒', handled:false, writeOff:'未核销' },
-].slice(0, 5);
+const ANOMALY_RECORDS: AnomalyRecord[] = [];
 
-const BIZ_RECORDS_LEAVE: BizRecord[] = [
-  { id:1, name:'孟佳玫', empId:'CP25006', dept:'产品运营部',   leaveType:'年假', startTime:'2026-05-02 09:00', endTime:'2026-05-02 18:00', origDuration:'8小时', recalcDuration:'8小时', updatedShift:'早九点到六点', reason:'假期期间有加班记录与请假时段重叠', source:'假期管理', approvalStatus:'已通过', cancelStatus:'未申请取消' },
-  { id:2, name:'张林乐', empId:'CP25008', dept:'研发设计一部', leaveType:'事假', startTime:'2026-05-06 13:00', endTime:'2026-05-06 18:00', origDuration:'4小时', recalcDuration:'3.5小时', updatedShift:'早八点半到五点半', reason:'班次变更导致请假时长不匹配',         source:'假期管理', approvalStatus:'已通过', cancelStatus:'未申请取消' },
-  { id:3, name:'荣誉',   empId:'CP25015', dept:'工艺开发部',   leaveType:'病假', startTime:'2026-05-07 09:00', endTime:'2026-05-07 18:00', origDuration:'8小时', recalcDuration:'',       updatedShift:'',             reason:'病假单时长与实际排班天数不符',     source:'假期管理', approvalStatus:'审批中',  cancelStatus:'未申请取消' },
-];
+const BIZ_RECORDS_LEAVE: BizRecord[] = [];
 
-const BIZ_RECORDS_FIELDOUT: BizRecord[] = [
-  { id:4, name:'孟佳玫', empId:'CP25006', dept:'产品运营部',   leaveType:'外勤', startTime:'2026-05-04 14:00', endTime:'2026-05-04 17:30', origDuration:'3.5小时', recalcDuration:'3.5小时', updatedShift:'早九点到六点', reason:'外勤时段与排班变更存在交叉',       source:'勤务数据', approvalStatus:'已通过', cancelStatus:'未申请取消' },
-  { id:5, name:'林娜',   empId:'CP25003', dept:'产品研发中心', leaveType:'外勤', startTime:'2026-05-03 09:00', endTime:'2026-05-03 12:00', origDuration:'3小时',   recalcDuration:'',        updatedShift:'',             reason:'外勤时间段对应人员已离职，数据待审核', source:'勤务数据', approvalStatus:'审批中',  cancelStatus:'未申请取消' },
-];
+const BIZ_RECORDS_FIELDOUT: BizRecord[] = [];
 
 // ─── Helpers ─────────────────────────────────
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, cb: () => void) {
@@ -283,7 +271,7 @@ function AnomalyAttendance({ colors }: { colors: any }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [jumpPage, setJumpPage] = useState('');
-  const [rows, setRows] = useState<AnomalyRecord[]>(ANOMALY_RECORDS);
+  const [rows, setRows] = useState<AnomalyRecord[]>([]);
   const [sourceFile, setSourceFile] = useState('');
   const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -328,7 +316,7 @@ function AnomalyAttendance({ colors }: { colors: any }) {
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {
-      setLoadError('真实数据连接失败，当前展示静态数据');
+      setLoadError('真实数据连接失败，当前不展示本地静态人员');
     }
   }, []);
 
@@ -824,9 +812,48 @@ function AnomalyBusiness({ colors }: { colors: any }) {
   const [pageSize, setPageSize] = useState(20);
   const [jumpPage, setJumpPage] = useState('');
   const [bizRowsByTab, setBizRowsByTab] = useState<{ leave: BizRecord[]; fieldout: BizRecord[] }>({
-    leave: BIZ_RECORDS_LEAVE,
-    fieldout: BIZ_RECORDS_FIELDOUT,
+    leave: [],
+    fieldout: [],
   });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchWorkDataRecords()
+      .then((res) => {
+        if (cancelled) return;
+        const rows = res.rows || [];
+        const toBizRow = (row: any, id: number, reason: string): BizRecord => ({
+          id,
+          name: row.applicant,
+          empId: row.applicantId,
+          dept: row.applicantDept,
+          leaveType: row.applyType,
+          startTime: `${String(row.bizDate || '').slice(0, 10)} 09:00`,
+          endTime: `${String(row.bizDate || '').slice(-10)} 18:00`,
+          origDuration: row.applyType === '外勤' ? '4小时' : '1天',
+          recalcDuration: row.applyType === '外勤' ? '4小时' : '',
+          updatedShift: '早九晚六',
+          reason,
+          source: '员工主数据 + 小程序移动端 API',
+          approvalStatus: row.approvalStatus,
+          cancelStatus: row.cancelStatus,
+        });
+        setBizRowsByTab({
+          leave: rows
+            .filter((row: any) => String(row.applyType).includes('假'))
+            .map((row: any, index: number) => toBizRow(row, 980000 + index + 1, '联动演示：请假时长进入业务异常复核')),
+          fieldout: rows
+            .filter((row: any) => row.applyType === '外勤')
+            .map((row: any, index: number) => toBizRow(row, 981000 + index + 1, '联动演示：外勤时段与打卡范围联动校验')),
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setBizRowsByTab({ leave: [], fieldout: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const rows = bizRowsByTab[bizTab];
   const filteredRows = rows.filter(row => {

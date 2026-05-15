@@ -67,29 +67,7 @@ const SETTABLE_COLS = [
   { key: 'lateMinutes',  label: '迟到时长(分钟)' },
 ];
 
-const EMPLOYEES: DailyEmployee[] = [
-  { name: '林娜',   confirmStatus: '已确认', empId: 'CP25003', date: '2026-05-06', dept: '产品研发中心', position: '产品研发中心总监',   bizGroup: '', deptFullPath: '产品研发中心',       regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '曹文瑶', confirmStatus: '已确认', empId: 'CP25004', date: '2026-05-06', dept: '产品运营部',   position: '产品研发中心总监',   bizGroup: '', deptFullPath: '产品研发中心/产品', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '侯雅妮', confirmStatus: '已确认', empId: 'CP25005', date: '2026-05-06', dept: '产品运营部',   position: '产品运营专员',       bizGroup: '', deptFullPath: '产品研发中心/产品', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '孟佳玫', confirmStatus: '已确认', empId: 'CP25006', date: '2026-05-06', dept: '产品运营部',   position: '研发设计师',         bizGroup: '', deptFullPath: '产品研发中心/产品', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '张艺嫚', confirmStatus: '已确认', empId: 'CP25007', date: '2026-05-06', dept: '研发设计一部', position: '主管级研发设计师',   bizGroup: '', deptFullPath: '产品研发中心/研发', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '张林乐', confirmStatus: '已确认', empId: 'CP25008', date: '2026-05-06', dept: '研发设计一部', position: '研发设计师',         bizGroup: '', deptFullPath: '产品研发中心/研发', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '李荣成', confirmStatus: '已确认', empId: 'CP25009', date: '2026-05-06', dept: '研发设计一部', position: '研发设计师',         bizGroup: '', deptFullPath: '产品研发中心/研发', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '林信敏', confirmStatus: '已确认', empId: 'CP25010', date: '2026-05-06', dept: '研发设计二部', position: '研发设计二部总监',   bizGroup: '', deptFullPath: '产品研发中心/研发', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '吴洛富', confirmStatus: '已确认', empId: 'CP25011', date: '2026-05-06', dept: '直营建连店',   position: '设计师',             bizGroup: '', deptFullPath: '产品研发中心/技术', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '程会娟', confirmStatus: '已确认', empId: 'CP25012', date: '2026-05-06', dept: '工艺开发部',   position: '主管级工艺工程师',   bizGroup: '', deptFullPath: '产品研发中心/工艺', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '戴琳玲', confirmStatus: '已确认', empId: 'CP25013', date: '2026-05-06', dept: '工艺开发部',   position: '工艺开发部主管',     bizGroup: '', deptFullPath: '产品研发中心/工艺', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '邹智旭', confirmStatus: '已确认', empId: 'CP25014', date: '2026-05-06', dept: '工艺开发部',   position: '工艺工程师',         bizGroup: '', deptFullPath: '产品研发中心/工艺', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '荣誉',   confirmStatus: '已确认', empId: 'CP25015', date: '2026-05-06', dept: '工艺开发部',   position: '工艺工程师助理',     bizGroup: '', deptFullPath: '产品研发中心/工艺', regularDate: '2025-08-01', attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '方赛',   confirmStatus: '已确认', empId: 'CP25016', date: '2026-05-06', dept: '工艺开发部',   position: '中级工艺工程师',     bizGroup: '', deptFullPath: '产品研发中心/工艺', regularDate: '2025-06-25', attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '劲善达', confirmStatus: '已确认', empId: 'CP25017', date: '2026-05-06', dept: '工艺开发部',   position: '中级工艺工程师',     bizGroup: '', deptFullPath: '产品研发中心/工艺', regularDate: '2025-07-14', attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '颜志文', confirmStatus: '已确认', empId: 'CP25018', date: '2026-05-06', dept: '工艺开发部',   position: '试制工程师',         bizGroup: '', deptFullPath: '产品研发中心/工艺', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '尤国强', confirmStatus: '已确认', empId: 'CP25019', date: '2026-05-06', dept: '技术支持部',   position: '技术支持部主管',     bizGroup: '', deptFullPath: '产品研发中心/技术', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '朱苗建', confirmStatus: '已确认', empId: 'CP25020', date: '2026-05-06', dept: '直营样品组',   position: '中级样品设计师',     bizGroup: '', deptFullPath: '产品研发中心/信息', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '周誓',   confirmStatus: '已确认', empId: 'CP25021', date: '2026-05-06', dept: '工艺开发部',   position: '高级工艺工程师',     bizGroup: '', deptFullPath: '产品研发中心/工艺', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '赵继磊', confirmStatus: '已确认', empId: 'CP25022', date: '2026-05-06', dept: '技术服务组',   position: '中级技术工程师',     bizGroup: '', deptFullPath: '产品研发中心/技术', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '异常', anomalyDesc: '未排班', taskSummary: '', normalHours: 0, lateMinutes: 0 },
-  { name: '行健磊', confirmStatus: '未确认', empId: 'CP25023', date: '2026-05-06', dept: '技术服务组',   position: '业务技术工程师',     bizGroup: '', deptFullPath: '产品研发中心/技术', regularDate: '',           attendGroup: '华托大厦', shiftName: '', dateType: '工作日', weekday: '三', attendResult: '正常', anomalyDesc: '',    taskSummary: '正常', normalHours: 8,  lateMinutes: 0 },
-].slice(0, 5);
+const EMPLOYEES: DailyEmployee[] = [];
 
 // ─── Hooks ───────────────────────────────────
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, cb: () => void) {
@@ -756,7 +734,7 @@ export default function DailyAttendanceStats() {
   const [pageSize, setPageSize] = useState(100);
   const [jumpPage, setJumpPage] = useState('');
   const [activeStatFilter, setActiveStatFilter] = useState<string | null>(null);
-  const [employees, setEmployees] = useState<DailyEmployee[]>(EMPLOYEES);
+  const [employees, setEmployees] = useState<DailyEmployee[]>([]);
   const [sourceFile, setSourceFile] = useState('');
   const [loadError, setLoadError] = useState('');
   const [initialDateRange, setInitialDateRange] = useState({ start: '2026-05-06', end: '2026-05-06' });
@@ -778,7 +756,7 @@ export default function DailyAttendanceStats() {
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {
-      setLoadError('真实数据连接失败，当前展示静态数据');
+      setLoadError('真实数据连接失败，当前不展示本地静态人员');
     }
   }, []);
 

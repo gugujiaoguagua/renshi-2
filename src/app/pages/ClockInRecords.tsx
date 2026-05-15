@@ -43,53 +43,13 @@ type PhotoRecord = {
 };
 
 // ─── Mock Data ────────────────────────────────
-const CLOCK_RECORDS: ClockRecord[] = [
-  { id:1,  name:'曹文瑶', empId:'CP25004', dept:'产品运营部',   date:'2026-05-07', time:'09:02:15', source:'企业微信打卡', device:'HUAWEI P40',   location:'华托大厦·2楼前台',          workLocation:'华托大厦',  freeWork:'上班', note:'',         hasPhoto:false, creator:'系统',  createTime:'2026-05-07 09:02:20', modifier:'',   modifyTime:'' },
-  { id:2,  name:'曹文瑶', empId:'CP25004', dept:'产品运营部',   date:'2026-05-07', time:'18:10:30', source:'企业微信打卡', device:'HUAWEI P40',   location:'华托大厦·2楼前台',          workLocation:'华托大厦',  freeWork:'下班', note:'',         hasPhoto:false, creator:'系统',  createTime:'2026-05-07 18:10:35', modifier:'',   modifyTime:'' },
-  { id:3,  name:'孟佳玫', empId:'CP25006', dept:'产品运营部',   date:'2026-05-07', time:'09:15:22', source:'企业微信打卡', device:'iPhone 14',    location:'华托大厦·1楼大堂',          workLocation:'华托大厦',  freeWork:'上班', note:'',         hasPhoto:false, creator:'系统',  createTime:'2026-05-07 09:15:25', modifier:'',   modifyTime:'' },
-  { id:4,  name:'林娜',   empId:'CP25003', dept:'产品研发中心', date:'2026-05-07', time:'08:55:10', source:'蓝牙打卡',    device:'蓝牙考勤机01',  location:'研发中心·入口门禁',         workLocation:'研发中心', freeWork:'上班', note:'',         hasPhoto:false, creator:'系统',  createTime:'2026-05-07 08:55:12', modifier:'',   modifyTime:'' },
-  { id:5,  name:'李荣成', empId:'CP25009', dept:'研发设计一部', date:'2026-05-07', time:'09:00:05', source:'人脸识别打卡', device:'面部识别终端',  location:'设计楼·3楼刷脸机',          workLocation:'设计楼',   freeWork:'上班', note:'',         hasPhoto:true,  creator:'系统',  createTime:'2026-05-07 09:00:08', modifier:'',   modifyTime:'' },
-  { id:6,  name:'戴琳玲', empId:'CP25013', dept:'工艺开发部',   date:'2026-05-07', time:'17:58:44', source:'企业微信打卡', device:'OPPO Reno9',   location:'工艺楼·出口',               workLocation:'工艺楼',   freeWork:'下班', note:'外出返回', hasPhoto:false, creator:'系统',  createTime:'2026-05-07 17:58:50', modifier:'',   modifyTime:'' },
-  { id:7,  name:'张艺嫚', empId:'CP25007', dept:'研发设计一部', date:'2026-05-07', time:'08:48:30', source:'Wi-Fi打卡',   device:'iPhone 15',    location:'研发中心·Wi-Fi范围',        workLocation:'研发中心', freeWork:'上班', note:'',         hasPhoto:false, creator:'系统',  createTime:'2026-05-07 08:48:33', modifier:'',   modifyTime:'' },
-  { id:8,  name:'邹智旭', empId:'CP25014', dept:'工艺开发部',   date:'2026-05-07', time:'09:32:18', source:'企业微信打卡', device:'小米 14',      location:'工艺楼·入口',               workLocation:'工艺楼',   freeWork:'上班', note:'客户送货晚到', hasPhoto:false, creator:'系统', createTime:'2026-05-07 09:32:20', modifier:'HR', modifyTime:'2026-05-07 11:00:00' },
-  { id:9,  name:'程会娟', empId:'CP25012', dept:'工艺开发部',   date:'2026-05-07', time:'09:04:55', source:'钉钉打卡',    device:'iPhone 13',    location:'工艺楼·2楼',                workLocation:'工艺楼',   freeWork:'上班', note:'',         hasPhoto:false, creator:'系统',  createTime:'2026-05-07 09:05:00', modifier:'',   modifyTime:'' },
-  { id:10, name:'林信敏', empId:'CP25010', dept:'研发设计二部', date:'2026-05-07', time:'18:25:12', source:'企业微信打卡', device:'三星 S22',     location:'设计楼·楼梯口',             workLocation:'设计楼',   freeWork:'下班', note:'',         hasPhoto:false, creator:'系统',  createTime:'2026-05-07 18:25:15', modifier:'',   modifyTime:'' },
-  { id:11, name:'荣誉',   empId:'CP25015', dept:'工艺开发部',   date:'2026-05-06', time:'09:01:30', source:'人脸识别打卡', device:'面部识别终端',  location:'工艺楼·人脸考勤机',         workLocation:'工艺楼',   freeWork:'上班', note:'',         hasPhoto:true,  creator:'系统',  createTime:'2026-05-06 09:01:33', modifier:'',   modifyTime:'' },
-  { id:12, name:'方赛',   empId:'CP25016', dept:'工艺开发部',   date:'2026-05-06', time:'17:55:20', source:'企业微信打卡', device:'iPhone 12',    location:'工艺楼·出口',               workLocation:'工艺楼',   freeWork:'下班', note:'',         hasPhoto:false, creator:'系统',  createTime:'2026-05-06 17:55:24', modifier:'',   modifyTime:'' },
-].slice(0, 5);
+const CLOCK_RECORDS: ClockRecord[] = [];
 
-const MAKEUP_RECORDS: MakeupRecord[] = [
-  { id:1, status:'已完成', applicant:'林信敏', applicantId:'CP25010', applicantDept:'研发设计二部', makeupDate:'2026-05-05', makeupTime:'09:00', reason:'上班漏打卡（设备故障）', initiator:'林信敏',  initiatorId:'CP25010', initiateTime:'2026-05-05 18:45', completeTime:'2026-05-06 09:30', hasPhoto:false, archiveStatus:'已归档' },
-  { id:2, status:'审批中', applicant:'邹智旭', applicantId:'CP25014', applicantDept:'工艺开发部',   makeupDate:'2026-05-06', makeupTime:'09:00', reason:'到访客户迟入楼忘打卡',    initiator:'邹智旭',  initiatorId:'CP25014', initiateTime:'2026-05-06 12:00', completeTime:'',                 hasPhoto:false, archiveStatus:'未归档' },
-  { id:3, status:'已完成', applicant:'曹文瑶', applicantId:'CP25004', applicantDept:'产品运营部',   makeupDate:'2026-05-04', makeupTime:'18:00', reason:'下班漏打卡',              initiator:'曹文瑶',  initiatorId:'CP25004', initiateTime:'2026-05-04 20:00', completeTime:'2026-05-05 10:15', hasPhoto:true,  archiveStatus:'已归档' },
-  { id:4, status:'已拒绝', applicant:'荣誉',   applicantId:'CP25015', applicantDept:'工艺开发部',   makeupDate:'2026-04-30', makeupTime:'09:00', reason:'上班漏打卡',              initiator:'荣誉',    initiatorId:'CP25015', initiateTime:'2026-05-02 09:30', completeTime:'2026-05-02 16:00', hasPhoto:false, archiveStatus:'未归档' },
-  { id:5, status:'已完成', applicant:'张艺嫚', applicantId:'CP25007', applicantDept:'研发设计一部', makeupDate:'2026-05-03', makeupTime:'18:00', reason:'手机没电，下班忘打卡',     initiator:'张艺嫚',  initiatorId:'CP25007', initiateTime:'2026-05-03 21:00', completeTime:'2026-05-04 11:00', hasPhoto:false, archiveStatus:'已归档' },
-  { id:6, status:'审批中', applicant:'林娜',   applicantId:'CP25003', applicantDept:'产品研发中心', makeupDate:'2026-05-07', makeupTime:'09:00', reason:'上班打卡记录未上传',      initiator:'林娜',    initiatorId:'CP25003', initiateTime:'2026-05-07 10:00', completeTime:'',                 hasPhoto:true,  archiveStatus:'未归档' },
-  { id:7, status:'已完成', applicant:'程会娟', applicantId:'CP25012', applicantDept:'工艺开发部',   makeupDate:'2026-05-02', makeupTime:'09:00', reason:'上班漏打卡',              initiator:'HR管理员', initiatorId:'HR001',   initiateTime:'2026-05-02 14:00', completeTime:'2026-05-02 15:30', hasPhoto:false, archiveStatus:'已归档' },
-  { id:8, status:'待审批', applicant:'戴琳玲', applicantId:'CP25013', applicantDept:'工艺开发部',   makeupDate:'2026-05-07', makeupTime:'17:30', reason:'下班提早离开未打卡',      initiator:'戴琳玲',  initiatorId:'CP25013', initiateTime:'2026-05-07 19:00', completeTime:'',                 hasPhoto:false, archiveStatus:'未归档' },
-].slice(0, 5);
+const MAKEUP_RECORDS: MakeupRecord[] = [];
 
-const FIELD_RECORDS: FieldRecord[] = [
-  { id:1, name:'孟佳玫', empId:'CP25006', initiator:'孟佳玫',  initiatorId:'CP25006', source:'移动端申请',  dept:'产品运营部',   date:'2026-05-06', time:'09:00 - 17:00', initiateTime:'2026-05-05 17:30', completeTime:'2026-05-06 17:10', location:'客户现场·上海市浦东新区',    note:'客户技术支持', hasPhoto:true,  reviewStatus:'已通过' },
-  { id:2, name:'林娜',   empId:'CP25003', initiator:'林娜',    initiatorId:'CP25003', source:'PC端申请',    dept:'产品研发中心', date:'2026-05-07', time:'09:00 - 12:00', initiateTime:'2026-05-06 16:00', completeTime:'2026-05-07 12:10', location:'合作方公司·上海市静安区',    note:'产品调研',     hasPhoto:false, reviewStatus:'已通过' },
-  { id:3, name:'张林乐', empId:'CP25008', initiator:'张林乐',  initiatorId:'CP25008', source:'移动端申请',  dept:'研发设计一部', date:'2026-05-10', time:'全天',            initiateTime:'2026-05-07 10:00', completeTime:'',                 location:'深圳供应商工厂',              note:'工厂验收',     hasPhoto:false, reviewStatus:'审批中' },
-  { id:4, name:'戴琳玲', empId:'CP25013', initiator:'戴琳玲',  initiatorId:'CP25013', source:'移动端申请',  dept:'工艺开发部',   date:'2026-05-06', time:'14:00 - 18:00', initiateTime:'2026-05-06 09:00', completeTime:'2026-05-06 18:20', location:'华托大厦·6楼展厅',            note:'展品巡查',     hasPhoto:true,  reviewStatus:'已通过' },
-  { id:5, name:'程会娟', empId:'CP25012', initiator:'程会娟',  initiatorId:'CP25012', source:'移动端申请',  dept:'工艺开发部',   date:'2026-05-05', time:'10:00 - 16:00', initiateTime:'2026-05-04 17:00', completeTime:'2026-05-05 16:15', location:'客户体验店·上海市黄浦区',    note:'',            hasPhoto:false, reviewStatus:'已通过' },
-  { id:6, name:'曹文瑶', empId:'CP25004', initiator:'HR管理员', initiatorId:'HR001',  source:'HR手动添加',  dept:'产品运营部',   date:'2026-05-04', time:'09:00 - 17:00', initiateTime:'2026-05-04 18:00', completeTime:'2026-05-05 09:30', location:'客户现场·上海市闵行区',      note:'数据补录',     hasPhoto:false, reviewStatus:'已通过' },
-  { id:7, name:'邹智旭', empId:'CP25014', initiator:'邹智旭',  initiatorId:'CP25014', source:'移动端申请',  dept:'工艺开发部',   date:'2026-05-07', time:'13:00 - 17:00', initiateTime:'2026-05-07 09:00', completeTime:'',                 location:'未填写',                       note:'',            hasPhoto:false, reviewStatus:'审批中' },
-  { id:8, name:'李荣成', empId:'CP25009', initiator:'李荣成',  initiatorId:'CP25009', source:'PC端申请',    dept:'研发设计一部', date:'2026-05-03', time:'全天',            initiateTime:'2026-05-02 11:00', completeTime:'2026-05-03 18:30', location:'上海设计中心·展览馆',         note:'行业展参观',   hasPhoto:true,  reviewStatus:'已拒绝' },
-].slice(0, 5);
+const FIELD_RECORDS: FieldRecord[] = [];
 
-const PHOTO_CLOCK_RECORDS: PhotoRecord[] = [
-  { id:1, name:'吴洛富', empId:'CP25011', dept:'直营建连店', date:'2026-05-07', clockTime:'07:32:10', locateTime:'07:32:05', completeTime:'07:32:12', location:'直营建连店·主门口',        note:'',              hasPhoto:true, reviewStatus:'已通过' },
-  { id:2, name:'周誓',   empId:'CP25021', dept:'工艺开发部', date:'2026-05-07', clockTime:'09:05:30', locateTime:'09:05:28', completeTime:'09:05:35', location:'工艺楼·入口',               note:'',              hasPhoto:true, reviewStatus:'已通过' },
-  { id:3, name:'朱苗建', empId:'CP25020', dept:'直营建连店', date:'2026-05-07', clockTime:'07:41:22', locateTime:'07:41:20', completeTime:'07:41:30', location:'直营建连店·侧门',           note:'下雨天绕路',    hasPhoto:true, reviewStatus:'审批中' },
-  { id:4, name:'方赛',   empId:'CP25016', dept:'工艺开发部', date:'2026-05-06', clockTime:'09:08:45', locateTime:'09:08:40', completeTime:'09:08:52', location:'工艺楼·地下停车场入口',    note:'',              hasPhoto:true, reviewStatus:'已通过' },
-  { id:5, name:'尤国强', empId:'CP25019', dept:'技术支持部', date:'2026-05-06', clockTime:'09:00:05', locateTime:'09:00:01', completeTime:'09:00:10', location:'技术楼·正门',               note:'',              hasPhoto:true, reviewStatus:'已通过' },
-  { id:6, name:'吴洛富', empId:'CP25011', dept:'直营建连店', date:'2026-05-06', clockTime:'17:55:08', locateTime:'17:55:05', completeTime:'17:55:15', location:'直营建连店·主门口',         note:'',              hasPhoto:true, reviewStatus:'已通过' },
-  { id:7, name:'周誓',   empId:'CP25021', dept:'工艺开发部', date:'2026-05-06', clockTime:'18:02:33', locateTime:'18:02:30', completeTime:'18:02:40', location:'工艺楼·出口',               note:'',              hasPhoto:true, reviewStatus:'已通过' },
-  { id:8, name:'劲善达', empId:'CP25017', dept:'工艺开发部', date:'2026-05-05', clockTime:'09:12:18', locateTime:'09:12:15', completeTime:'09:12:25', location:'工艺楼·入口',               note:'人脸失败改拍照', hasPhoto:true, reviewStatus:'已拒绝' },
-].slice(0, 5);
+const PHOTO_CLOCK_RECORDS: PhotoRecord[] = [];
 
 const CLOCK_SOURCE_OPTS = ['企业微信打卡', '钉钉打卡', '人脸识别打卡', '蓝牙打卡', 'Wi-Fi打卡', 'HR手动添加'];
 const DEPT_OPTS = ['产品研发中心', '产品运营部', '研发设计一部', '研发设计二部', '工艺开发部', '技术支持部', '直营建连店'];
@@ -316,7 +276,7 @@ function OriginalClockTab({ colors }: { colors: any }) {
   const [pageSize, setPageSize] = useState(20);
   const [photoTarget, setPhotoTarget] = useState<string | null>(null);
   const [activeClockFilter, setActiveClockFilter] = useState<string>('all');
-  const [rows, setRows] = useState<ClockRecord[]>(CLOCK_RECORDS);
+  const [rows, setRows] = useState<ClockRecord[]>([]);
   const [sourceFile, setSourceFile] = useState('');
   const [loadError, setLoadError] = useState('');
   const [dateRange, setDateRange] = useState<DateRangeFilter>({ start: '', end: '' });
@@ -336,7 +296,7 @@ function OriginalClockTab({ colors }: { colors: any }) {
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {
-      setLoadError('真实数据连接失败，当前展示静态数据');
+      setLoadError('真实数据连接失败，当前不展示本地静态人员');
     }
   }, []);
 
@@ -668,7 +628,7 @@ function MakeupClockTab({ colors }: { colors: any }) {
   const [recordStatusFilter, setRecordStatusFilter] = useState('');
   const [sortKey, setSortKey] = useState<keyof MakeupRecord>('makeupDate');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
-  const [rows, setRows] = useState<MakeupRecord[]>(MAKEUP_RECORDS);
+  const [rows, setRows] = useState<MakeupRecord[]>([]);
   const [loadError, setLoadError] = useState('');
 
   const loadMakeupRows = useCallback(async () => {
@@ -677,7 +637,7 @@ function MakeupClockTab({ colors }: { colors: any }) {
       setRows((res.rows || []) as RealMakeupClockRecord[]);
       setLoadError('');
     } catch (_error) {
-      setLoadError('移动端补卡记录连接失败，当前展示静态数据');
+      setLoadError('移动端补卡记录连接失败，当前不展示本地静态人员');
     }
   }, []);
 
@@ -904,7 +864,7 @@ function FieldWorkTab({ colors }: { colors: any }) {
   const [reviewFilter, setReviewFilter] = useState('');
   const [sortKey, setSortKey] = useState<keyof FieldRecord>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
-  const [rows, setRows] = useState<FieldRecord[]>(FIELD_RECORDS);
+  const [rows, setRows] = useState<FieldRecord[]>([]);
   const fieldImportInputRef = useRef<HTMLInputElement>(null);
   const filteredRows = rows.filter(row => {
     const applicantKeyword = applicantFilter.trim().toLowerCase();
@@ -1199,7 +1159,7 @@ function PhotoClockTab({ colors }: { colors: any }) {
   const [reviewFilter, setReviewFilter] = useState('');
   const [sortKey, setSortKey] = useState<keyof PhotoRecord>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
-  const [rows, setRows] = useState<PhotoRecord[]>(PHOTO_CLOCK_RECORDS);
+  const [rows, setRows] = useState<PhotoRecord[]>([]);
   const [loadError, setLoadError] = useState('');
 
   const loadPhotoRows = useCallback(async () => {
@@ -1208,7 +1168,7 @@ function PhotoClockTab({ colors }: { colors: any }) {
       setRows((res.rows || []) as RealPhotoClockRecord[]);
       setLoadError('');
     } catch (_error) {
-      setLoadError('移动端拍照打卡记录连接失败，当前展示静态数据');
+      setLoadError('移动端拍照打卡记录连接失败，当前不展示本地静态人员');
     }
   }, []);
 

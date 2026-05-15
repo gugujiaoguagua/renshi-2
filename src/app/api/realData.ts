@@ -242,6 +242,41 @@ export type WorkDataRecord = {
   cancelStatus: '未申请取消' | '取消审批中' | '已取消';
 };
 
+export type OvertimeRecord = {
+  id: number;
+  status: string;
+  name: string;
+  empId: string;
+  dept: string;
+  deptPath: string;
+  date: string;
+  start: string;
+  end: string;
+  applyHours: string;
+  finalHours: string;
+  type: string;
+  compensate: string;
+  toLeave: string;
+  convert: string;
+  rule: string;
+  flowStatus: string;
+};
+
+export type FieldWorkRecord = {
+  id: number;
+  status: string;
+  name: string;
+  empId: string;
+  dept: string;
+  deptPath: string;
+  effect: string;
+  source: string;
+  values: string[];
+  flowStatus: string;
+};
+
+export type LeaveRecordRow = Array<string | number | boolean>;
+
 export type ExternalRecord = {
   id: number;
   module: string;
@@ -315,6 +350,30 @@ export async function saveAttendanceAnomalies(rows: AttendanceAnomalyRecord[]) {
 
 export async function fetchWorkDataRecords() {
   return limitDataResponse(await requestJson<DataResponse<WorkDataRecord>>('/api/work-data'));
+}
+
+export async function fetchOvertimeRecords() {
+  return limitDataResponse(await requestJson<DataResponse<OvertimeRecord>>('/api/overtime-records'));
+}
+
+export async function fetchFieldOutRecords() {
+  return limitDataResponse(await requestJson<DataResponse<FieldWorkRecord>>('/api/field-out-records'));
+}
+
+export async function fetchFieldTripRecords() {
+  return limitDataResponse(await requestJson<DataResponse<FieldWorkRecord>>('/api/field-trip-records'));
+}
+
+export async function fetchLeaveRecords() {
+  return limitDataResponse(await requestJson<DataResponse<LeaveRecordRow>>('/api/leave-records'));
+}
+
+export async function fetchLeaveBalances() {
+  return limitDataResponse(await requestJson<DataResponse<LeaveRecordRow>>('/api/leave-balances'));
+}
+
+export async function fetchLeaveDetails() {
+  return limitDataResponse(await requestJson<DataResponse<LeaveRecordRow>>('/api/leave-details'));
 }
 
 export async function fetchSettingsShifts() {

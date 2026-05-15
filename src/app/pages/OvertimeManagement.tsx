@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTheme } from '../context/ThemeContext';
+import { fetchOvertimeRecords } from '../api/realData';
 import {
   Calendar,
   ChevronDown,
@@ -77,12 +78,7 @@ type OvertimeRow = {
   flowStatus: string;
 };
 
-const OVERTIME_ROWS: OvertimeRow[] = [
-  { id: 1, status: '已通过', name: '曹文瑶', empId: 'CP25004', dept: '产品运营部', deptPath: '产品研发中心/产品运营部', date: '2026-05-06', start: '18:00', end: '21:00', applyHours: '3小时', finalHours: '3小时', type: '工作日加班', compensate: '加班费', toLeave: '否', convert: '按实际时长', rule: '仅计时长', flowStatus: '已通过' },
-  { id: 2, status: '审批中', name: '戴琳玲', empId: 'CP25013', dept: '工艺开发部', deptPath: '产品研发中心/工艺开发部', date: '2026-05-06', start: '20:00', end: '22:10', applyHours: '2.1小时', finalHours: '待核算', type: '工作日加班', compensate: '调休假', toLeave: '是', convert: '按审批时长', rule: '调休', flowStatus: '审批中' },
-  { id: 3, status: '已通过', name: '李荣成', empId: 'CP25009', dept: '研发设计一部', deptPath: '产品研发中心/研发设计一部', date: '2026-05-08', start: '18:30', end: '20:30', applyHours: '2小时', finalHours: '2小时', type: '工作日加班', compensate: '加班费', toLeave: '否', convert: '按规则折算', rule: '仅计时长', flowStatus: '已通过' },
-  { id: 4, status: '已拒绝', name: '邹智旭', empId: 'CP25014', dept: '工艺开发部', deptPath: '产品研发中心/工艺开发部', date: '2026-05-05', start: '19:00', end: '21:30', applyHours: '2.5小时', finalHours: '0', type: '休息日加班', compensate: '加班费+调休', toLeave: '否', convert: '按实际时长', rule: '调休', flowStatus: '已拒绝' },
-];
+const OVERTIME_ROWS: OvertimeRow[] = [];
 
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, handler: () => void) {
   useEffect(() => {
@@ -310,7 +306,7 @@ export default function OvertimeManagement() {
   const [showFlowMenu, setShowFlowMenu] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [rows, setRows] = useState<OvertimeRow[]>(OVERTIME_ROWS);
+  const [rows, setRows] = useState<OvertimeRow[]>([]);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [deptFilter, setDeptFilter] = useState('');
   const [applicantFilter, setApplicantFilter] = useState('');
@@ -322,6 +318,19 @@ export default function OvertimeManagement() {
   const [ruleFilter, setRuleFilter] = useState('');
   const [sortConfig, setSortConfig] = useState<{ index: number; direction: 'asc' | 'desc' } | null>(null);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetchOvertimeRecords()
+      .then((res) => {
+        if (!cancelled) setRows(res.rows as OvertimeRow[]);
+      })
+      .catch(() => {
+        if (!cancelled) setRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const baseFilteredRows = rows.filter(row => {
     const applicantKeyword = applicantFilter.trim().toLowerCase();

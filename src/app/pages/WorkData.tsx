@@ -54,31 +54,9 @@ const DEPT_OPTIONS = ['产品研发中心','产品运营部','研发设计一部
 const ALL_STATUSES: ApprovalStatus[] = ['已通过','审批中','已拒绝','已撤销','已退回'];
 
 // ─── Mock Data ────────────────────────────────
-const DUTY_RECORDS: DutyRecord[] = [
-  { id:1,  applicant:'林娜',   applicantId:'CP25003', applicantDept:'产品研发中心', applyType:'出差', initiator:'林娜',   initiatorId:'CP25003', initiateTime:'2026-05-05 09:15', completeTime:'2026-05-05 14:30', bizDate:'2026-05-07 ~ 2026-05-09', summary:'北京客户拜访出差（3天）',   approvalStatus:'已通过', cancelStatus:'未申请取消' },
-  { id:2,  applicant:'曹文瑶', applicantId:'CP25004', applicantDept:'产品运营部',   applyType:'加班', initiator:'曹文瑶', initiatorId:'CP25004', initiateTime:'2026-05-06 18:00', completeTime:'2026-05-06 21:05', bizDate:'2026-05-06',              summary:'月度报表延时加班3小时',     approvalStatus:'已通过', cancelStatus:'未申请取消' },
-  { id:3,  applicant:'侯雅妮', applicantId:'CP25005', applicantDept:'产品运营部',   applyType:'年假', initiator:'侯雅妮', initiatorId:'CP25005', initiateTime:'2026-05-04 10:00', completeTime:'',                 bizDate:'2026-05-08 ~ 2026-05-12', summary:'年假申请（5天）',           approvalStatus:'审批中', cancelStatus:'未申请取消' },
-  { id:4,  applicant:'孟佳玫', applicantId:'CP25006', applicantDept:'产品运营部',   applyType:'外勤', initiator:'孟佳玫', initiatorId:'CP25006', initiateTime:'2026-05-06 08:30', completeTime:'2026-05-06 17:10', bizDate:'2026-05-06',              summary:'客户现场技术支持（外勤）',   approvalStatus:'已通过', cancelStatus:'未申请取消' },
-  { id:5,  applicant:'张艺嫚', applicantId:'CP25007', applicantDept:'研发设计一部', applyType:'事假', initiator:'张艺嫚', initiatorId:'CP25007', initiateTime:'2026-05-03 09:00', completeTime:'2026-05-03 10:40', bizDate:'2026-05-04',              summary:'个人事务请假（1天）',       approvalStatus:'已通过', cancelStatus:'未申请取消' },
-  { id:6,  applicant:'张林乐', applicantId:'CP25008', applicantDept:'研发设计一部', applyType:'出差', initiator:'张林乐', initiatorId:'CP25008', initiateTime:'2026-05-02 14:00', completeTime:'',                 bizDate:'2026-05-10 ~ 2026-05-11', summary:'深圳供应商拜访（2天）',     approvalStatus:'已拒绝', cancelStatus:'未申请取消' },
-  { id:7,  applicant:'李荣成', applicantId:'CP25009', applicantDept:'研发设计一部', applyType:'调休', initiator:'李荣成', initiatorId:'CP25009', initiateTime:'2026-05-01 16:00', completeTime:'2026-05-01 16:45', bizDate:'2026-05-08',              summary:'五一假期加班调休（1天）',   approvalStatus:'已通过', cancelStatus:'未申请取消' },
-  { id:8,  applicant:'林信敏', applicantId:'CP25010', applicantDept:'研发设计二部', applyType:'补卡', initiator:'林信敏', initiatorId:'CP25010', initiateTime:'2026-05-05 18:00', completeTime:'',                 bizDate:'2026-05-05',              summary:'上班打卡漏打补卡申请',       approvalStatus:'审批中', cancelStatus:'未申请取消' },
-  { id:9,  applicant:'程会娟', applicantId:'CP25012', applicantDept:'工艺开发部',   applyType:'出差', initiator:'程会娟', initiatorId:'CP25012', initiateTime:'2026-04-28 10:00', completeTime:'2026-04-28 17:30', bizDate:'2026-04-29 ~ 2026-04-30', summary:'工艺培训出差（2天）',       approvalStatus:'已通过', cancelStatus:'取消审批中' },
-  { id:10, applicant:'戴琳玲', applicantId:'CP25013', applicantDept:'工艺开发部',   applyType:'加班', initiator:'戴琳玲', initiatorId:'CP25013', initiateTime:'2026-05-06 20:00', completeTime:'2026-05-06 22:10', bizDate:'2026-05-06',              summary:'产品发布版本加班2小时',     approvalStatus:'已通过', cancelStatus:'未申请取消' },
-  { id:11, applicant:'邹智旭', applicantId:'CP25014', applicantDept:'工艺开发部',   applyType:'病假', initiator:'邹智旭', initiatorId:'CP25014', initiateTime:'2026-05-06 07:30', completeTime:'',                 bizDate:'2026-05-07',              summary:'感冒病假申请（1天）',       approvalStatus:'审批中', cancelStatus:'未申请取消' },
-  { id:12, applicant:'荣誉',   applicantId:'CP25015', applicantDept:'工艺开发部',   applyType:'年假', initiator:'荣誉',   initiatorId:'CP25015', initiateTime:'2026-04-25 09:00', completeTime:'2026-04-25 11:20', bizDate:'2026-04-27 ~ 2026-05-01', summary:'五一节前年假（5天）',       approvalStatus:'已撤销', cancelStatus:'未申请取消' },
-].slice(0, 5);
+const DUTY_RECORDS: DutyRecord[] = [];
 
-const UNCALC_RECORDS: UncalcRecord[] = [
-  { id:1, applicant:'曹文瑶', empId:'CP25004', dept:'产品运营部',   applyType:'加班', bizStartTime:'2026-04-30 18:00', bizEndTime:'2026-04-30 21:00', initiateTime:'2026-04-30 21:10', assignPeriod:'2026年04月', uncalcDates:'04/30',             uncalcCount:1 },
-  { id:2, applicant:'孟佳玫', empId:'CP25006', dept:'产品运营部',   applyType:'外勤', bizStartTime:'2026-04-28 09:00', bizEndTime:'2026-04-28 18:00', initiateTime:'2026-04-28 18:30', assignPeriod:'2026年04月', uncalcDates:'04/28',             uncalcCount:1 },
-  { id:3, applicant:'张艺嫚', empId:'CP25007', dept:'研发设计一部', applyType:'出差', bizStartTime:'2026-04-26 08:00', bizEndTime:'2026-04-28 20:00', initiateTime:'2026-04-25 16:00', assignPeriod:'2026年04月', uncalcDates:'04/26, 04/27, 04/28', uncalcCount:3 },
-  { id:4, applicant:'李荣成', empId:'CP25009', dept:'研发设计一部', applyType:'调休', bizStartTime:'2026-04-29 08:30', bizEndTime:'2026-04-29 17:30', initiateTime:'2026-04-28 15:00', assignPeriod:'2026年04月', uncalcDates:'04/29',             uncalcCount:1 },
-  { id:5, applicant:'程会娟', empId:'CP25012', dept:'工艺开发部',   applyType:'出差', bizStartTime:'2026-04-29 08:00', bizEndTime:'2026-04-30 20:00', initiateTime:'2026-04-28 10:00', assignPeriod:'2026年04月', uncalcDates:'04/29, 04/30',      uncalcCount:2 },
-  { id:6, applicant:'戴琳玲', empId:'CP25013', dept:'工艺开发部',   applyType:'加班', bizStartTime:'2026-04-30 19:00', bizEndTime:'2026-04-30 22:30', initiateTime:'2026-04-30 22:45', assignPeriod:'2026年04月', uncalcDates:'04/30',             uncalcCount:1 },
-  { id:7, applicant:'方赛',   empId:'CP25016', dept:'工艺开发部',   applyType:'年假', bizStartTime:'2026-04-27 08:30', bizEndTime:'2026-04-27 17:30', initiateTime:'2026-04-24 09:00', assignPeriod:'2026年04月', uncalcDates:'04/27',             uncalcCount:1 },
-  { id:8, applicant:'周誓',   empId:'CP25021', dept:'工艺开发部',   applyType:'出差', bizStartTime:'2026-04-28 07:00', bizEndTime:'2026-04-30 20:00', initiateTime:'2026-04-27 14:00', assignPeriod:'2026年04月', uncalcDates:'04/28, 04/29, 04/30', uncalcCount:3 },
-].slice(0, 5);
+const UNCALC_RECORDS: UncalcRecord[] = [];
 
 // ─── Helpers ─────────────────────────────────
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, cb: () => void) {
@@ -263,7 +241,7 @@ export default function WorkData() {
   const [jumpPage, setJumpPage] = useState('');
   const [quickFilter, setQuickFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [dutyRows, setDutyRows] = useState<DutyRecord[]>(DUTY_RECORDS);
+  const [dutyRows, setDutyRows] = useState<DutyRecord[]>([]);
   const [sourceFile, setSourceFile] = useState('');
   const [loadError, setLoadError] = useState('');
 
@@ -274,7 +252,7 @@ export default function WorkData() {
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {
-      setLoadError('真实数据连接失败，当前展示静态数据');
+      setLoadError('真实数据连接失败，当前不展示本地静态人员');
     }
   }, []);
 
@@ -284,7 +262,7 @@ export default function WorkData() {
 
   const QUICK_FILTERS = [{ v: 'all', label: '全部' }, { v: 'today', label: '今日' }, { v: 'week', label: '本周' }, { v: 'month', label: '本月' }] as const;
 
-  const rawRows = tab === 'records' ? dutyRows : UNCALC_RECORDS;
+  const rawRows = tab === 'records' ? dutyRows : [];
   const isInQuickRange = (dateText: string) => {
     if (quickFilter === 'all') return true;
     const date = new Date(String(dateText || '').slice(0, 10));

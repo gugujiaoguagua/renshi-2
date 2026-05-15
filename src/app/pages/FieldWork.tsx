@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
+import { fetchFieldOutRecords, fetchFieldTripRecords } from '../api/realData';
 import {
   Calendar,
   ChevronDown,
@@ -61,15 +62,9 @@ const TRIP_COLUMNS = [
 
 type FieldRow = { id: number; status: string; name: string; empId: string; dept: string; deptPath: string; effect: string; source: string; values: string[]; flowStatus: string };
 
-const OUT_ROWS: FieldRow[] = [
-  { id: 1, status: '已通过', name: '孟佳玫', empId: 'CP25006', dept: '产品运营部', deptPath: '产品研发中心/产品运营部', effect: '已生效', source: '移动端申请', values: ['孟佳玫', 'CP25006', '移动端申请', '2026-05-06 09:00', '2026-05-06 17:00', '8小时', '有', '客户现场技术支持', '2026-05-05 17:30'], flowStatus: '已通过' },
-  { id: 2, status: '审批中', name: '林娜', empId: 'CP25003', dept: '产品研发中心', deptPath: '产品研发中心', effect: '待生效', source: 'PC端申请', values: ['林娜', 'CP25003', 'PC端申请', '2026-05-07 09:00', '2026-05-07 12:00', '3小时', '无', '产品调研', '2026-05-06 16:00'], flowStatus: '审批中' },
-];
+const OUT_ROWS: FieldRow[] = [];
 
-const TRIP_ROWS: FieldRow[] = [
-  { id: 11, status: '已通过', name: '程会娟', empId: 'CP25012', dept: '工艺开发部', deptPath: '产品研发中心/工艺开发部', effect: '已生效', source: '移动端申请', values: ['移动端申请', '往返', '上海-苏州', '2026-05-04 ~ 2026-05-05', '有', '2', '工艺培训', '2026-05-03 09:30', '2026-05-03 11:00'], flowStatus: '已通过' },
-  { id: 12, status: '审批中', name: '张林乐', empId: 'CP25008', dept: '研发设计一部', deptPath: '产品研发中心/研发设计一部', effect: '待生效', source: 'PC端申请', values: ['PC端申请', '单程', '上海-深圳', '2026-05-10 ~ 2026-05-11', '无', '2', '供应商拜访', '2026-05-07 10:00', ''], flowStatus: '审批中' },
-];
+const TRIP_ROWS: FieldRow[] = [];
 
 const OUT_ADD_ITEMS: MenuItem[] = [
   { label: '添加单条' },
@@ -353,8 +348,8 @@ export default function FieldWork() {
   const [showFlowMenu, setShowFlowMenu] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [outRows, setOutRows] = useState<FieldRow[]>(OUT_ROWS);
-  const [tripRows, setTripRows] = useState<FieldRow[]>(TRIP_ROWS);
+  const [outRows, setOutRows] = useState<FieldRow[]>([]);
+  const [tripRows, setTripRows] = useState<FieldRow[]>([]);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [startTimeRange, setStartTimeRange] = useState({ start: '', end: '' });
   const [finishTimeRange, setFinishTimeRange] = useState({ start: '', end: '' });
@@ -367,6 +362,24 @@ export default function FieldWork() {
   const [tripTypeFilter, setTripTypeFilter] = useState('');
   const [tripRouteFilter, setTripRouteFilter] = useState('');
   const [sortConfig, setSortConfig] = useState<{ index: number; direction: 'asc' | 'desc' } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([fetchFieldOutRecords(), fetchFieldTripRecords()])
+      .then(([out, trip]) => {
+        if (cancelled) return;
+        setOutRows(out.rows as FieldRow[]);
+        setTripRows(trip.rows as FieldRow[]);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOutRows([]);
+        setTripRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const activeView: ViewType = location.pathname.includes('field-trip') ? 'trip' : 'out';
 

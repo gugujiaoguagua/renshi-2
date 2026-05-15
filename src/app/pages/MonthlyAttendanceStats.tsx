@@ -29,29 +29,7 @@ const MONTH_LABELS = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8
 // Today in app: 2026-05-07
 const TODAY = { year: 2026, month: 4, day: 7 }; // month is 0-indexed
 
-const EMPLOYEES: Employee[] = [
-  { name: '林娜',   empId: 'CP25003', dept: '产品研发中心', position: '产品研发中心总监',   attendGroup: '华托大厦', deptFullPath: '产品研发中心',         bizGroup: '' },
-  { name: '曹文瑶', empId: 'CP25004', dept: '产品运营部',   position: '产品研发中心总监',   attendGroup: '华托大厦', deptFullPath: '产品研发中心/产品',   bizGroup: '' },
-  { name: '侯雅妮', empId: 'CP25005', dept: '产品运营部',   position: '产品运营专员',       attendGroup: '华托大厦', deptFullPath: '产品研发中心/产品',   bizGroup: '' },
-  { name: '孟佳玫', empId: 'CP25006', dept: '产品运营部',   position: '研发设计师',         attendGroup: '华托大厦', deptFullPath: '产品研发中心/产品',   bizGroup: '' },
-  { name: '张艺嫚', empId: 'CP25007', dept: '研发设计一部', position: '主管级研发设计师',   attendGroup: '华托大厦', deptFullPath: '产品研发中心/研发',   bizGroup: '' },
-  { name: '张林乐', empId: 'CP25008', dept: '研发设计一部', position: '研发设计师',         attendGroup: '华托大厦', deptFullPath: '产品研发中心/研发',   bizGroup: '' },
-  { name: '李荣成', empId: 'CP25009', dept: '研发设计一部', position: '研发设计师',         attendGroup: '华托大厦', deptFullPath: '产品研发中心/研发',   bizGroup: '' },
-  { name: '林信敏', empId: 'CP25010', dept: '研发设计二部', position: '研发设计二部总监',   attendGroup: '华托大厦', deptFullPath: '产品研发中心/研发',   bizGroup: '' },
-  { name: '吴洛富', empId: 'CP25011', dept: '直营建连店',   position: '设计师',             attendGroup: '华托大厦', deptFullPath: '产品研发中心/技术',   bizGroup: '' },
-  { name: '程会娟', empId: 'CP25012', dept: '工艺开发部',   position: '主管级工艺工程师',   attendGroup: '华托大厦', deptFullPath: '产品研发中心/工艺',   bizGroup: '' },
-  { name: '戴琳玲', empId: 'CP25013', dept: '工艺开发部',   position: '工艺开发部主管',     attendGroup: '华托大厦', deptFullPath: '产品研发中心/工艺',   bizGroup: '' },
-  { name: '邹智旭', empId: 'CP25014', dept: '工艺开发部',   position: '工艺工程师',         attendGroup: '华托大厦', deptFullPath: '产品研发中心/工艺',   bizGroup: '' },
-  { name: '荣誉',   empId: 'CP25015', dept: '工艺开发部',   position: '工艺工程师助理',     attendGroup: '华托大厦', deptFullPath: '产品研发中心/工艺',   bizGroup: '' },
-  { name: '方赛',   empId: 'CP25016', dept: '工艺开发部',   position: '中级工艺工程师',     attendGroup: '华托大厦', deptFullPath: '产品研发中心/工艺',   bizGroup: '' },
-  { name: '劲善达', empId: 'CP25017', dept: '工艺开发部',   position: '中级工艺工程师',     attendGroup: '华托大厦', deptFullPath: '产品研发中心/工艺',   bizGroup: '' },
-  { name: '颜志文', empId: 'CP25018', dept: '工艺开发部',   position: '试制工程师',         attendGroup: '华托大厦', deptFullPath: '产品研发中心/工艺',   bizGroup: '' },
-  { name: '尤国强', empId: 'CP25019', dept: '技术支持部',   position: '技术支持部主管',     attendGroup: '华托大厦', deptFullPath: '产品研发中心/技术',   bizGroup: '' },
-  { name: '朱苗建', empId: 'CP25020', dept: '直营建连店',   position: '中级样品设计师',     attendGroup: '华托大厦', deptFullPath: '产品研发中心/信息',   bizGroup: '' },
-  { name: '周誓',   empId: 'CP25021', dept: '工艺开发部',   position: '高级工艺工程师',     attendGroup: '华托大厦', deptFullPath: '产品研发中心/工艺',   bizGroup: '' },
-  { name: '赵继磊', empId: 'CP25022', dept: '技术服务组',   position: '中级技术工程师',     attendGroup: '华托大厦', deptFullPath: '产品研发中心/技术',   bizGroup: '' },
-  { name: '行健磊', empId: 'CP25023', dept: '技术服务组',   position: '业务技术工程师',     attendGroup: '华托大厦', deptFullPath: '产品研发中心/技术',   bizGroup: '' },
-].slice(0, 5);
+const EMPLOYEES: Employee[] = [];
 
 // ─── Helpers ─────────────────────────────────
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, cb: () => void) {
@@ -313,7 +291,7 @@ export default function MonthlyAttendanceStats() {
   const [pageSize, setPageSize] = useState(20);
   const [jumpPage, setJumpPage] = useState('');
   const [showDataInfo, setShowDataInfo] = useState(false);
-  const [employees, setEmployees] = useState<Employee[]>(EMPLOYEES);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [sourceFile, setSourceFile] = useState('');
   const [loadError, setLoadError] = useState('');
 
@@ -324,7 +302,7 @@ export default function MonthlyAttendanceStats() {
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {
-      setLoadError('真实数据连接失败，当前展示静态数据');
+      setLoadError('真实数据连接失败，当前不展示本地静态人员');
     }
   }, []);
 

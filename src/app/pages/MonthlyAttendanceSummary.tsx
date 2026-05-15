@@ -109,30 +109,7 @@ const ALL_COLS: ColDef[] = [
   { key: 'confirmStatus', label: '确认状态', width: 98, sortable: true },
 ];
 
-const EMPLOYEE_BASE = [
-  { name: '林娜', empId: 'CP25003', dept: '产品研发中心', position: '产品研发中心总监', hireDate: '2023-03-09', resignDate: '', deptFullPath: '产品研发中心', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '曹文瑶', empId: 'CP25004', dept: '产品运营部', position: '产品研发中心总监', hireDate: '2020-12-18', resignDate: '', deptFullPath: '产品研发中心/产品运营部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '侯雅妮', empId: 'CP25005', dept: '产品运营部', position: '产品运营专员', hireDate: '2024-06-19', resignDate: '', deptFullPath: '产品研发中心/产品运营部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '孟佳玫', empId: 'CP25006', dept: '产品运营部', position: '研发设计师', hireDate: '2024-07-08', resignDate: '', deptFullPath: '产品研发中心/产品运营部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '张艺嫚', empId: 'CP25007', dept: '研发设计一部', position: '主管级研发设计师', hireDate: '2020-03-16', resignDate: '', deptFullPath: '产品研发中心/研发设计一部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '张林乐', empId: 'CP25008', dept: '研发设计一部', position: '研发设计师', hireDate: '2023-12-19', resignDate: '', deptFullPath: '产品研发中心/研发设计一部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '李荣成', empId: 'CP25009', dept: '研发设计一部', position: '研发设计师', hireDate: '2023-03-27', resignDate: '', deptFullPath: '产品研发中心/研发设计一部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '林信敏', empId: 'CP25010', dept: '研发设计二部', position: '研发设计二部总监', hireDate: '2009-09-07', resignDate: '', deptFullPath: '产品研发中心/研发设计二部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '吴洛富', empId: 'CP25011', dept: '直营建连店', position: '设计师', hireDate: '2008-07-20', resignDate: '', deptFullPath: '产品研发中心/技术支持部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '程会娟', empId: 'CP25012', dept: '工艺开发部', position: '主管级工艺工程师', hireDate: '2023-02-20', resignDate: '', deptFullPath: '产品研发中心/工艺开发部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '戴琳玲', empId: 'CP25013', dept: '工艺开发部', position: '工艺开发部主管', hireDate: '2021-03-01', resignDate: '', deptFullPath: '产品研发中心/工艺开发部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '邹智旭', empId: 'CP25014', dept: '工艺开发部', position: '工艺工程师', hireDate: '2024-05-06', resignDate: '', deptFullPath: '产品研发中心/工艺开发部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '荣誉', empId: 'CP25015', dept: '工艺开发部', position: '工艺工程师助理', hireDate: '2025-03-03', resignDate: '', deptFullPath: '产品研发中心/工艺开发部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '方赛', empId: 'CP25016', dept: '工艺开发部', position: '中级工艺工程师', hireDate: '2025-03-25', resignDate: '', deptFullPath: '产品研发中心/工艺开发部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '陈善达', empId: 'CP25017', dept: '工艺开发部', position: '中级工艺工程师', hireDate: '2025-04-14', resignDate: '', deptFullPath: '产品研发中心/工艺开发部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '蔡志文', empId: 'CP25018', dept: '工艺开发部', position: '试制工程师', hireDate: '2020-07-29', resignDate: '', deptFullPath: '产品研发中心/工艺开发部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '尤国强', empId: 'CP25019', dept: '技术支持部', position: '技术支持部主管', hireDate: '2019-06-28', resignDate: '', deptFullPath: '产品研发中心/技术支持部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '余国强', empId: 'CP25020', dept: '直营样品组', position: '中级样品设计师', hireDate: '2024-07-15', resignDate: '', deptFullPath: '产品研发中心/直营样品组', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '周熙', empId: 'CP25021', dept: '工艺开发部', position: '高级工艺工程师', hireDate: '2015-11-26', resignDate: '', deptFullPath: '产品研发中心/工艺开发部', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '邢佩佩', empId: 'CP25022', dept: '技术服务组', position: '中级技术工程师', hireDate: '2013-06-15', resignDate: '', deptFullPath: '产品研发中心/技术服务组', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '杨钰敏', empId: 'CP25023', dept: '技术服务组', position: '中级技术工程师', hireDate: '2023-10-07', resignDate: '', deptFullPath: '产品研发中心/技术服务组', bizGroup: '-', attendGroup: '华托大厦' },
-  { name: '林恺敏', empId: 'CP25025', dept: '数据设计部', position: '资深设计师', hireDate: '2023-12-21', resignDate: '', deptFullPath: '产品研发中心/数据设计部', bizGroup: '-', attendGroup: '华托大厦' },
-].slice(0, 5);
+const EMPLOYEE_BASE = [];
 
 const DEFAULT_ROWS: MonthEmployee[] = EMPLOYEE_BASE.map((emp, index) => ({
   id: index + 1,
@@ -802,7 +779,7 @@ export default function MonthlyAttendanceSummary() {
 
   const [year, setYear] = useState(2026);
   const [month, setMonth] = useState(4);
-  const [rows, setRows] = useState<MonthEmployee[]>(DEFAULT_ROWS);
+  const [rows, setRows] = useState<MonthEmployee[]>([]);
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [sortKey, setSortKey] = useState<keyof MonthEmployee | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>(null);
@@ -843,7 +820,7 @@ export default function MonthlyAttendanceSummary() {
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {
-      setLoadError('真实数据连接失败，当前展示静态数据');
+      setLoadError('真实数据连接失败，当前不展示本地静态人员');
     }
   }, []);
 

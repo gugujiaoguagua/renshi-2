@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
+import { fetchLeaveBalances, fetchLeaveDetails, fetchLeaveRecords } from '../api/realData';
 import {
   AlertCircle,
   Calendar,
@@ -50,17 +51,9 @@ const DETAIL_MORE_ITEMS: MenuItem[] = [
   { label: '导出本页数据' },
 ];
 
-const LEAVE_RECORD_ROWS = [
-  ['已通过', '侯雅妮', 'CP25005', '产品运营部', '产品研发中心/产品运营部', '侯雅妮', 'CP25005', '员工发起', '年假', '2026-05-08 09:00', '2026-05-12 18:00', '5天', '年假申请', '2026-05-04 10:00', '2026-05-04 11:00', '已通过', '查看'],
-  ['审批中', '荣誉', 'CP25015', '工艺开发部', '产品研发中心/工艺开发部', '荣誉', 'CP25015', '员工发起', '病假', '2026-05-07 09:00', '2026-05-07 18:00', '1天', '病假申请', '2026-05-06 07:30', '', '审批中', '查看'],
-  ['已拒绝', '张艺嫚', 'CP25007', '研发设计一部', '产品研发中心/研发设计一部', '张艺嫚', 'CP25007', '员工发起', '事假', '2026-05-04 09:00', '2026-05-04 18:00', '1天', '个人事务', '2026-05-03 09:00', '2026-05-03 10:40', '已拒绝', '查看'],
-];
+const LEAVE_RECORD_ROWS: Array<Array<React.ReactNode>> = [];
 
-const LEAVE_BALANCE_ROWS = [
-  ['林娜', 'CP25003', '产品研发中心', '产品研发中心', '2023-03-09', '5', '3', '10', '0', '0', '3', '0'],
-  ['曹文瑶', 'CP25004', '产品运营部', '产品研发中心/产品运营部', '2020-12-18', '7', '3', '10', '0', '0', '3', '0'],
-  ['侯雅妮', 'CP25005', '产品运营部', '产品研发中心/产品运营部', '2024-06-19', '2', '3', '10', '0', '0', '3', '0'],
-];
+const LEAVE_BALANCE_ROWS: Array<Array<React.ReactNode>> = [];
 
 const TYPE_ROWS = [
   { name: '年假', short: '年', enabled: true, unit: '按天请假', paid: '是', negative: '否', before: '否', note: '年假额度可根据员工司龄自动发放，支持跨周期结转。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:17' },
@@ -184,6 +177,21 @@ function LeaveRecordView({
   const [recordStatusFilter, setRecordStatusFilter] = useState('');
   const [flowStatusFilter, setFlowStatusFilter] = useState('');
   const [sortConfig, setSortConfig] = useState<{ index: number; direction: 'asc' | 'desc' } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchLeaveRecords()
+      .then((res) => {
+        if (!cancelled) setTableRows(res.rows as Array<Array<React.ReactNode>>);
+      })
+      .catch(() => {
+        if (!cancelled) setTableRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const rows = tableRows.filter(row => {
 
     const applicantKeyword = applicantFilter.trim().toLowerCase();
@@ -327,9 +335,25 @@ function LeaveBalanceView({
   onCloseMenu: () => void;
 }) {
   const [sortConfig, setSortConfig] = useState<{ index: number; direction: 'asc' | 'desc' } | null>(null);
+  const [balanceRows, setBalanceRows] = useState<Array<Array<React.ReactNode>>>(LEAVE_BALANCE_ROWS);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchLeaveBalances()
+      .then((res) => {
+        if (!cancelled) setBalanceRows(res.rows as Array<Array<React.ReactNode>>);
+      })
+      .catch(() => {
+        if (!cancelled) setBalanceRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const sortedRows = !sortConfig
-    ? LEAVE_BALANCE_ROWS
-    : [...LEAVE_BALANCE_ROWS].sort((a, b) => {
+    ? balanceRows
+    : [...balanceRows].sort((a, b) => {
       const aValue = String(a[sortConfig.index] ?? '');
       const bValue = String(b[sortConfig.index] ?? '');
       const factor = sortConfig.direction === 'asc' ? 1 : -1;
@@ -433,6 +457,19 @@ function LeaveDetailView({
 }) {
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [detailRows, setDetailRows] = useState<Array<Array<React.ReactNode>>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchLeaveDetails()
+      .then((res) => {
+        if (!cancelled) setDetailRows(res.rows as Array<Array<React.ReactNode>>);
+      })
+      .catch(() => {
+        if (!cancelled) setDetailRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const addDetailRow = (source = '新增额度记录') => {
     const today = new Date().toISOString().slice(0, 10);
     setDetailRows(current => [['新增员工', `LD${String(current.length + 1).padStart(4, '0')}`, '产品运营部', '产品研发中心/产品运营部', today, '2026', '年假', '1', '1', '1', '0', source.includes('冻结') ? '1' : '0', '0', '1', `${today}`, '2026-12-31', today, '查看'], ...current]);

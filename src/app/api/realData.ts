@@ -201,6 +201,19 @@ export type AttendanceAnomalyRecord = {
 
 export type SettingTableRow = string[];
 
+export type OnboardEmployeePayload = {
+  name: string;
+  employeeNo: string;
+  department?: string;
+  deptFullPath?: string;
+  position?: string;
+  hireDate?: string;
+  userId?: string;
+  attendanceGroupName?: string;
+  shiftName?: string;
+  faceStatus?: string;
+};
+
 export type StatItemRecord = {
   id: number;
   name: string;
@@ -314,6 +327,21 @@ export async function fetchSettingsFace() {
 
 export async function fetchSettingsPeople() {
   return limitDataResponse(await requestJson<DataResponse<SettingTableRow>>('/api/settings-people'));
+}
+
+export async function onboardEmployee(payload: OnboardEmployeePayload) {
+  return requestJson<{
+    ok: boolean;
+    created: boolean;
+    employee: Record<string, unknown>;
+    peopleRow: SettingTableRow;
+    faceRow: SettingTableRow;
+    attendanceRow: AttendanceEmployee;
+  }>('/api/employees/onboard', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function fetchStatItems() {

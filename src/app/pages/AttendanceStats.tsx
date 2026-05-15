@@ -358,9 +358,7 @@ export default function AttendanceStats() {
     setIsLoading(true);
     try {
       const res = await fetchAttendanceEmployees();
-      if (res.rows?.length) {
-        setEmployees(res.rows);
-      }
+      setEmployees(res.rows || []);
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {

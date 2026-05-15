@@ -292,9 +292,7 @@ export default function ExternalDataManagement() {
   const loadExternalRows = useCallback(async () => {
     try {
       const res = await fetchExternalRecords();
-      if (res.rows?.length) {
-        setRows(res.rows);
-      }
+      setRows(res.rows || []);
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {

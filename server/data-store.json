@@ -7801,31 +7801,8 @@
       "lateMinutes": 0
     }
   ],
-  "updatedAt": "2026-05-15T07:22:42.582Z",
+  "updatedAt": "2026-05-15T07:49:24.764Z",
   "mobileClockRecords": [
-    {
-      "id": "clock_1778829762581",
-      "employeeId": "emp_CP25003",
-      "employeeName": "林娜",
-      "employeeNo": "CP25003",
-      "dept": "产品研发中心",
-      "attendanceGroupName": "华托大厦",
-      "shiftName": "早九晚六",
-      "date": "2026-05-15",
-      "type": "clockIn",
-      "time": "15:22",
-      "serverTime": "2026-05-15 15:22:42",
-      "latitude": 31.2304,
-      "longitude": 121.4737,
-      "accuracy": 15,
-      "address": "华托大厦",
-      "workLocation": "华托大厦",
-      "distance": 0,
-      "faceVerifyId": "verify_face",
-      "photoFileId": "verify_photo",
-      "result": "normal",
-      "message": "打卡成功"
-    },
     {
       "id": "clock_1778828957147",
       "employeeId": "emp_demo_001",
@@ -8074,5 +8051,6 @@
       "status": "pending",
       "handled": false
     }
-  ]
+  ],
+  "onboardedEmployees": []
 }

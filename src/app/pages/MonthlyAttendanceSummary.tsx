@@ -837,11 +837,9 @@ export default function MonthlyAttendanceSummary() {
   const loadMonthlySummary = useCallback(async () => {
     try {
       const res = await fetchMonthlySummaryEmployees();
-      if (res.rows?.length) {
-        setRows(res.rows);
-        setSelectedRows(new Set());
-        setPage(1);
-      }
+      setRows(res.rows || []);
+      setSelectedRows(new Set());
+      setPage(1);
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {

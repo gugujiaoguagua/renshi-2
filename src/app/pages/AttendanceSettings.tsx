@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
-import { fetchSettingsFace, fetchSettingsPeople, fetchSettingsShifts } from '../api/realData';
+import { fetchSettingsFace, fetchSettingsPeople, fetchSettingsShifts, onboardEmployee } from '../api/realData';
 import {
   AlertCircle,
   Calendar,
@@ -216,9 +216,9 @@ export default function AttendanceSettings() {
         fetchSettingsPeople(),
         fetchSettingsFace(),
       ]);
-      if (shifts.rows?.length) setShiftRows(shifts.rows);
-      if (people.rows?.length) setPeopleRows(people.rows);
-      if (face.rows?.length) setFaceRows(face.rows);
+      setShiftRows(shifts.rows || []);
+      setPeopleRows(people.rows || []);
+      setFaceRows(face.rows || []);
       setSourceInfo(`班次：${shifts.sourceFile}；人员：${people.sourceFile}；人脸：${face.sourceFile}`);
       setLoadError('');
     } catch (_error) {
@@ -267,7 +267,19 @@ export default function AttendanceSettings() {
       {activeView === 'card-rules' && <CardRulesView colors={colors} />}
       {activeView === 'mobile-clock' && <MobileClockView colors={colors} />}
       {activeView === 'location' && <LocationView colors={colors} showMore={!!showMore.location} onToggleMore={() => toggleMore('location')} />}
-      {activeView === 'face' && <FaceView colors={colors} showMore={!!showMore.face} onToggleMore={() => toggleMore('face')} faceRows={faceRows} sourceInfo={sourceInfo} loadError={loadError} />}
+      {activeView === 'face' && <FaceView
+        colors={colors}
+        showMore={!!showMore.face}
+        onToggleMore={() => toggleMore('face')}
+        faceRows={faceRows}
+        sourceInfo={sourceInfo}
+        loadError={loadError}
+        onEmployeeCreated={(peopleRow, faceRow) => {
+          setPeopleRows(current => [peopleRow, ...current.filter(row => row[1] !== peopleRow[1])]);
+          setFaceRows(current => [faceRow, ...current.filter(row => row[1] !== faceRow[1])]);
+          setSourceInfo('员工主数据 + 人脸管理 + 考勤人员');
+        }}
+      />}
       {activeView === 'devices' && <DevicesView colors={colors} />}
       {activeView === 'holiday' && <HolidayView colors={colors} />}
       {activeView === 'calendar' && <CalendarView colors={colors} />}
@@ -941,7 +953,23 @@ function LocationView({ colors, showMore, onToggleMore }: { colors: any; showMor
   );
 }
 
-function FaceView({ colors, showMore, onToggleMore, faceRows, sourceInfo, loadError }: { colors: any; showMore: boolean; onToggleMore: () => void; faceRows: string[][]; sourceInfo?: string; loadError?: string }) {
+function FaceView({
+  colors,
+  showMore,
+  onToggleMore,
+  faceRows,
+  sourceInfo,
+  loadError,
+  onEmployeeCreated,
+}: {
+  colors: any;
+  showMore: boolean;
+  onToggleMore: () => void;
+  faceRows: string[][];
+  sourceInfo?: string;
+  loadError?: string;
+  onEmployeeCreated: (peopleRow: string[], faceRow: string[]) => void;
+}) {
   const [rowsData, setRowsData] = useState<string[][]>(faceRows);
   const [draftFilters, setDraftFilters] = useState({ employee: '', dept: '', group: '', status: '', start: '', end: '' });
   const [appliedFilters, setAppliedFilters] = useState(draftFilters);
@@ -978,6 +1006,51 @@ function FaceView({ colors, showMore, onToggleMore, faceRows, sourceInfo, loadEr
   const importFaces = () => {
     const targetIds = new Set(targetRows.map(createRowId));
     setRowsData(current => current.map(row => targetIds.has(createRowId(row)) ? setRowCell(setRowCell(row, 6, '已录入'), 9, '批量导入') : row));
+  };
+
+  const createEmployeeWithFace = async () => {
+    const name = window.prompt('请输入新员工姓名');
+    if (name === null) return;
+    const employeeNo = window.prompt('请输入员工号');
+    if (employeeNo === null) return;
+    const trimmedName = name.trim();
+    const trimmedNo = employeeNo.trim();
+    if (!trimmedName || !trimmedNo) {
+      window.alert('姓名和员工号必填');
+      return;
+    }
+
+    const department = window.prompt('请输入部门', '新人培训组');
+    if (department === null) return;
+    const position = window.prompt('请输入岗位', '-');
+    if (position === null) return;
+    const attendanceGroupName = window.prompt('请输入考勤组', '华托大厦');
+    if (attendanceGroupName === null) return;
+    const shiftName = window.prompt('请输入班次', '早九晚六');
+    if (shiftName === null) return;
+    const hireDate = window.prompt('请输入入职日期', new Date().toISOString().slice(0, 10));
+    if (hireDate === null) return;
+    const userId = window.prompt('请输入企业微信UserID，测试阶段可留空', `wecom_${trimmedNo}`);
+    if (userId === null) return;
+
+    try {
+      const result = await onboardEmployee({
+        name: trimmedName,
+        employeeNo: trimmedNo,
+        department: department.trim() || '未分配部门',
+        position: position.trim() || '-',
+        attendanceGroupName: attendanceGroupName.trim() || '华托大厦',
+        shiftName: shiftName.trim() || '早九晚六',
+        hireDate: hireDate.trim() || new Date().toISOString().slice(0, 10),
+        userId: userId.trim() || `wecom_${trimmedNo}`,
+        faceStatus: '已录入',
+      });
+      onEmployeeCreated(result.peopleRow, result.faceRow);
+      setRowsData(current => [result.faceRow, ...current.filter(row => row[1] !== result.faceRow[1])]);
+      window.alert(`${trimmedName} 已录入员工主数据和人脸信息`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : '新增员工失败');
+    }
   };
 
   const addReminderRecord = (message: string) => {
@@ -1028,6 +1101,7 @@ function FaceView({ colors, showMore, onToggleMore, faceRows, sourceInfo, loadEr
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
+        <button onClick={createEmployeeWithFace} style={primaryBtn(colors)}>新增员工并录入人脸</button>
         <button onClick={importFaces} style={primaryBtn(colors)}>批量导入人脸</button>
         <button onClick={() => addReminderRecord(`已配置录入提醒：覆盖${targetRows.length}人`)} style={outlineBtn(colors)}>配置录入提醒</button>
         <button onClick={refreshFaces} style={outlineBtn(colors)}>批量重刷</button>

@@ -270,9 +270,7 @@ export default function WorkData() {
   const loadWorkData = useCallback(async () => {
     try {
       const res = await fetchWorkDataRecords();
-      if (res.rows?.length) {
-        setDutyRows(res.rows);
-      }
+      setDutyRows(res.rows || []);
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {

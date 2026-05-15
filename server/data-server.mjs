@@ -59,6 +59,17 @@ function setStoredRows(key, rows) {
   writeStore(store);
 }
 
+function upsertStoredRow(key, row, idGetter) {
+  const rows = getStoredRows(key) || [];
+  const nextId = idGetter(row);
+  const existingIndex = rows.findIndex((item) => idGetter(item) === nextId);
+  const nextRows = existingIndex >= 0
+    ? rows.map((item, index) => (index === existingIndex ? { ...item, ...row } : item))
+    : [row, ...rows];
+  setStoredRows(key, nextRows);
+  return { row, rows: nextRows, created: existingIndex < 0 };
+}
+
 function rowPersonKey(row) {
   if (Array.isArray(row)) return asText(row[1] || row[0], '');
   return asText(
@@ -407,6 +418,98 @@ function mapPeopleSettingRows(rows) {
   ]).filter((row) => row[0] !== '-');
 }
 
+function getOnboardedEmployees() {
+  return getStoredRows('onboardedEmployees') || [];
+}
+
+function normalizeOnboardedEmployee(input = {}) {
+  const employeeNo = asRawText(input.employeeNo || input.empId);
+  const name = asRawText(input.name);
+  return {
+    id: asRawText(input.id || `emp_${employeeNo}`),
+    userId: asRawText(input.userId || `wecom_${employeeNo}`),
+    name,
+    employeeNo,
+    department: asText(input.department || input.dept, '未分配部门'),
+    deptFullPath: asText(input.deptFullPath || input.department, input.department ? `上海拉达家具有限公司/${input.department}` : '上海拉达家具有限公司/未分配部门'),
+    position: asText(input.position, '-'),
+    hireDate: asText(input.hireDate, currentDateText()),
+    employeeType: asText(input.employeeType, '全职'),
+    employeeStatus: asText(input.employeeStatus, '在职'),
+    businessGroup: asText(input.businessGroup, '-'),
+    workPlace: asText(input.workPlace, '-'),
+    attendanceGroupId: asText(input.attendanceGroupId, 'group_huatuo'),
+    attendanceGroupName: asText(input.attendanceGroupName || input.attendGroup, '华托大厦'),
+    shiftId: asText(input.shiftId, MOBILE_SHIFT.id),
+    shiftName: asText(input.shiftName || input.shift, MOBILE_SHIFT.name),
+    statScheme: asText(input.statScheme, '默认方案'),
+    faceStatus: asText(input.faceStatus, '已录入'),
+    reviewStatus: asText(input.reviewStatus, '已通过'),
+    faceScore: asText(input.faceScore, '系统录入'),
+    dataSource: asText(input.dataSource, '后台录入'),
+    office: input.office && typeof input.office === 'object' ? input.office : MOBILE_OFFICE,
+    createdAt: asText(input.createdAt, nowText()),
+    updatedAt: nowText(),
+  };
+}
+
+function onboardedEmployeeToPeopleRow(employee) {
+  return [
+    employee.name,
+    employee.employeeNo,
+    employee.department,
+    employee.position,
+    employee.hireDate,
+    employee.shiftName,
+    currentDateText().slice(0, 7).replace('-', ''),
+    employee.employeeType,
+    employee.employeeStatus,
+    '-',
+    employee.businessGroup,
+    employee.workPlace,
+    employee.attendanceGroupName,
+    employee.statScheme,
+  ];
+}
+
+function onboardedEmployeeToFaceRow(employee) {
+  return [
+    employee.name,
+    employee.employeeNo,
+    employee.department,
+    employee.deptFullPath,
+    employee.attendanceGroupName,
+    employee.hireDate,
+    employee.faceStatus,
+    employee.reviewStatus,
+    employee.faceScore,
+    employee.dataSource,
+  ];
+}
+
+function onboardedEmployeeToAttendanceStatsRow(employee) {
+  return {
+    name: employee.name,
+    empId: employee.employeeNo,
+    attendGroup: employee.attendanceGroupName,
+    dept: employee.department,
+    deptFull: employee.deptFullPath,
+    shift: employee.shiftName,
+    type: '移动端打卡',
+    attendance: '未出勤',
+    status: '未出勤',
+    anomaly: '-',
+    leave: '-',
+    fieldTrip: '-',
+    cin1: '-',
+    cout1: '-',
+    cin2: '-',
+    cout2: '-',
+    cin3: '-',
+    cout3: '-',
+  };
+}
+
 function mapStatItemRows(rows) {
   const sample = rows[0] || {};
   return Object.keys(sample).map((name, index) => {
@@ -529,6 +632,17 @@ function readMappedRows(file, sheetMatcher, mapper) {
   return { rows: mapper(rows), sheetName };
 }
 
+function sendLinkedRows(res, sheetName, rows, extra = {}) {
+  return res.json({
+    sourceFile: '员工主数据 + 小程序移动端 API',
+    sheetName,
+    total: rows.length,
+    rows,
+    linkedOnly: true,
+    ...extra,
+  });
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, dataDir: DATA_DIR, files: listExcelFiles().map((f) => f.name) });
 });
@@ -540,28 +654,13 @@ app.get('/api/data-sources', (_req, res) => {
 
 app.get('/api/attendance-stats', (_req, res) => {
   const mobileRows = mapMobileClockRowsToAttendanceStats(getMobileRows('mobileClockRecords', []));
-  const file = pickFile('实时统计', '每日统计表', '考勤明细');
-  try {
-    const { rows, sheetName } = readMappedRows(file, undefined, mapAttendanceRows);
-    const data = limitDemoPeople([...mobileRows, ...rows]);
-    if (!data.length) return res.status(404).json({ message: '未找到实时统计数据文件。' });
-    return res.json({ sourceFile: mobileRows.length ? '小程序移动端 mock API + 实时统计' : file.name, sheetName, total: data.length, rows: data });
-  } catch (error) {
-    if (mobileRows.length) {
-      const rows = limitDemoPeople(mobileRows);
-      return res.json({ sourceFile: '小程序移动端 mock API', sheetName: 'mobileClockRecords', total: rows.length, rows });
-    }
-    return res.status(500).json({ message: '读取实时统计失败', detail: String(error?.message || error) });
-  }
+  const onboardedRows = getOnboardedEmployees().map(onboardedEmployeeToAttendanceStatsRow);
+  const rows = limitDemoPeople([...mobileRows, ...onboardedRows]);
+  return sendLinkedRows(res, 'attendanceStats', rows);
 });
 
 app.get('/api/daily-attendance', (_req, res) => {
-  const persisted = getStoredRows('dailyAttendance');
-  if (persisted) {
-    const rows = limitDemoPeople(persisted);
-    return res.json({ sourceFile: '本地持久化数据 data-store.json', sheetName: 'dailyAttendance', total: rows.length, rows, persisted: true });
-  }
-  sendMappedRows(res, pickFile('每日统计表'), undefined, mapDailyRows, '未找到每日统计表。');
+  return sendLinkedRows(res, 'dailyAttendance', []);
 });
 
 app.put('/api/daily-attendance', (req, res) => {
@@ -574,16 +673,11 @@ app.put('/api/daily-attendance', (req, res) => {
 });
 
 app.get('/api/monthly-attendance', (_req, res) => {
-  sendMappedRows(res, pickFile('考勤明细', '月考勤统计'), undefined, mapMonthlyRows, '未找到月考勤明细。');
+  return sendLinkedRows(res, 'monthlyAttendance', []);
 });
 
 app.get('/api/monthly-summary', (_req, res) => {
-  const persisted = getStoredRows('monthlySummary');
-  if (persisted) {
-    const rows = limitDemoPeople(persisted);
-    return res.json({ sourceFile: '本地持久化数据 data-store.json', sheetName: 'monthlySummary', total: rows.length, rows, persisted: true });
-  }
-  sendMappedRows(res, pickFile('月考勤统计'), undefined, mapMonthlySummaryRows, '未找到月考勤统计汇总表。');
+  return sendLinkedRows(res, 'monthlySummary', []);
 });
 
 app.put('/api/monthly-summary', (req, res) => {
@@ -598,40 +692,12 @@ app.put('/api/monthly-summary', (req, res) => {
 
 app.get('/api/clock-records', (_req, res) => {
   const mobileRows = mapMobileClockRowsToAdmin(getMobileRows('mobileClockRecords', []));
-  const file = pickFile('原始打卡记录');
-  try {
-    const { rows, sheetName } = readMappedRows(file, (name) => name.includes('明细'), mapClockRows);
-    const data = limitDemoPeople([...mobileRows, ...rows]);
-    if (!data.length) return res.status(404).json({ message: '未找到原始打卡记录。' });
-    return res.json({ sourceFile: mobileRows.length ? '小程序移动端 mock API + 原始打卡记录' : file.name, sheetName, total: data.length, rows: data });
-  } catch (error) {
-    if (mobileRows.length) {
-      const rows = limitDemoPeople(mobileRows);
-      return res.json({ sourceFile: '小程序移动端 mock API', sheetName: 'mobileClockRecords', total: rows.length, rows });
-    }
-    return res.status(500).json({ message: '读取原始打卡记录失败', detail: String(error?.message || error) });
-  }
+  return sendLinkedRows(res, 'mobileClockRecords', limitDemoPeople(mobileRows));
 });
 
 app.get('/api/attendance-anomalies', (_req, res) => {
   const mobileRows = mapMobileAnomalyRowsToAdmin(getMobileRows('mobileAnomalies', []));
-  const persisted = getStoredRows('attendanceAnomalies');
-  if (persisted) {
-    const rows = limitDemoPeople([...mobileRows, ...persisted]);
-    return res.json({ sourceFile: mobileRows.length ? '小程序移动端 mock API + 本地持久化数据 data-store.json' : '本地持久化数据 data-store.json', sheetName: 'attendanceAnomalies', total: rows.length, rows, persisted: true });
-  }
-  const file = pickFile('考勤异常');
-  try {
-    const { rows, sheetName } = readMappedRows(file, undefined, mapAnomalyRows);
-    const data = limitDemoPeople([...mobileRows, ...rows]);
-    if (!data.length) return res.status(404).json({ message: '未找到考勤异常数据。' });
-    return res.json({ sourceFile: mobileRows.length ? '小程序移动端 mock API + 考勤异常' : file.name, sheetName, total: data.length, rows: data });
-  } catch (error) {
-    if (mobileRows.length) {
-      return res.json({ sourceFile: '小程序移动端 mock API', sheetName: 'mobileAnomalies', total: mobileRows.length, rows: mobileRows });
-    }
-    return res.status(500).json({ message: '读取考勤异常失败', detail: String(error?.message || error) });
-  }
+  return sendLinkedRows(res, 'mobileAnomalies', mobileRows);
 });
 
 app.put('/api/attendance-anomalies', (req, res) => {
@@ -645,27 +711,43 @@ app.put('/api/attendance-anomalies', (req, res) => {
 
 
 app.get('/api/work-data', (_req, res) => {
-  sendMappedRows(res, pickFile('月考勤统计'), undefined, mapWorkDataRows, '未找到可派生勤务数据的月考勤统计表。');
+  return sendLinkedRows(res, 'workData', []);
 });
 
 app.get('/api/settings-shifts', (_req, res) => {
-  sendMappedRows(res, pickFile('班次管理'), undefined, mapShiftSettingRows, '未找到班次管理表。', { limitPeople: false });
+  return sendLinkedRows(res, 'settingsShifts', []);
 });
 
 app.get('/api/settings-face', (_req, res) => {
-  sendMappedRows(res, pickFile('人脸管理'), undefined, mapFaceSettingRows, '未找到人脸管理表。');
+  const onboardedRows = getOnboardedEmployees().map(onboardedEmployeeToFaceRow);
+  return sendLinkedRows(res, 'onboardedEmployees', limitDemoPeople(onboardedRows));
 });
 
 app.get('/api/settings-people', (_req, res) => {
-  sendMappedRows(res, pickFile('月考勤统计', '人脸管理'), undefined, mapPeopleSettingRows, '未找到考勤人员数据表。');
+  const onboardedRows = getOnboardedEmployees().map(onboardedEmployeeToPeopleRow);
+  return sendLinkedRows(res, 'onboardedEmployees', limitDemoPeople(onboardedRows));
+});
+
+app.post('/api/employees/onboard', (req, res) => {
+  const employeeNo = asRawText(req.body?.employeeNo);
+  const name = asRawText(req.body?.name);
+  if (!employeeNo || !name) {
+    return res.status(400).json({ message: '姓名和员工号必填' });
+  }
+  const employee = normalizeOnboardedEmployee(req.body);
+  const result = upsertStoredRow('onboardedEmployees', employee, (row) => asRawText(row.employeeNo));
+  return res.json({
+    ok: true,
+    created: result.created,
+    employee,
+    peopleRow: onboardedEmployeeToPeopleRow(employee),
+    faceRow: onboardedEmployeeToFaceRow(employee),
+    attendanceRow: onboardedEmployeeToAttendanceStatsRow(employee),
+  });
 });
 
 app.get('/api/stat-items', (_req, res) => {
-  const persisted = getStoredRows('statItems');
-  if (persisted) {
-    return res.json({ sourceFile: '本地持久化数据 data-store.json', sheetName: 'statItems', total: persisted.length, rows: persisted, persisted: true });
-  }
-  sendMappedRows(res, pickFile('月考勤统计'), undefined, mapStatItemRows, '未找到可生成统计项的月考勤统计表。', { limitPeople: false });
+  return sendLinkedRows(res, 'statItems', []);
 });
 
 app.put('/api/stat-items', (req, res) => {
@@ -679,15 +761,7 @@ app.put('/api/stat-items', (req, res) => {
 
 
 app.get('/api/external-records', (_req, res) => {
-  const file = pickFile('月考勤统计', '每日统计表', '原始打卡记录');
-  try {
-    if (!file) return res.status(404).json({ message: '未找到外部统计文件，请检查资料目录。' });
-    const { rows, sheetName } = readSheetRows(file.fullPath);
-    const data = mapExternalRows(rows, file.name);
-    return res.json({ sourceFile: file.name, sheetName, total: data.length, rows: data });
-  } catch (error) {
-    return res.status(500).json({ message: '读取外部统计失败', detail: String(error?.message || error) });
-  }
+  return sendLinkedRows(res, 'externalRecords', []);
 });
 
 const MOBILE_OFFICE = {
@@ -749,7 +823,12 @@ function normalizeMobileEmployee(input = {}) {
 
 function readMobileUsers() {
   const configured = readJsonFile(MOBILE_TEST_USERS_FILE, null);
-  const users = Array.isArray(configured) && configured.length ? configured : [DEFAULT_MOBILE_EMPLOYEE];
+  const persisted = getOnboardedEmployees();
+  const users = [
+    ...(Array.isArray(configured) ? configured : []),
+    ...persisted,
+  ];
+  if (!users.length) users.push(DEFAULT_MOBILE_EMPLOYEE);
   return users.map(normalizeMobileEmployee);
 }
 
@@ -757,6 +836,15 @@ function getDefaultMobileEmployee() {
   const preferredNo = asRawText(process.env.MOBILE_TEST_EMPLOYEE_NO);
   const users = readMobileUsers();
   return users.find((user) => preferredNo && user.employeeNo === preferredNo) || users[0] || DEFAULT_MOBILE_EMPLOYEE;
+}
+
+function findMobileEmployee(criteria = {}) {
+  const employeeNo = asRawText(criteria.employeeNo || criteria.empNo);
+  const userId = asRawText(criteria.userId);
+  const users = readMobileUsers();
+  return users.find((user) => employeeNo && user.employeeNo === employeeNo)
+    || users.find((user) => userId && user.userId === userId)
+    || null;
 }
 
 function tokenForEmployee(employee) {
@@ -968,7 +1056,12 @@ app.post('/api/wecom/login', (req, res) => {
   if (!code) {
     return res.status(400).json({ message: '缺少企业微信登录code' });
   }
-  const employee = getDefaultMobileEmployee();
+  const requestedEmployeeNo = asRawText(req.body?.employeeNo);
+  const requestedUserId = asRawText(req.body?.userId);
+  const employee = findMobileEmployee({ employeeNo: requestedEmployeeNo, userId: requestedUserId }) || getDefaultMobileEmployee();
+  if (requestedEmployeeNo && employee.employeeNo !== requestedEmployeeNo) {
+    return res.status(404).json({ message: `未找到员工号 ${requestedEmployeeNo}，请先在后台人脸管理录入员工` });
+  }
   return res.json({
     token: tokenForEmployee(employee),
     employee,

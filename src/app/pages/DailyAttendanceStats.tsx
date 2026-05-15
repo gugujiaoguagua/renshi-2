@@ -764,16 +764,15 @@ export default function DailyAttendanceStats() {
   const loadDailyAttendance = useCallback(async (syncDateRange = false) => {
     try {
       const res = await fetchDailyAttendanceEmployees();
-      if (res.rows?.length) {
-        setEmployees(res.rows);
-        const dates = res.rows.map(row => row.date).filter(Boolean).sort();
-        if (dates.length) {
-          const range = { start: dates[0], end: dates[dates.length - 1] };
-          setInitialDateRange(range);
-          if (syncDateRange) {
-            setDateStart(range.start);
-            setDateEnd(range.end);
-          }
+      const rows = res.rows || [];
+      setEmployees(rows);
+      const dates = rows.map(row => row.date).filter(Boolean).sort();
+      if (dates.length) {
+        const range = { start: dates[0], end: dates[dates.length - 1] };
+        setInitialDateRange(range);
+        if (syncDateRange) {
+          setDateStart(range.start);
+          setDateEnd(range.end);
         }
       }
       setSourceFile(res.sourceFile || '');

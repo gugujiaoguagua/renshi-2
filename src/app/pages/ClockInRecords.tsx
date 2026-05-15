@@ -332,9 +332,7 @@ function OriginalClockTab({ colors }: { colors: any }) {
   const loadClockRows = useCallback(async () => {
     try {
       const res = await fetchClockRecords();
-      if (res.rows?.length) {
-        setRows(res.rows);
-      }
+      setRows(res.rows || []);
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {
@@ -676,9 +674,7 @@ function MakeupClockTab({ colors }: { colors: any }) {
   const loadMakeupRows = useCallback(async () => {
     try {
       const res = await fetchMakeupClockRecords();
-      if (res.rows?.length) {
-        setRows(res.rows as RealMakeupClockRecord[]);
-      }
+      setRows((res.rows || []) as RealMakeupClockRecord[]);
       setLoadError('');
     } catch (_error) {
       setLoadError('移动端补卡记录连接失败，当前展示静态数据');
@@ -1209,9 +1205,7 @@ function PhotoClockTab({ colors }: { colors: any }) {
   const loadPhotoRows = useCallback(async () => {
     try {
       const res = await fetchPhotoClockRecords();
-      if (res.rows?.length) {
-        setRows(res.rows as RealPhotoClockRecord[]);
-      }
+      setRows((res.rows || []) as RealPhotoClockRecord[]);
       setLoadError('');
     } catch (_error) {
       setLoadError('移动端拍照打卡记录连接失败，当前展示静态数据');

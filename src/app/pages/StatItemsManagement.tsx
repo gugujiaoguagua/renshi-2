@@ -334,9 +334,7 @@ export default function StatItemsManagement() {
   const loadStatItems = useCallback(async () => {
     try {
       const res = await fetchStatItems();
-      if (res.rows?.length) {
-        setItems(res.rows);
-      }
+      setItems(res.rows || []);
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {

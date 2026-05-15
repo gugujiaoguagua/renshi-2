@@ -320,9 +320,7 @@ export default function MonthlyAttendanceStats() {
   const loadMonthlyAttendance = useCallback(async () => {
     try {
       const res = await fetchMonthlyAttendanceEmployees();
-      if (res.rows?.length) {
-        setEmployees(res.rows);
-      }
+      setEmployees(res.rows || []);
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {

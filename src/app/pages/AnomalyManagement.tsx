@@ -324,9 +324,7 @@ function AnomalyAttendance({ colors }: { colors: any }) {
 
     try {
       const res = await fetchAttendanceAnomalies();
-      if (res.rows?.length) {
-        setRows(res.rows);
-      }
+      setRows(res.rows || []);
       setSourceFile(res.sourceFile || '');
       setLoadError('');
     } catch (_error) {

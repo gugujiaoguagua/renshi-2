@@ -20,11 +20,13 @@ const WECOM_APP_SECRET = process.env.WECOM_APP_SECRET || process.env.WECOM_SECRE
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(WORKSPACE_DIR, '资料'));
 const STORE_FILE = path.join(SERVER_DIR, 'data-store.json');
 const MOBILE_TEST_USERS_FILE = path.join(SERVER_DIR, 'mobile-test-users.json');
+const UPLOAD_DIR = path.join(SERVER_DIR, 'uploads');
 const TIME_ZONE = 'Asia/Shanghai';
 
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
+app.use('/uploads', express.static(UPLOAD_DIR));
 
 function readStore() {
   try {
@@ -38,6 +40,69 @@ function readStore() {
 function writeStore(store) {
   fs.mkdirSync(path.dirname(STORE_FILE), { recursive: true });
   fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2), 'utf-8');
+}
+
+function publicUrl(req, relativePath) {
+  if (!relativePath) return '';
+  if (/^https?:\/\//i.test(relativePath)) return relativePath;
+  const host = req.get('host');
+  const protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
+  return `${protocol}://${host}${relativePath.startsWith('/') ? '' : '/'}${relativePath}`;
+}
+
+function readRequestBuffer(req, limitBytes = 8 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    req.on('data', (chunk) => {
+      total += chunk.length;
+      if (total > limitBytes) {
+        reject(new Error('上传文件过大'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+function parseMultipartPhoto(buffer, contentType) {
+  const boundaryMatch = String(contentType || '').match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  const boundary = boundaryMatch?.[1] || boundaryMatch?.[2];
+  if (!boundary) return null;
+  const boundaryBuffer = Buffer.from(`--${boundary}`);
+  let cursor = buffer.indexOf(boundaryBuffer);
+  while (cursor >= 0) {
+    let partStart = cursor + boundaryBuffer.length;
+    if (buffer.slice(partStart, partStart + 2).toString() === '--') break;
+    if (buffer.slice(partStart, partStart + 2).toString() === '\r\n') partStart += 2;
+    const nextBoundary = buffer.indexOf(boundaryBuffer, partStart);
+    if (nextBoundary < 0) break;
+    let part = buffer.slice(partStart, nextBoundary);
+    if (part.slice(-2).toString() === '\r\n') part = part.slice(0, -2);
+    const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'));
+    if (headerEnd > 0) {
+      const header = part.slice(0, headerEnd).toString('utf8');
+      const body = part.slice(headerEnd + 4);
+      if (/name="photo"/i.test(header) && /filename=/i.test(header)) {
+        const filename = header.match(/filename="([^"]*)"/i)?.[1] || 'clock-photo.jpg';
+        const mimeType = header.match(/content-type:\s*([^\r\n]+)/i)?.[1]?.trim() || 'image/jpeg';
+        return { filename, mimeType, buffer: body };
+      }
+    }
+    cursor = nextBoundary;
+  }
+  return null;
+}
+
+function imageExtension(mimeType, filename) {
+  const fromName = path.extname(filename || '').toLowerCase();
+  if (['.jpg', '.jpeg', '.png', '.webp'].includes(fromName)) return fromName;
+  if (mimeType === 'image/png') return '.png';
+  if (mimeType === 'image/webp') return '.webp';
+  return '.jpg';
 }
 
 function readJsonFile(filePath, fallback) {
@@ -382,10 +447,10 @@ function mapShiftSettingRows(rows) {
   return rows.slice(0, 1000).map((row) => [
     asText(getByAliases(row, ['班次名称']), '-'),
     asText(getByAliases(row, ['班次简称']), '-'),
-    asText(getByAliases(row, ['班次性质']), '通用'),
+    asText(getByAliases(row, ['班次颜色', '颜色']), '#B53A2A'),
     asText(getByAliases(row, ['班次标签']), '-'),
     asText(getByAliases(row, ['冬夏令时']), '-'),
-    asText(getByAliases(row, ['工作时间', '上班时间']), '-'),
+    asText(getByAliases(row, ['出勤时间', '工作时间', '上班时间']), '-'),
     asText(getByAliases(row, ['合计工作时长']), '-'),
     asText(getByAliases(row, ['适用考勤组']), '-'),
     '系统导入',
@@ -429,6 +494,34 @@ function mapPeopleSettingRows(rows) {
   ]).filter((row) => row[0] !== '-');
 }
 
+const DEFAULT_SHIFT_SETTING_ROWS = [
+  ['早七点半晚五点半', '7.5-5.5', '#9A3412', '-', '通用', '07:30-17:30(正常出勤)', '9小时', '-', '常乐', '2026-04-20 14:58:50', '常乐', '2026-04-21 16:00:00'],
+  ['早八点半晚五点半', '8.5-5.5', '#3B82F6', '-', '通用', '08:30-17:30(正常出勤)', '8小时', '-', '常乐', '2026-04-20 15:00:36', '常乐', '2026-04-21 16:00:00'],
+  ['早十点半晚六点半', '10.5-6.5', '#9A3412', '-', '通用', '10:30-18:30(正常出勤)', '7小时', '昊中店', '何山', '2025-08-28 10:21:18', '常乐', '2026-04-21 16:00:00'],
+  ['早十二点晚八', '12-8', '#9A3412', '-', '通用', '12:00-20:00(正常出勤)', '7小时', '昊中店', '何山', '2025-08-28 10:22:03', '常乐', '2026-04-21 16:00:00'],
+  ['早九点半晚五点半', '9.5-5.5', '#4DD7A5', '-', '通用', '09:30-17:30(正常出勤)', '7小时', '昊中店,松江月星,真北北馆', '何山', '2025-08-28 10:23:08', '常乐', '2026-04-21 16:00:00'],
+  ['早九点半晚六点', '9.5-6', '#A855F7', '-', '通用', '09:30-18:00(正常出勤)', '8小时30分钟', '松江月星,真北北馆', '常乐', '2026-04-21 08:46:10', '常乐', '2026-04-21 16:00:00'],
+  ['早九点半晚八点', '9.5-8', '#F43F5E', '-', '通用', '09:30-20:00(正常出勤)', '10小时30分钟', '真北北馆,真北南馆,金桥店,汶水店', '常乐', '2026-04-21 08:41:56', '常乐', '2026-04-21 16:00:00'],
+  ['早九晚六点半', '9-6.5', '#FB7185', '-', '通用', '09:00-18:30(正常出勤)', '8小时30分钟', '浦江店', '何山', '2025-08-28 10:48:30', '常乐', '2026-04-21 16:00:00'],
+  ['早九晚六', '9-6', '#FB6B4B', '-', '通用', '09:00-18:00(正常出勤)', '8小时', '华托大厦', '何山', '2025-08-28 10:48:30', '常乐', '2026-04-21 16:00:00'],
+  ['早九点半晚七点半', '9.5-7.5', '#FB6B4B', '-', '通用', '09:30-19:30(正常出勤)', '9小时', '-', '何山', '2025-08-28 10:48:30', '常乐', '2026-04-21 16:00:00'],
+  ['早九点半晚六点半', '9.5-6', '#FB6B4B', '-', '通用', '09:30-18:30(正常出勤)', '8小时', '拉迷YOUNG,建配龙', '何山', '2025-08-28 10:48:30', '常乐', '2026-04-21 16:00:00'],
+  ['早二晚六', '2-6', '#FB6B4B', '-', '通用', '14:00-18:00(正常出勤)', '3小时', '金桥店', '常乐', '2026-04-21 09:47:02', '常乐', '2026-04-21 16:00:00'],
+  ['早十晚二', '10-2', '#FB6B4B', '-', '通用', '10:00-14:00(正常出勤)', '3小时', '金桥店', '常乐', '2026-04-21 09:47:10', '常乐', '2026-04-21 16:00:00'],
+  ['早一晚九', '1-9', '#FB6B4B', '-', '通用', '13:00-21:00(正常出勤)', '7小时', '澳门月星', '何山', '2025-08-28 10:48:30', '常乐', '2026-04-21 16:00:00'],
+  ['早二晚八', '2-8', '#FB6B4B', '-', '通用', '14:00-20:00(正常出勤)', '6小时', '金桥店', '常乐', '2026-04-21 09:49:07', '常乐', '2026-04-21 16:00:00'],
+  ['早十点半晚八', '10-8.5', '#FB6B4B', '-', '通用', '10:30-20:00(正常出勤)', '8小时30分钟', '沪南店', '何山', '2025-08-28 10:48:30', '常乐', '2026-04-21 16:00:00'],
+  ['早十晚六', '10-6', '#FB6B4B', '-', '通用', '10:00-18:00(正常出勤)', '7小时', '真北全案,沪南店,汶水店', '何山', '2025-08-28 10:48:30', '常乐', '2026-04-21 16:00:00'],
+  ['家饰佳-早九点四十晚六点半', '家', '#F43F5E', '-', '通用', '09:40-18:30(正常出勤)', '7小时50分钟', '家饰佳', '何山', '2025-08-28 10:12:35', '常乐', '2026-04-21 10:00:00'],
+  ['早七点半晚五点半-工厂车间', '工厂车间', '#FB6B4B', '-', '通用', '07:30-17:30(正常出勤)', '10小时', '考勤组D,考勤组E', '何山', '2025-08-28 09:31:06', '常乐', '2026-04-21 10:00:00'],
+  ['早八晚五', '8-5', '#60A5FA', '-', '通用', '08:00-17:00(正常出勤)', '8小时', '综合考勤组', '常乐', '2026-04-21 09:50:00', '常乐', '2026-04-21 16:00:00'],
+  ['早八晚六', '8-6', '#60A5FA', '-', '通用', '08:00-18:00(正常出勤)', '9小时', '综合考勤组', '常乐', '2026-04-21 09:52:00', '常乐', '2026-04-21 16:00:00'],
+  ['早十晚七', '10-7', '#FB6B4B', '-', '通用', '10:00-19:00(正常出勤)', '8小时', '直营门店', '常乐', '2026-04-21 09:54:00', '常乐', '2026-04-21 16:00:00'],
+  ['晚班', '13-22', '#7C3AED', '-', '通用', '13:00-22:00(正常出勤)', '8小时', '直营门店', '常乐', '2026-04-21 09:56:00', '常乐', '2026-04-21 16:00:00'],
+  ['弹性工作制（8小时）', '弹性8', '#10B981', '弹性', '通用', '09:00-18:00(弹性出勤)', '8小时', '研发中心考勤组', '常乐', '2026-04-21 09:58:00', '常乐', '2026-04-21 16:00:00'],
+  ['休息', '休', '#94A3B8', '休息', '通用', '休息', '0小时', '通用', '系统', '2026-05-16 00:00:00', '系统', '2026-05-16 00:00:00'],
+];
+
 function getOnboardedEmployees() {
   return getStoredRows('onboardedEmployees') || [];
 }
@@ -438,6 +531,7 @@ function normalizeOnboardedEmployee(input = {}) {
   const name = asRawText(input.name);
   const managerNo = asRawText(input.managerNo || input.managerEmployeeNo);
   const managerName = asRawText(input.managerName);
+  const shift = resolveShiftOption(input);
   return {
     id: asRawText(input.id || `emp_${employeeNo}`),
     userId: asRawText(input.userId || `wecom_${employeeNo}`),
@@ -455,8 +549,8 @@ function normalizeOnboardedEmployee(input = {}) {
     workPlace: asText(input.workPlace, '-'),
     attendanceGroupId: asText(input.attendanceGroupId, 'group_huatuo'),
     attendanceGroupName: asText(input.attendanceGroupName || input.attendGroup, '华托大厦'),
-    shiftId: asText(input.shiftId, MOBILE_SHIFT.id),
-    shiftName: asText(input.shiftName || input.shift, MOBILE_SHIFT.name),
+    shiftId: shift.id,
+    shiftName: shift.name,
     statScheme: asText(input.statScheme, '默认方案'),
     faceStatus: asText(input.faceStatus, '已录入'),
     reviewStatus: asText(input.reviewStatus, '已通过'),
@@ -643,6 +737,7 @@ function buildLinkedDailyRows() {
     const hasAnomaly = clockRowsHaveAnomaly(todayRows);
     const clockIn = clockInText(employee, todayRows);
     const clockOut = clockOutText(employee, todayRows);
+    const shift = getEmployeeShift(employee);
     return {
       name: base.name,
       confirmStatus: hasClock ? '待确认' : '未确认',
@@ -661,7 +756,7 @@ function buildLinkedDailyRows() {
       anomalyDesc: hasClock ? clockAnomalyText(todayRows) : '未打卡',
       taskSummary: hasClock ? `打卡${todayRows.length}次` : '-',
       normalHours: clockIn !== '-' && clockOut !== '-' ? 8 : 0,
-      lateMinutes: minutesAfter(clockIn, MOBILE_SHIFT.clockInTime),
+      lateMinutes: minutesAfter(clockIn, shift.clockInTime || MOBILE_SHIFT.clockInTime),
     };
   });
 }
@@ -708,7 +803,10 @@ function buildLinkedMonthlySummaryRows() {
     const actualWorkDays = countUniqueClockDates(employee, period);
     const lateMinutes = monthRows
       .filter((row) => row.type === 'clockIn')
-      .reduce((sum, row) => sum + minutesAfter(row.time, MOBILE_SHIFT.clockInTime), 0);
+      .reduce((sum, row) => {
+        const shift = getEmployeeShift(employee, asText(row.date, currentDateText()));
+        return sum + minutesAfter(row.time, shift.clockInTime || MOBILE_SHIFT.clockInTime);
+      }, 0);
     return {
       id: index + 1,
       name: base.name,
@@ -779,6 +877,33 @@ function buildLinkedLeaveBalanceRows() {
 
 function buildLinkedLeaveDetailRows() {
   return filterRowsToOnboardedEmployees(getStoredRows('leaveDetails') || []);
+}
+
+const DEFAULT_LEAVE_TYPE_ROWS = [
+  { name: '年假', short: '年', enabled: true, unit: '按天请假', paid: '是', negative: '否', before: '否', note: '年假额度可根据员工司龄自动发放，支持跨周期结转。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:17' },
+  { name: '病假', short: '病', enabled: true, unit: '按天请假', paid: '否', negative: '否', before: '否', note: '病假需员工上传病历或就诊凭证，系统支持按天或小时折算。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:08' },
+  { name: '事假', short: '事', enabled: true, unit: '按天请假', paid: '否', negative: '否', before: '否', note: '个人事务请假，审批通过后进入月度假勤统计。', reason: '是', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:08' },
+  { name: '婚假', short: '婚', enabled: true, unit: '按天请假', paid: '是', negative: '否', before: '否', note: '婚假按法定或公司规定执行，支持一次性发放。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:22' },
+  { name: '产假', short: '产', enabled: true, unit: '按天请假', paid: '是', negative: '否', before: '是', note: '产假支持前置请假及分段休假，系统可自动关联哺乳假规则。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:27' },
+  { name: '调休假', short: '调', enabled: true, unit: '按小时请假', paid: '否', negative: '否', before: '否', note: '加班转调休产生的额度，优先消耗近期生成的调休额度。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:54' },
+];
+
+function getLeaveTypeRows() {
+  const storedRows = getStoredRows('leaveTypes');
+  return storedRows && storedRows.length ? storedRows : DEFAULT_LEAVE_TYPE_ROWS;
+}
+
+function getLeaveSchemeRows() {
+  const storedRows = getStoredRows('leaveSchemes');
+  return storedRows || [];
+}
+
+function saveRowsEndpoint(req, res, key, sheetName, normalizer = (row) => row) {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) return res.status(400).json({ message: 'rows必须是数组' });
+  const normalizedRows = rows.map(normalizer).filter(Boolean);
+  setStoredRows(key, normalizedRows);
+  return sendLinkedRows(res, sheetName, normalizedRows);
 }
 
 function buildLinkedMakeupRows() {
@@ -952,6 +1077,7 @@ function upsertSchedule(row) {
   const schedules = getStoredRows('employeeSchedules') || [];
   const dateText = asText(row.date, currentDateText());
   const employeeNo = asRawText(row.employeeNo);
+  const shift = resolveShiftOption(row);
   const next = {
     id: `${dateText}:${employeeNo}`,
     date: dateText,
@@ -960,8 +1086,8 @@ function upsertSchedule(row) {
     dept: asText(row.dept, ''),
     managerNo: asText(row.managerNo, ''),
     managerName: asText(row.managerName, ''),
-    shiftId: asText(row.shiftId, MOBILE_SHIFT.id),
-    shiftName: asText(row.shiftName, MOBILE_SHIFT.name),
+    shiftId: shift.id,
+    shiftName: shift.name,
     updatedAt: nowText(),
   };
   const nextRows = [
@@ -1178,7 +1304,12 @@ function getOnboardedEmployeeNoSet() {
 function filterRowsToOnboardedEmployees(rows) {
   const employeeNos = getOnboardedEmployeeNoSet();
   if (!employeeNos.size) return [];
-  return rows.filter((row) => employeeNos.has(asRawText(row.employeeNo || row.empId || row.employeeId)));
+  return rows.filter((row) => {
+    if (Array.isArray(row)) {
+      return row.some((cell) => employeeNos.has(asRawText(cell)));
+    }
+    return employeeNos.has(asRawText(row.employeeNo || row.empId || row.employeeId));
+  });
 }
 
 app.get('/api/health', (_req, res) => {
@@ -1265,6 +1396,10 @@ app.get('/api/leave-records', (_req, res) => {
   return sendLinkedRows(res, 'leaveRecords', buildLinkedLeaveRows());
 });
 
+app.put('/api/leave-records', (req, res) => {
+  return saveRowsEndpoint(req, res, 'leaveRecords', 'leaveRecords', (row) => Array.isArray(row) ? row.map((cell) => asText(cell, '')) : null);
+});
+
 app.get('/api/leave-balances', (_req, res) => {
   return sendLinkedRows(res, 'leaveBalances', buildLinkedLeaveBalanceRows());
 });
@@ -1273,8 +1408,72 @@ app.get('/api/leave-details', (_req, res) => {
   return sendLinkedRows(res, 'leaveDetails', buildLinkedLeaveDetailRows());
 });
 
+app.put('/api/leave-details', (req, res) => {
+  return saveRowsEndpoint(req, res, 'leaveDetails', 'leaveDetails', (row) => Array.isArray(row) ? row.map((cell) => asText(cell, '')) : null);
+});
+
+app.get('/api/leave-types', (_req, res) => {
+  return sendLinkedRows(res, 'leaveTypes', getLeaveTypeRows());
+});
+
+app.put('/api/leave-types', (req, res) => {
+  return saveRowsEndpoint(req, res, 'leaveTypes', 'leaveTypes', (row) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+    return {
+      name: asText(row.name, ''),
+      short: asText(row.short, asText(row.name, '').slice(0, 1)),
+      enabled: Boolean(row.enabled),
+      unit: asText(row.unit, '按天请假'),
+      paid: asText(row.paid, '否'),
+      negative: asText(row.negative, '否'),
+      before: asText(row.before, '否'),
+      note: asText(row.note, '-'),
+      reason: asText(row.reason, '否'),
+      attachment: asText(row.attachment, '否'),
+      attachmentNote: asText(row.attachmentNote, '-'),
+      creator: asText(row.creator, '后台维护'),
+      createdAt: asText(row.createdAt, nowText()),
+      editor: asText(row.editor, '后台维护'),
+      editedAt: asText(row.editedAt, nowText()),
+    };
+  });
+});
+
+app.get('/api/leave-schemes', (_req, res) => {
+  return sendLinkedRows(res, 'leaveSchemes', getLeaveSchemeRows());
+});
+
+app.put('/api/leave-schemes', (req, res) => {
+  return saveRowsEndpoint(req, res, 'leaveSchemes', 'leaveSchemes', (row) => Array.isArray(row) ? row.map((cell) => asText(cell, '')) : null);
+});
+
 app.get('/api/settings-shifts', (_req, res) => {
-  return sendLinkedRows(res, 'settingsShifts', []);
+  return sendLinkedRows(res, 'settingsShifts', getShiftSettingRows());
+});
+
+app.put('/api/settings-shifts', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) {
+    return res.status(400).json({ message: 'rows必须是班次数组' });
+  }
+  const normalizedRows = rows
+    .filter((row) => Array.isArray(row) && asRawText(row[0]))
+    .map((row) => [
+      asText(row[0], '-'),
+      asText(row[1], '-'),
+      asText(row[2], '#B53A2A'),
+      asText(row[3], '-'),
+      asText(row[4], '通用'),
+      asText(row[5], '09:00-18:00(正常出勤)'),
+      asText(row[6], '8小时'),
+      asText(row[7], '-'),
+      asText(row[8], '后台维护'),
+      asText(row[9], nowText()),
+      asText(row[10], '后台维护'),
+      nowText(),
+    ]);
+  setStoredRows('settingsShifts', normalizedRows);
+  return sendLinkedRows(res, 'settingsShifts', normalizedRows);
 });
 
 app.get('/api/settings-face', (_req, res) => {
@@ -1390,11 +1589,7 @@ app.get('/api/mobile/manager/schedules', (req, res) => {
     missing,
     rows,
     dayStatuses: scheduleMonthStatuses(monthText, employee),
-    shifts: [
-      { id: 'shift_0900_1800', name: '早九晚六', time: '09:00-18:00' },
-      { id: 'shift_1300_2200', name: '晚班', time: '13:00-22:00' },
-      { id: 'shift_rest', name: '休息', time: '休息' },
-    ],
+    shifts: getShiftOptions(),
   });
 });
 
@@ -1462,8 +1657,46 @@ app.post('/api/mobile/manager/schedules', (req, res) => {
   return res.json({ ok: true, row, message: '排班已保存' });
 });
 
+const DEFAULT_STAT_ITEMS = [
+  { id: 1, name: '员工姓名', module: '基础考勤', category: '人事基础', desc: '员工的实际姓名', enabled: true, hasFormula: false, dataType: '文本型', isCustom: false },
+  { id: 2, name: '员工工号', module: '基础考勤', category: '人事基础', desc: '员工唯一标识工号', enabled: true, hasFormula: false, dataType: '文本型', isCustom: false },
+  { id: 3, name: '部门', module: '基础考勤', category: '人事基础', desc: '员工所属部门名称', enabled: true, hasFormula: false, dataType: '文本型', isCustom: false },
+  { id: 4, name: '岗位', module: '基础考勤', category: '人事基础', desc: '员工当前岗位信息', enabled: true, hasFormula: false, dataType: '文本型', isCustom: false },
+  { id: 5, name: '入职日期', module: '基础考勤', category: '人事基础', desc: '员工入职日期', enabled: true, hasFormula: false, dataType: '日期型', isCustom: false },
+  { id: 6, name: '上班打卡时间', module: '基础考勤', category: '打卡信息', desc: '当日第一次上班打卡的具体时间', enabled: true, hasFormula: false, dataType: '文本型', isCustom: false },
+  { id: 7, name: '下班打卡时间', module: '基础考勤', category: '打卡信息', desc: '当日最后一次下班打卡的具体时间', enabled: true, hasFormula: false, dataType: '文本型', isCustom: false },
+  { id: 8, name: '打卡地点', module: '基础考勤', category: '打卡信息', desc: '打卡时的GPS定位或Wi-Fi位置信息', enabled: false, hasFormula: false, dataType: '文本型', isCustom: false },
+  { id: 9, name: '打卡设备', module: '基础考勤', category: '打卡信息', desc: '打卡所使用的设备类型信息', enabled: false, hasFormula: false, dataType: '文本型', isCustom: false },
+  { id: 10, name: '应出勤天数', module: '基础考勤', category: '考勤基础', desc: '当月根据排班应出勤的总天数', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 11, name: '实际出勤天数', module: '基础考勤', category: '考勤基础', desc: '当月实际签到出勤的天数', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 12, name: '旷工天数', module: '薪资核算', category: '考勤基础', desc: '当月无故缺勤的天数', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 13, name: '迟到次数', module: '基础考勤', category: '考勤基础', desc: '当月迟到的总次数', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 14, name: '迟到时长(分钟)', module: '薪资核算', category: '考勤基础', desc: '当月迟到累计时长，单位分钟', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 15, name: '早退次数', module: '基础考勤', category: '考勤基础', desc: '当月早退的总次数', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 16, name: '早退时长(分钟)', module: '薪资核算', category: '考勤基础', desc: '当月早退累计时长，单位分钟', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 17, name: '正班时长(小时)', module: '薪资核算', category: '考勤基础', desc: '当月正常班次累计工时，单位小时', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 18, name: '年假天数', module: '薪资核算', category: '请假时长', desc: '当月年假申请并获批的天数', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 19, name: '事假天数', module: '薪资核算', category: '请假时长', desc: '当月事假申请并获批的天数', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 20, name: '病假天数', module: '薪资核算', category: '请假时长', desc: '当月病假申请并获批的天数', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 21, name: '婚假天数', module: '薪资核算', category: '请假时长', desc: '当月婚假申请并获批的天数', enabled: false, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 22, name: '产假天数', module: '薪资核算', category: '请假时长', desc: '当月产假申请并获批的天数', enabled: false, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 23, name: '工作日加班时长(小时)', module: '薪资核算', category: '加班信息', desc: '当月工作日加班累计时长，单位小时', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 24, name: '周末加班时长(小时)', module: '薪资核算', category: '加班信息', desc: '当月周末加班累计时长，单位小时', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 25, name: '节假日加班时长(小时)', module: '薪资核算', category: '加班信息', desc: '当月节假日加班累计时长，单位小时', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 26, name: '出差天数', module: '基础考勤', category: '其他', desc: '当月出差申请并获批的天数', enabled: true, hasFormula: true, dataType: '数值型', isCustom: false },
+  { id: 27, name: '外勤次数', module: '基础考勤', category: '其他', desc: '当月外勤申请并获批的次数', enabled: true, hasFormula: false, dataType: '数值型', isCustom: false },
+  { id: 28, name: '项目津贴工时', module: '薪资核算', category: '自定义', desc: '项目组特殊津贴工时统计（外部数据支持）', enabled: true, hasFormula: false, dataType: '数值型', isCustom: true },
+];
+
 app.get('/api/stat-items', (_req, res) => {
-  return sendLinkedRows(res, 'statItems', []);
+  const storedRows = getStoredRows('statItems');
+  const rows = storedRows && storedRows.length ? storedRows : DEFAULT_STAT_ITEMS;
+  return res.json({
+    sourceFile: storedRows && storedRows.length ? '本地持久化数据 data-store.json' : '系统默认统计项配置',
+    sheetName: '统计项管理',
+    total: rows.length,
+    rows,
+  });
 });
 
 app.put('/api/stat-items', (req, res) => {
@@ -1495,6 +1728,68 @@ const MOBILE_SHIFT = {
   clockOutTime: '18:00',
 };
 
+function getShiftSettingRows() {
+  const storedRows = getStoredRows('settingsShifts');
+  return storedRows && storedRows.length ? storedRows : DEFAULT_SHIFT_SETTING_ROWS;
+}
+
+function parseShiftClockTimes(value) {
+  const text = asText(value, '');
+  if (!text || text.includes('休息')) return { clockInTime: '', clockOutTime: '' };
+  const match = text.match(/(\d{1,2}):(\d{2})\s*[-~—至]\s*(\d{1,2}):(\d{2})/);
+  if (!match) return { clockInTime: MOBILE_SHIFT.clockInTime, clockOutTime: MOBILE_SHIFT.clockOutTime };
+  const clockInTime = `${match[1].padStart(2, '0')}:${match[2]}`;
+  const clockOutTime = `${match[3].padStart(2, '0')}:${match[4]}`;
+  return { clockInTime, clockOutTime };
+}
+
+function shiftIdFromTimes(clockInTime, clockOutTime, name) {
+  if (name === '休息') return 'shift_rest';
+  const inPart = asText(clockInTime, MOBILE_SHIFT.clockInTime).replace(':', '');
+  const outPart = asText(clockOutTime, MOBILE_SHIFT.clockOutTime).replace(':', '');
+  const baseId = `shift_${inPart}_${outPart}`;
+  if (name === MOBILE_SHIFT.name) return baseId;
+  let hash = 0;
+  for (const char of asText(name, '')) hash = ((hash * 31) + char.charCodeAt(0)) >>> 0;
+  return `${baseId}_${hash.toString(36)}`;
+}
+
+function shiftOptionFromRow(row) {
+  const name = asText(row?.[0], MOBILE_SHIFT.name);
+  const { clockInTime, clockOutTime } = parseShiftClockTimes(row?.[5]);
+  const isRest = name === '休息' || asText(row?.[5], '').includes('休息');
+  return {
+    id: isRest ? 'shift_rest' : shiftIdFromTimes(clockInTime, clockOutTime, name),
+    name,
+    shortName: asText(row?.[1], name),
+    color: asText(row?.[2], '#B53A2A'),
+    time: isRest ? '休息' : `${clockInTime}-${clockOutTime}`,
+    clockInTime: isRest ? '' : clockInTime,
+    clockOutTime: isRest ? '' : clockOutTime,
+  };
+}
+
+function getShiftOptions() {
+  const seen = new Set();
+  return getShiftSettingRows()
+    .map(shiftOptionFromRow)
+    .filter((shift) => {
+      if (!shift.name || seen.has(shift.id)) return false;
+      seen.add(shift.id);
+      return true;
+    });
+}
+
+function resolveShiftOption(input = {}) {
+  const requestedId = asRawText(input.shiftId || input.id);
+  const requestedName = asRawText(input.shiftName || input.name || input.shift);
+  const options = getShiftOptions();
+  return options.find((item) => requestedId && item.id === requestedId)
+    || options.find((item) => requestedName && item.name === requestedName)
+    || options.find((item) => item.id === MOBILE_SHIFT.id)
+    || { ...MOBILE_SHIFT, shortName: MOBILE_SHIFT.name, time: `${MOBILE_SHIFT.clockInTime}-${MOBILE_SHIFT.clockOutTime}`, color: '#B53A2A' };
+}
+
 const DEFAULT_MOBILE_EMPLOYEE = {
   id: '',
   userId: '',
@@ -1514,6 +1809,7 @@ function normalizeMobileEmployee(input = {}) {
   const employeeNo = asRawText(input.employeeNo || input.empId || DEFAULT_MOBILE_EMPLOYEE.employeeNo);
   const userId = asRawText(input.userId || `wecom_${employeeNo}` || DEFAULT_MOBILE_EMPLOYEE.userId);
   const office = input.office && typeof input.office === 'object' ? input.office : MOBILE_OFFICE;
+  const shift = resolveShiftOption(input);
   return {
     ...DEFAULT_MOBILE_EMPLOYEE,
     ...input,
@@ -1524,8 +1820,8 @@ function normalizeMobileEmployee(input = {}) {
     department: asText(input.department || input.dept, DEFAULT_MOBILE_EMPLOYEE.department),
     attendanceGroupId: asText(input.attendanceGroupId, DEFAULT_MOBILE_EMPLOYEE.attendanceGroupId),
     attendanceGroupName: asText(input.attendanceGroupName || input.attendGroup, DEFAULT_MOBILE_EMPLOYEE.attendanceGroupName),
-    shiftId: asText(input.shiftId, MOBILE_SHIFT.id),
-    shiftName: asText(input.shiftName || input.shift, MOBILE_SHIFT.name),
+    shiftId: shift.id,
+    shiftName: shift.name,
     faceStatus: asText(input.faceStatus, DEFAULT_MOBILE_EMPLOYEE.faceStatus),
     office: {
       ...MOBILE_OFFICE,
@@ -1636,11 +1932,10 @@ function requireRequestEmployee(req, res) {
 
 function getEmployeeShift(employee, dateText = currentDateText()) {
   const schedule = getEmployeeSchedule(employee, dateText);
-  return {
-    ...MOBILE_SHIFT,
-    id: asText(schedule?.shiftId || employee.shiftId, MOBILE_SHIFT.id),
-    name: asText(schedule?.shiftName || employee.shiftName, MOBILE_SHIFT.name),
-  };
+  return resolveShiftOption({
+    shiftId: schedule?.shiftId || employee.shiftId,
+    shiftName: schedule?.shiftName || employee.shiftName,
+  });
 }
 
 function getEmployeeOffice(employee) {
@@ -1703,7 +1998,9 @@ function mapMobileClockRowsToAdmin(rows) {
     workLocation: asText(row.workLocation, MOBILE_OFFICE.name),
     freeWork: row.type === 'clockOut' ? '下班' : '上班',
     note: row.result === 'normal' ? '移动端打卡，人脸核验通过' : asText(row.message, '移动端异常打卡'),
-    hasPhoto: Boolean(row.photoFileId || row.faceVerifyId),
+    hasPhoto: Boolean(row.photoUrl),
+    photoUrl: asText(row.photoUrl, ''),
+    photoTakenAt: asText(row.photoTakenAt || row.serverTime, ''),
     creator: '移动端',
     createTime: asText(row.serverTime, ''),
     modifier: '',
@@ -1768,7 +2065,9 @@ function mapMobileClockRowsToPhoto(rows) {
       completeTime: asText(row.serverTime, ''),
       location: `${asText(row.address, MOBILE_OFFICE.name)} · 距离${Math.round(Number(row.distance || 0))}m`,
       note: `人脸核验ID：${asText(row.faceVerifyId, '-')}`,
-      hasPhoto: true,
+      hasPhoto: Boolean(row.photoUrl),
+      photoUrl: asText(row.photoUrl, ''),
+      photoTakenAt: asText(row.photoTakenAt || row.serverTime, ''),
       reviewStatus: row.result === 'normal' ? '已通过' : '审批中',
     }));
 }
@@ -1888,14 +2187,46 @@ app.get('/api/mobile/today', (req, res) => {
   });
 });
 
-app.post('/api/mobile/face-verify', (_req, res) => {
+app.post('/api/mobile/face-verify', async (req, res) => {
   const id = `face_${Date.now()}`;
-  res.json({
-    faceVerifyId: id,
-    photoFileId: `photo_${Date.now()}`,
-    passed: true,
-    message: '人脸核验通过',
-  });
+  const photoFileId = `photo_${Date.now()}`;
+  try {
+    const buffer = await readRequestBuffer(req);
+    const photo = parseMultipartPhoto(buffer, req.headers['content-type']);
+    let photoUrl = '';
+    let storedPath = '';
+    let mimeType = '';
+    if (photo && photo.buffer.length > 0) {
+      const ext = imageExtension(photo.mimeType, photo.filename);
+      const fileName = `${photoFileId}${ext}`;
+      const photoDir = path.join(UPLOAD_DIR, 'clock-photos');
+      fs.mkdirSync(photoDir, { recursive: true });
+      storedPath = path.join(photoDir, fileName);
+      fs.writeFileSync(storedPath, photo.buffer);
+      photoUrl = `/uploads/clock-photos/${fileName}`;
+      mimeType = photo.mimeType;
+    }
+
+    const photos = getMobileRows('mobileFacePhotos', []);
+    setMobileRows('mobileFacePhotos', [{
+      id,
+      photoFileId,
+      photoUrl,
+      storedPath,
+      mimeType,
+      takenAt: nowText(),
+    }, ...photos]);
+
+    res.json({
+      faceVerifyId: id,
+      photoFileId,
+      photoUrl: publicUrl(req, photoUrl),
+      passed: true,
+      message: photoUrl ? '人脸核验通过，照片已保存' : '人脸核验通过，未收到照片文件',
+    });
+  } catch (error) {
+    res.status(400).json({ message: error.message || '人脸照片上传失败' });
+  }
 });
 
 app.post('/api/mobile/clock', (req, res) => {
@@ -1924,6 +2255,7 @@ app.post('/api/mobile/clock', (req, res) => {
   const locationAccepted = inRange || MOBILE_ALLOW_OUT_OF_RANGE || testModeLocationBypass;
   const records = getMobileRows('mobileClockRecords', []);
   const serverTime = nowText();
+  const photoMeta = getMobileRows('mobileFacePhotos', []).find((item) => asText(item.photoFileId, '') === asText(req.body?.photoFileId, ''));
   const record = {
     id: `clock_${Date.now()}`,
     employeeId: employee.id,
@@ -1944,6 +2276,8 @@ app.post('/api/mobile/clock', (req, res) => {
     distance: Math.round(distance),
     faceVerifyId: req.body.faceVerifyId,
     photoFileId: req.body?.photoFileId || '',
+    photoUrl: photoMeta?.photoUrl ? publicUrl(req, photoMeta.photoUrl) : asText(req.body?.photoUrl, ''),
+    photoTakenAt: asText(photoMeta?.takenAt, serverTime),
     result: locationAccepted && preciseEnough ? 'normal' : 'abnormal',
     message: locationAccepted && preciseEnough
       ? (inRange ? '打卡成功' : '打卡成功（测试模式已放行定位范围）')

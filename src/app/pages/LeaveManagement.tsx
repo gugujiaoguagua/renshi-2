@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
-import { fetchLeaveBalances, fetchLeaveDetails, fetchLeaveRecords } from '../api/realData';
+import { fetchLeaveBalances, fetchLeaveDetails, fetchLeaveRecords, fetchLeaveSchemes, fetchLeaveTypes, saveLeaveDetails, saveLeaveRecords, saveLeaveSchemes, saveLeaveTypes } from '../api/realData';
 import { monthRange } from '../utils/date';
 import {
   AlertCircle,
@@ -19,6 +19,7 @@ type LeaveView = 'record' | 'balance' | 'detail' | 'type' | 'scheme';
 type MenuItem = { label: string; hint?: string };
 type TabConfig = { key: LeaveView; label: string; path: string };
 type SortConfig = { index: number; direction: 'asc' | 'desc' };
+type PlainRow = Array<string | number | boolean>;
 
 const ROUTE_TABS: TabConfig[] = [
   { key: 'record', label: '请假记录', path: '/attendance/leave' },
@@ -55,6 +56,10 @@ const DETAIL_MORE_ITEMS: MenuItem[] = [
 const LEAVE_RECORD_ROWS: Array<Array<React.ReactNode>> = [];
 
 const LEAVE_BALANCE_ROWS: Array<Array<React.ReactNode>> = [];
+
+function plainRows(rows: Array<Array<React.ReactNode>>): PlainRow[] {
+  return rows.map(row => row.map(cell => typeof cell === 'string' || typeof cell === 'number' || typeof cell === 'boolean' ? cell : String(cell ?? '')));
+}
 
 const TYPE_ROWS = [
   { name: '年假', short: '年', enabled: true, unit: '按天请假', paid: '是', negative: '否', before: '否', note: '年假额度可根据员工司龄自动发放，支持跨周期结转。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:17' },
@@ -193,6 +198,14 @@ function LeaveRecordView({
     };
   }, []);
 
+  const commitLeaveRecords = (updater: (rows: Array<Array<React.ReactNode>>) => Array<Array<React.ReactNode>>) => {
+    setTableRows(current => {
+      const next = updater(current);
+      void saveLeaveRecords(plainRows(next)).catch(() => window.alert('请假记录已在页面更新，但保存到后端失败'));
+      return next;
+    });
+  };
+
   const rows = tableRows.filter(row => {
 
     const applicantKeyword = applicantFilter.trim().toLowerCase();
@@ -242,15 +255,40 @@ function LeaveRecordView({
     link.click();
     window.URL.revokeObjectURL(url);
   };
-  const deleteRows = () => setTableRows(current => current.filter(row => !rows.includes(row)));
+  const deleteRows = () => commitLeaveRecords(current => current.filter(row => !rows.includes(row)));
   const addLeaveRecord = (label = '添加请假记录') => {
     const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    setTableRows(current => [[label.includes('批量') ? '审批中' : '已通过', '新增员工', `LV${String(current.length + 1).padStart(4, '0')}`, '产品运营部', '产品研发中心/产品运营部', '新增员工', `LV${String(current.length + 1).padStart(4, '0')}`, label.includes('管理员') ? '管理员发起' : '员工发起', '年假', `${new Date().toISOString().slice(0, 10)} 09:00`, `${new Date().toISOString().slice(0, 10)} 18:00`, '1天', label, now, label.includes('发起') ? '' : now, label.includes('发起') ? '审批中' : '已通过', '查看'], ...current]);
+    commitLeaveRecords(current => [[label.includes('批量') ? '审批中' : '已通过', '新增员工', `LV${String(current.length + 1).padStart(4, '0')}`, '产品运营部', '产品研发中心/产品运营部', '新增员工', `LV${String(current.length + 1).padStart(4, '0')}`, label.includes('管理员') ? '管理员发起' : '员工发起', '年假', `${new Date().toISOString().slice(0, 10)} 09:00`, `${new Date().toISOString().slice(0, 10)} 18:00`, '1天', label, now, label.includes('发起') ? '' : now, label.includes('发起') ? '审批中' : '已通过', '查看'], ...current]);
   };
   const clearLeaveRecords = () => {
     if (!window.confirm('确认清空当前筛选出的请假记录？')) return;
-    setTableRows(current => current.filter(row => !rows.includes(row)));
+    commitLeaveRecords(current => current.filter(row => !rows.includes(row)));
   };
+  const editLeaveRecord = (row: Array<React.ReactNode>) => {
+    const nextReason = window.prompt('修改请假事由', String(row[12] ?? ''));
+    if (nextReason === null) return;
+    const nextStatus = window.prompt('修改流程状态（已通过/审批中/已拒绝）', String(row[15] ?? '')) || String(row[15] ?? '审批中');
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    commitLeaveRecords(current => current.map(item => item === row ? [
+      nextStatus,
+      ...item.slice(1, 12),
+      nextReason.trim() || String(item[12] ?? ''),
+      item[13],
+      nextStatus === '审批中' ? '' : now,
+      nextStatus,
+      '查看',
+    ] : item));
+  };
+  const viewLeaveRecord = (row: Array<React.ReactNode>) => {
+    window.alert(`请假记录详情\n申请人：${row[1]}\n员工号：${row[2]}\n假期类型：${row[8]}\n开始时间：${row[9]}\n结束时间：${row[10]}\n请假时长：${row[11]}\n流程状态：${row[15]}`);
+  };
+  const displayRows = sortedRows.map(row => [
+    ...row.slice(0, LEAVE_RECORD_COLUMNS.length - 1),
+    <RowActions key={`actions-${String(row[2])}-${String(row[13])}`} colors={colors} actions={[
+      { label: '查看', onClick: () => viewLeaveRecord(row) },
+      { label: '编辑', onClick: () => editLeaveRecord(row) },
+    ]} />,
+  ]);
   return (
     <>
       <InfoBanner
@@ -301,7 +339,7 @@ function LeaveRecordView({
 
       <TableShell
         columns={LEAVE_RECORD_COLUMNS}
-        rows={sortedRows}
+        rows={displayRows}
         colors={colors}
         emptyText="暂无内容"
         sortConfig={sortConfig}
@@ -471,9 +509,16 @@ function LeaveDetailView({
       cancelled = true;
     };
   }, []);
+  const commitLeaveDetails = (updater: (rows: Array<Array<React.ReactNode>>) => Array<Array<React.ReactNode>>) => {
+    setDetailRows(current => {
+      const next = updater(current);
+      void saveLeaveDetails(plainRows(next)).catch(() => window.alert('假期额度明细已在页面更新，但保存到后端失败'));
+      return next;
+    });
+  };
   const addDetailRow = (source = '新增额度记录') => {
     const today = new Date().toISOString().slice(0, 10);
-    setDetailRows(current => [['新增员工', `LD${String(current.length + 1).padStart(4, '0')}`, '产品运营部', '产品研发中心/产品运营部', today, '2026', '年假', '1', '1', '1', '0', source.includes('冻结') ? '1' : '0', '0', '1', `${today}`, '2026-12-31', today, '查看'], ...current]);
+    commitLeaveDetails(current => [['新增员工', `LD${String(current.length + 1).padStart(4, '0')}`, '产品运营部', '产品研发中心/产品运营部', today, '2026', '年假', '1', '1', '1', '0', source.includes('冻结') ? '1' : '0', '0', '1', `${today}`, '2026-12-31', today, '查看'], ...current]);
   };
   const exportDetailRows = () => {
     const csv = [LEAVE_DETAIL_COLUMNS, ...detailRows].map(row => row.map(cell => String(cell ?? '')).join(',')).join('\n');
@@ -492,6 +537,23 @@ function LeaveDetailView({
     }
     addDetailRow(item.label);
   };
+  const editDetailRow = (row: Array<React.ReactNode>) => {
+    const nextRemain = window.prompt('修改剩余额度', String(row[13] ?? ''));
+    if (nextRemain === null) return;
+    const nextAdjust = window.prompt('修改调整额度', String(row[10] ?? '')) ?? String(row[10] ?? '0');
+    commitLeaveDetails(current => current.map(item => item === row ? item.map((cell, index) => {
+      if (index === 10) return nextAdjust.trim() || '0';
+      if (index === 13) return nextRemain.trim() || String(cell ?? '');
+      return cell;
+    }) : item));
+  };
+  const displayDetailRows = detailRows.map(row => [
+    ...row.slice(0, LEAVE_DETAIL_COLUMNS.length - 1),
+    <RowActions key={`detail-${String(row[1])}-${String(row[6])}`} colors={colors} actions={[
+      { label: '查看', onClick: () => window.alert(`额度明细\n姓名：${row[0]}\n员工号：${row[1]}\n假期类型：${row[6]}\n剩余额度：${row[13]}`) },
+      { label: '编辑', onClick: () => editDetailRow(row) },
+    ]} />,
+  ]);
 
   return (
     <>
@@ -546,7 +608,7 @@ function LeaveDetailView({
 
       <TableShell
         columns={LEAVE_DETAIL_COLUMNS}
-        rows={detailRows}
+        rows={displayDetailRows}
         colors={colors}
         emptyText="暂无内容"
         sortConfig={sortConfig}
@@ -568,6 +630,26 @@ function LeaveTypeView({
 }) {
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [typeRows, setTypeRows] = useState<Array<LeaveTypeRow>>(TYPE_ROWS);
+  useEffect(() => {
+    let cancelled = false;
+    fetchLeaveTypes()
+      .then((res) => {
+        if (!cancelled && Array.isArray(res.rows)) setTypeRows(res.rows as Array<LeaveTypeRow>);
+      })
+      .catch(() => {
+        if (!cancelled) setTypeRows(TYPE_ROWS);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const commitLeaveTypes = (updater: (rows: Array<LeaveTypeRow>) => Array<LeaveTypeRow>) => {
+    setTypeRows(current => {
+      const next = updater(current);
+      void saveLeaveTypes(next).catch(() => window.alert('假期类型已在页面更新，但保存到后端失败'));
+      return next;
+    });
+  };
   const sortedTypeRows = useMemo(() => {
     const rows = typeRows.map((row, order) => ({ row, order }));
     if (!sortConfig) return rows;
@@ -587,7 +669,7 @@ function LeaveTypeView({
       return;
     }
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    setTypeRows(current => [{
+    commitLeaveTypes(current => [{
       name: trimmedName,
       short: trimmedName.slice(0, 1),
       enabled: true,
@@ -613,11 +695,11 @@ function LeaveTypeView({
       window.alert('假期类型名称不能为空');
       return;
     }
-    setTypeRows(current => current.map(item => item.name === row.name ? { ...item, name: trimmedName, short: trimmedName.slice(0, 1), editor: '当前用户', editedAt: new Date().toISOString().slice(0, 19).replace('T', ' ') } : item));
+    commitLeaveTypes(current => current.map(item => item.name === row.name ? { ...item, name: trimmedName, short: trimmedName.slice(0, 1), editor: '当前用户', editedAt: new Date().toISOString().slice(0, 19).replace('T', ' ') } : item));
   };
   const deleteLeaveType = (row: LeaveTypeRow) => {
     if (!window.confirm(`确认删除假期类型「${row.name}」？`)) return;
-    setTypeRows(current => current.filter(item => item.name !== row.name));
+    commitLeaveTypes(current => current.filter(item => item.name !== row.name));
   };
 
   return (
@@ -732,6 +814,26 @@ function LeaveSchemeView({
 }) {
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [schemeRows, setSchemeRows] = useState<Array<Array<React.ReactNode>>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchLeaveSchemes()
+      .then((res) => {
+        if (!cancelled) setSchemeRows(res.rows as Array<Array<React.ReactNode>>);
+      })
+      .catch(() => {
+        if (!cancelled) setSchemeRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const commitLeaveSchemes = (updater: (rows: Array<Array<React.ReactNode>>) => Array<Array<React.ReactNode>>) => {
+    setSchemeRows(current => {
+      const next = updater(current);
+      void saveLeaveSchemes(plainRows(next)).catch(() => window.alert('假期方案已在页面更新，但保存到后端失败'));
+      return next;
+    });
+  };
   const addScheme = () => {
     const name = window.prompt('请输入假期方案名称', `新增假期方案${schemeRows.length + 1}`);
     if (name === null) return;
@@ -741,8 +843,31 @@ function LeaveSchemeView({
       return;
     }
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    setSchemeRows(current => [[trimmedName, '年假', '按规则控制', '启用额度控制', '全部员工', String(current.length + 1), '当前用户', now, '当前用户', now, '查看'], ...current]);
+    commitLeaveSchemes(current => [[trimmedName, '年假', '按规则控制', '启用额度控制', '全部员工', String(current.length + 1), '当前用户', now, '当前用户', now, '查看'], ...current]);
   };
+  const editScheme = (row: Array<React.ReactNode>) => {
+    const name = window.prompt('修改假期方案名称', String(row[0] ?? ''));
+    if (name === null) return;
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      window.alert('方案名称不能为空');
+      return;
+    }
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    commitLeaveSchemes(current => current.map(item => item === row ? [trimmedName, ...item.slice(1, 8), '当前用户', now, item[10] ?? '查看'] : item));
+  };
+  const deleteScheme = (row: Array<React.ReactNode>) => {
+    if (!window.confirm(`确认删除假期方案「${row[0]}」？`)) return;
+    commitLeaveSchemes(current => current.filter(item => item !== row));
+  };
+  const displaySchemeRows = schemeRows.map(row => [
+    ...row.slice(0, LEAVE_SCHEME_COLUMNS.length - 1),
+    <RowActions key={`scheme-${String(row[0])}`} colors={colors} actions={[
+      { label: '查看', onClick: () => window.alert(`假期方案\n方案名称：${row[0]}\n假期类型：${row[1]}\n适用范围：${row[4]}`) },
+      { label: '编辑', onClick: () => editScheme(row) },
+      { label: '删除', onClick: () => deleteScheme(row) },
+    ]} />,
+  ]);
 
   return (
     <>
@@ -779,7 +904,7 @@ function LeaveSchemeView({
 
       <TableShell
         columns={LEAVE_SCHEME_COLUMNS}
-        rows={schemeRows}
+        rows={displaySchemeRows}
         colors={colors}
         emptyText="暂无内容"
         sortConfig={sortConfig}
@@ -787,6 +912,16 @@ function LeaveSchemeView({
         onSortChange={(index) => setSortConfig(current => getNextSortConfig(current, index))}
       />
     </>
+  );
+}
+
+function RowActions({ colors, actions }: { colors: any; actions: Array<{ label: string; onClick: () => void }> }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {actions.map(action => (
+        <button key={action.label} onClick={action.onClick} style={textActionBtn(colors)}>{action.label}</button>
+      ))}
+    </div>
   );
 }
 

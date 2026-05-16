@@ -334,9 +334,14 @@ export default function StatItemsManagement() {
   const loadStatItems = useCallback(async () => {
     try {
       const res = await fetchStatItems();
-      setItems(res.rows || []);
+      if (res.rows && res.rows.length > 0) {
+        setItems(res.rows);
+      } else {
+        setItems(INIT_ITEMS);
+        setLoadError('统计项接口返回空数据，当前保留系统默认配置');
+      }
       setSourceFile(res.sourceFile || '');
-      setLoadError('');
+      if (res.rows && res.rows.length > 0) setLoadError('');
     } catch (_error) {
       setLoadError('真实统计项连接失败，当前展示静态配置');
     }

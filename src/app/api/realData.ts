@@ -111,6 +111,8 @@ export type ClockRecord = {
   freeWork: string;
   note: string;
   hasPhoto: boolean;
+  photoUrl?: string;
+  photoTakenAt?: string;
   creator: string;
   createTime: string;
   modifier: string;
@@ -146,6 +148,8 @@ export type PhotoClockRecord = {
   location: string;
   note: string;
   hasPhoto: boolean;
+  photoUrl?: string;
+  photoTakenAt?: string;
   reviewStatus: string;
 };
 
@@ -178,6 +182,7 @@ export type OnboardEmployeePayload = {
   hireDate?: string;
   userId?: string;
   attendanceGroupName?: string;
+  shiftId?: string;
   shiftName?: string;
   faceStatus?: string;
 };
@@ -336,6 +341,14 @@ export async function fetchLeaveRecords() {
   return limitDataResponse(await requestJson<DataResponse<LeaveRecordRow>>('/api/leave-records'));
 }
 
+export async function saveLeaveRecords(rows: LeaveRecordRow[]) {
+  return requestJson<DataResponse<LeaveRecordRow>>('/api/leave-records', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
 export async function fetchLeaveBalances() {
   return limitDataResponse(await requestJson<DataResponse<LeaveRecordRow>>('/api/leave-balances'));
 }
@@ -344,8 +357,48 @@ export async function fetchLeaveDetails() {
   return limitDataResponse(await requestJson<DataResponse<LeaveRecordRow>>('/api/leave-details'));
 }
 
+export async function saveLeaveDetails(rows: LeaveRecordRow[]) {
+  return requestJson<DataResponse<LeaveRecordRow>>('/api/leave-details', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
+export async function fetchLeaveTypes() {
+  return requestJson<DataResponse<Record<string, unknown>>>('/api/leave-types');
+}
+
+export async function saveLeaveTypes(rows: Array<Record<string, unknown>>) {
+  return requestJson<DataResponse<Record<string, unknown>>>('/api/leave-types', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
+export async function fetchLeaveSchemes() {
+  return requestJson<DataResponse<LeaveRecordRow>>('/api/leave-schemes');
+}
+
+export async function saveLeaveSchemes(rows: LeaveRecordRow[]) {
+  return requestJson<DataResponse<LeaveRecordRow>>('/api/leave-schemes', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
 export async function fetchSettingsShifts() {
   return requestJson<DataResponse<SettingTableRow>>('/api/settings-shifts');
+}
+
+export async function saveSettingsShifts(rows: SettingTableRow[]) {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-shifts', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
 }
 
 export async function fetchSettingsFace() {

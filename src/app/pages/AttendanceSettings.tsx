@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
-import { deleteOnboardedEmployees, fetchSettingsFace, fetchSettingsPeople, fetchSettingsShifts, onboardEmployee } from '../api/realData';
+import { deleteOnboardedEmployees, fetchSettingsFace, fetchSettingsPeople, fetchSettingsShifts, onboardEmployee, saveSettingsShifts } from '../api/realData';
 import { monthEndISO, monthStartISO, todayISO } from '../utils/date';
 import {
   AlertCircle,
@@ -36,6 +36,12 @@ type SettingView =
 type RouteTab = { key: SettingView; label: string; path: string };
 type OverviewCard = { title: string; desc: string; extra: string; path: string; badge: string };
 type TableSortConfig = { index: number; direction: 'asc' | 'desc' };
+
+type ShiftOption = {
+  id: string;
+  name: string;
+  time: string;
+};
 
 type TableProps = {
   columns: string[];
@@ -102,7 +108,7 @@ const OVERVIEW_CARDS: OverviewCard[] = [
 ];
 
 const GROUP_COLUMNS = ['考勤组名称', '考勤类型', '适用范围', '出勤时间', '创建人', '创建时间', '修改人', '修改时间', '操作'];
-const SHIFT_COLUMNS = ['班次名称', '班次简称', '班次角色', '标签', '冬夏令时', '出勤时间', '出勤时长', '适用考勤组', '创建人', '创建时间', '修改人', '修改时间', '操作'];
+const SHIFT_COLUMNS = ['班次名称', '班次简称', '班次颜色', '标签', '冬夏令时', '出勤时间', '出勤时长', '适用考勤组', '创建人', '创建时间', '修改人', '修改时间', '操作'];
 const PEOPLE_COLUMNS = ['姓名', '员工号', '部门', '岗位', '入职日期', '班次', '考勤日期', '员工类型', '员工状态', '排休', '业务分组', '工作地', '考勤组', '统计方案', '操作'];
 const CARD_RULE_COLUMNS = ['规则名称', '规则内容', '关联考勤组', '创建人', '创建时间', '修改人', '修改时间', '操作'];
 const MOBILE_COLUMNS = ['方案名称', '方案内容', '关联考勤组', '创建人', '创建时间', '修改人', '修改时间', '操作'];
@@ -113,6 +119,42 @@ const CALENDAR_COLUMNS = ['方案名称', '考勤周期', '每周工作日', '�
 const OVERTIME_RULE_COLUMNS = ['加班规则名称', '规则内容', '关联考勤组', '创建人', '创建时间', '修改人', '修改时间', '操作'];
 const FIELD_RULE_COLUMNS = ['规则名称', '规则内容', '关联考勤组', '创建人', '创建时间', '修改人', '修改时间', '操作'];
 const STAT_SCHEME_COLUMNS = ['方案名称', '考勤周期', '业务停止规则', '适用范围', '创建人', '创建时间', '修改人', '修改时间', '操作'];
+
+function parseShiftTimeRange(value: unknown) {
+  const text = String(value ?? '');
+  if (text.includes('休息')) return { clockInTime: '', clockOutTime: '', time: '休息' };
+  const match = text.match(/(\d{1,2}):(\d{2})\s*[-~—至]\s*(\d{1,2}):(\d{2})/);
+  if (!match) return { clockInTime: '09:00', clockOutTime: '18:00', time: '09:00-18:00' };
+  const clockInTime = `${match[1].padStart(2, '0')}:${match[2]}`;
+  const clockOutTime = `${match[3].padStart(2, '0')}:${match[4]}`;
+  return { clockInTime, clockOutTime, time: `${clockInTime}-${clockOutTime}` };
+}
+
+function shiftIdFromRow(row: string[]) {
+  const name = String(row[0] ?? '');
+  const { clockInTime, clockOutTime } = parseShiftTimeRange(row[5]);
+  if (name === '休息') return 'shift_rest';
+  const baseId = `shift_${clockInTime.replace(':', '')}_${clockOutTime.replace(':', '')}`;
+  if (name === '早九晚六') return baseId;
+  let hash = 0;
+  for (const char of name) hash = ((hash * 31) + char.charCodeAt(0)) >>> 0;
+  return `${baseId}_${hash.toString(36)}`;
+}
+
+function shiftOptionsFromRows(rows: string[][]): ShiftOption[] {
+  const seen = new Set<string>();
+  return rows
+    .filter(row => row[0])
+    .map(row => {
+      const id = shiftIdFromRow(row);
+      return { id, name: String(row[0]), time: parseShiftTimeRange(row[5]).time };
+    })
+    .filter(option => {
+      if (seen.has(option.id)) return false;
+      seen.add(option.id);
+      return true;
+    });
+}
 
 const GROUP_ROWS = [
   ['冲床组', '排班制', '部门：冲压车间', '早十晚六 / 早十午六', '何山', '2025-08-28 11:10:29', '棠乐', '2026-04-22 14:55:09'],
@@ -188,7 +230,6 @@ const ONBOARD_DEPARTMENTS = [
 ];
 
 const ONBOARD_ATTEND_GROUPS = ['华托大厦', '综合考勤组', '研发中心考勤组', '工艺部考勤组'];
-const ONBOARD_SHIFTS = ['早九晚六', '早九点到六点', '早八点半到五点半', '早七点半到五点半', '弹性工作制（8小时）'];
 const ONBOARD_FACE_STATUSES = ['已录入', '未录入'];
 
 const DEPT_FULL_PATH_BY_NAME: Record<string, string> = {
@@ -251,6 +292,7 @@ export default function AttendanceSettings() {
     const sub = location.pathname.split('/').pop() ?? '';
     return LEGACY_ALIAS[sub] ?? (ROUTE_TABS.find(tab => tab.path === location.pathname)?.key ?? 'overview');
   }, [location.pathname]);
+  const shiftOptions = useMemo(() => shiftOptionsFromRows(shiftRows), [shiftRows]);
 
   const toggleMore = (key: string) => setShowMore(prev => ({ ...prev, [key]: !prev[key] }));
   const openTab = (view: SettingView) => {
@@ -278,7 +320,7 @@ export default function AttendanceSettings() {
         />
       )}
       {activeView === 'groups' && <GroupsView colors={colors} showMore={!!showMore.groups} onToggleMore={() => toggleMore('groups')} />}
-      {activeView === 'shifts' && <ShiftsView colors={colors} showMore={!!showMore.shifts} onToggleMore={() => toggleMore('shifts')} shiftRows={shiftRows} sourceInfo={sourceInfo} loadError={loadError} />}
+      {activeView === 'shifts' && <ShiftsView colors={colors} showMore={!!showMore.shifts} onToggleMore={() => toggleMore('shifts')} shiftRows={shiftRows} onShiftRowsChange={setShiftRows} sourceInfo={sourceInfo} loadError={loadError} />}
       {activeView === 'people' && <PeopleView colors={colors} showMore={!!showMore.people} onToggleMore={() => toggleMore('people')} peopleRows={peopleRows} sourceInfo={sourceInfo} loadError={loadError} />}
       {activeView === 'card-rules' && <CardRulesView colors={colors} />}
       {activeView === 'mobile-clock' && <MobileClockView colors={colors} />}
@@ -288,6 +330,7 @@ export default function AttendanceSettings() {
         showMore={!!showMore.face}
         onToggleMore={() => toggleMore('face')}
         faceRows={faceRows}
+        shiftOptions={shiftOptions}
         sourceInfo={sourceInfo}
         loadError={loadError}
         onEmployeeCreated={(peopleRow, faceRow) => {
@@ -531,7 +574,7 @@ function SourceNotice({ sourceInfo, loadError }: { sourceInfo?: string; loadErro
   return <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>{sourceInfo ? `已连接真实数据源：${sourceInfo}` : ''}{loadError ? ` ${loadError}` : ''}</div>;
 }
 
-function ShiftsView({ colors, showMore, onToggleMore, shiftRows, sourceInfo, loadError }: { colors: any; showMore: boolean; onToggleMore: () => void; shiftRows: string[][]; sourceInfo?: string; loadError?: string }) {
+function ShiftsView({ colors, showMore, onToggleMore, shiftRows, onShiftRowsChange, sourceInfo, loadError }: { colors: any; showMore: boolean; onToggleMore: () => void; shiftRows: string[][]; onShiftRowsChange: (rows: string[][]) => void; sourceInfo?: string; loadError?: string }) {
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [rowsData, setRowsData] = useState<string[][]>(shiftRows);
   const [draftFilters, setDraftFilters] = useState({ name: '', tag: '' });
@@ -553,6 +596,15 @@ function ShiftsView({ colors, showMore, onToggleMore, shiftRows, sourceInfo, loa
     });
   }, [rowsData]);
 
+  const commitRows = (updater: (rows: string[][]) => string[][]) => {
+    setRowsData(current => {
+      const next = updater(current);
+      onShiftRowsChange(next);
+      void saveSettingsShifts(next).catch(() => window.alert('班次已在页面更新，但保存到后端失败，请稍后重试'));
+      return next;
+    });
+  };
+
   const filteredRows = useMemo(() => {
     const nameKeyword = appliedFilters.name.trim().toLowerCase();
     return rowsData.filter(row => {
@@ -569,7 +621,10 @@ function ShiftsView({ colors, showMore, onToggleMore, shiftRows, sourceInfo, loa
 
   const rowIds = sortedRows.map(getShiftRowId);
   const rows = sortedRows.map(row => [
-    ...row,
+    row[0],
+    row[1],
+    shiftColorCell(colors, row[2]),
+    ...row.slice(3),
     shiftActionLinks(colors, row, {
       onDetail: () => window.alert(`班次详情\n名称：${row[0] ?? '-'}\n出勤时间：${row[5] ?? '-'}\n适用考勤组：${row[7] ?? '-'}`),
       onEdit: () => {
@@ -580,7 +635,7 @@ function ShiftsView({ colors, showMore, onToggleMore, shiftRows, sourceInfo, loa
           window.alert('班次名称不能为空');
           return;
         }
-        setRowsData(current => current.map(item => getShiftRowId(item) === getShiftRowId(row) ? [trimmedName, ...item.slice(1)] : item));
+        commitRows(current => current.map(item => getShiftRowId(item) === getShiftRowId(row) ? [trimmedName, ...item.slice(1)] : item));
       },
       onMore: () => window.alert(`更多操作\n可对「${row[0] ?? '-'}」执行复制、停用或查看引用。`),
     }),
@@ -615,7 +670,7 @@ function ShiftsView({ colors, showMore, onToggleMore, shiftRows, sourceInfo, loa
       return;
     }
     if (!window.confirm(`确认删除选中的 ${visibleSelectedIds.length} 个班次？`)) return;
-    setRowsData(current => current.filter(row => !selectedRowIds.has(getShiftRowId(row))));
+    commitRows(current => current.filter(row => !selectedRowIds.has(getShiftRowId(row))));
     setSelectedRowIds(new Set());
   };
 
@@ -628,7 +683,7 @@ function ShiftsView({ colors, showMore, onToggleMore, shiftRows, sourceInfo, loa
       return;
     }
     const shortName = window.prompt('请输入班次简称', trimmedName.slice(0, 8))?.trim() || trimmedName.slice(0, 8);
-    setRowsData(current => [[trimmedName, shortName, '正常出勤', '-', '通用', '09:00', '8.00小时/天', '-', '手动创建'], ...current]);
+    commitRows(current => [[trimmedName, shortName, '#B53A2A', '-', '通用', '09:00-18:00(正常出勤)', '8小时', '通用', '后台维护', nowText(), '后台维护', nowText()], ...current]);
   };
 
   const addTag = () => {
@@ -641,7 +696,7 @@ function ShiftsView({ colors, showMore, onToggleMore, shiftRows, sourceInfo, loa
     const targetIds = rowIds.filter(rowId => selectedRowIds.has(rowId));
     const effectiveTargetIds = targetIds.length ? targetIds : rowIds;
     if (effectiveTargetIds.length) {
-      setRowsData(current => current.map(row => effectiveTargetIds.includes(getShiftRowId(row)) ? setShiftRowCell(row, 3, trimmedTag) : row));
+      commitRows(current => current.map(row => effectiveTargetIds.includes(getShiftRowId(row)) ? setShiftRowCell(row, 3, trimmedTag) : row));
       window.alert(`已将标签「${trimmedTag}」添加到 ${effectiveTargetIds.length} 个班次`);
     } else {
       window.alert(`已新增标签「${trimmedTag}」`);
@@ -684,7 +739,7 @@ function ShiftsView({ colors, showMore, onToggleMore, shiftRows, sourceInfo, loa
         window.alert('未识别到可导入的班次数据');
         return;
       }
-      setRowsData(current => [...importedRows, ...current]);
+      commitRows(current => [...importedRows, ...current]);
       window.alert(`导入成功：${importedRows.length} 条班次`);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : '导入失败，请检查文件格式');
@@ -696,7 +751,7 @@ function ShiftsView({ colors, showMore, onToggleMore, shiftRows, sourceInfo, loa
   return (
     <ListPage colors={colors}>
       <SourceNotice sourceInfo={sourceInfo} loadError={loadError} />
-      <InfoBanner colors={colors} messages={['设置每天上下班时间、打卡时间和出勤班次将有助于考勤统计。']} />
+      <InfoBanner colors={colors} messages={['设置每天上下班时间，打卡时间范围和弹性打卡规则，完成后可在考勤组、新增员工和管理员排班中使用。']} />
       <FilterBar colors={colors}>
         <SearchField label="班次名称" placeholder="请输入" colors={colors} width={180} value={draftFilters.name} onChange={value => setDraftFilters(current => ({ ...current, name: value }))} />
         <SelectField label="标签名称" placeholder="请选择标签" colors={colors} width={160} options={tagOptions} value={draftFilters.tag} onChange={value => setDraftFilters(current => ({ ...current, tag: value }))} />
@@ -723,7 +778,7 @@ function ShiftsView({ colors, showMore, onToggleMore, shiftRows, sourceInfo, loa
       </FilterBar>
       <Toolbar colors={colors}>
         <button onClick={addShift} style={primaryBtn(colors)}>新建班次</button>
-        <button onClick={() => importInputRef.current?.click()} style={outlineBtn(colors)}>导入排入</button>
+        <button onClick={() => importInputRef.current?.click()} style={outlineBtn(colors)}>导入班次</button>
         <button onClick={exportRows} style={outlineBtn(colors)}>导出</button>
         <button
           onClick={deleteSelected}
@@ -980,6 +1035,7 @@ function FaceView({
   showMore,
   onToggleMore,
   faceRows,
+  shiftOptions,
   sourceInfo,
   loadError,
   onEmployeeCreated,
@@ -989,6 +1045,7 @@ function FaceView({
   showMore: boolean;
   onToggleMore: () => void;
   faceRows: string[][];
+  shiftOptions: ShiftOption[];
   sourceInfo?: string;
   loadError?: string;
   onEmployeeCreated: (peopleRow: string[], faceRow: string[]) => void;
@@ -1017,6 +1074,7 @@ function FaceView({
     faceStatus: '已录入',
     userId: '',
   });
+  const effectiveShiftOptions = shiftOptions.length ? shiftOptions : [{ id: 'shift_0900_1800', name: '早九晚六', time: '09:00-18:00' }];
 
   useEffect(() => {
     setRowsData(faceRows);
@@ -1092,7 +1150,8 @@ function FaceView({
         managerName,
         position: employeeDraft.position.trim() || '员工',
         attendanceGroupName: employeeDraft.attendanceGroupName.trim() || '华托大厦',
-        shiftName: employeeDraft.shiftName.trim() || '早九晚六',
+        shiftId: effectiveShiftOptions.find(shift => shift.name === employeeDraft.shiftName)?.id || 'shift_0900_1800',
+        shiftName: employeeDraft.shiftName.trim() || effectiveShiftOptions[0]?.name || '早九晚六',
         hireDate: employeeDraft.hireDate.trim() || todayISO(),
         userId: employeeDraft.userId.trim() || `wecom_${trimmedNo}`,
         faceStatus: employeeDraft.faceStatus,
@@ -1278,7 +1337,7 @@ function FaceView({
               </FormField>
               <FormField label="班次" colors={colors}>
                 <select value={employeeDraft.shiftName} onChange={event => updateEmployeeDraft('shiftName', event.target.value)} style={modalInput(colors)}>
-                  {ONBOARD_SHIFTS.map(shift => <option key={shift} value={shift}>{shift}</option>)}
+                  {effectiveShiftOptions.map(shift => <option key={shift.id} value={shift.name}>{shift.name} {shift.time !== '休息' ? `（${shift.time}）` : ''}</option>)}
                 </select>
               </FormField>
               <FormField label="人脸状态" colors={colors}>
@@ -1815,12 +1874,27 @@ function uniqueShiftTags(rows: string[][]) {
   ));
 }
 
+function shiftColorCell(colors: any, value: React.ReactNode) {
+  const color = typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : '#B53A2A';
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ width: 18, height: 18, borderRadius: 4, backgroundColor: color, border: `1px solid ${colors.cardBorder}` }} />
+      <span style={{ color: colors.textMuted }}>{color}</span>
+    </span>
+  );
+}
+
 function normalizeShiftImportRows(rows: unknown[][]) {
   return rows
     .map(row => row.map(cell => String(cell ?? '').trim()))
     .filter(row => row.some(Boolean))
     .filter(row => row[0] && row[0] !== SHIFT_COLUMNS[0])
-    .map(row => row.slice(0, SHIFT_COLUMNS.length - 1));
+    .map(row => {
+      const next = row.slice(0, SHIFT_COLUMNS.length - 1);
+      while (next.length < SHIFT_COLUMNS.length - 1) next.push('-');
+      if (!/^#[0-9a-f]{6}$/i.test(next[2] || '')) next[2] = '#B53A2A';
+      return next;
+    });
 }
 
 function parseCsv(text: string) {

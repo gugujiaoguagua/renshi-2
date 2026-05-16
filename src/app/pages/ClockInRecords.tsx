@@ -22,7 +22,7 @@ type ClockRecord = {
   id: number; name: string; empId: string; dept: string;
   date: string; time: string; source: string; device: string;
   location: string; workLocation: string; freeWork: string;
-  note: string; hasPhoto: boolean;
+  note: string; hasPhoto: boolean; photoUrl?: string; photoTakenAt?: string;
   creator: string; createTime: string; modifier: string; modifyTime: string;
 };
 type MakeupRecord = {
@@ -40,7 +40,7 @@ type FieldRecord = {
 type PhotoRecord = {
   id: number; name: string; empId: string; dept: string;
   date: string; clockTime: string; locateTime: string; completeTime: string;
-  location: string; note: string; hasPhoto: boolean; reviewStatus: string;
+  location: string; note: string; hasPhoto: boolean; photoUrl?: string; photoTakenAt?: string; reviewStatus: string;
 };
 
 // ─── Mock Data ────────────────────────────────
@@ -170,7 +170,10 @@ function StatusBadge({ status, colors }: { status: string; colors: any }) {
   return <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: 10, backgroundColor: bg, color: txt, whiteSpace: 'nowrap' }}>{status}</span>;
 }
 
-function PhotoModal({ title, onClose, colors }: { title: string; onClose: () => void; colors: any }) {
+type PhotoPreview = { name?: string; photoUrl?: string; photoTakenAt?: string; note?: string };
+
+function PhotoModal({ title, target, onClose, colors }: { title: string; target?: PhotoPreview | string | null; onClose: () => void; colors: any }) {
+  const preview = typeof target === 'string' ? { name: target } : (target || {});
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 600, backgroundColor: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ backgroundColor: colors.cardBg, borderRadius: 10, width: 340, boxShadow: '0 8px 28px rgba(0,0,0,0.22)', overflow: 'hidden' }}>
@@ -179,11 +182,17 @@ function PhotoModal({ title, onClose, colors }: { title: string; onClose: () => 
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: colors.textMuted }}><X size={14}/></button>
         </div>
         <div style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 200, height: 200, borderRadius: 8, backgroundColor: colors.statCardBg, border: `1px solid ${colors.cardBorder}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <Camera size={36} style={{ color: colors.textMuted }}/>
-            <span style={{ fontSize: '12px', color: colors.textMuted }}>照片预览（示例）</span>
-          </div>
-          <span style={{ fontSize: '11px', color: colors.textMuted }}>拍摄时间：{todayISO()} 09:00:08</span>
+          {preview.photoUrl ? (
+            <img src={preview.photoUrl} alt="打卡照片" style={{ width: 220, height: 220, objectFit: 'cover', borderRadius: 8, border: `1px solid ${colors.cardBorder}`, backgroundColor: colors.statCardBg }} />
+          ) : (
+            <div style={{ width: 220, height: 220, borderRadius: 8, backgroundColor: colors.statCardBg, border: `1px solid ${colors.cardBorder}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <Camera size={36} style={{ color: colors.textMuted }}/>
+              <span style={{ fontSize: '12px', color: colors.textMuted }}>暂无真实照片</span>
+            </div>
+          )}
+          <span style={{ fontSize: '12px', color: colors.text }}>{preview.name || ''}</span>
+          <span style={{ fontSize: '11px', color: colors.textMuted }}>拍摄时间：{preview.photoTakenAt || todayISO()}</span>
+          {preview.note && <span style={{ fontSize: '11px', color: colors.textMuted }}>{preview.note}</span>}
         </div>
       </div>
     </div>
@@ -275,7 +284,7 @@ function OriginalClockTab({ colors }: { colors: any }) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [photoTarget, setPhotoTarget] = useState<string | null>(null);
+  const [photoTarget, setPhotoTarget] = useState<PhotoPreview | null>(null);
   const [activeClockFilter, setActiveClockFilter] = useState<string>('all');
   const [rows, setRows] = useState<ClockRecord[]>([]);
   const [sourceFile, setSourceFile] = useState('');
@@ -592,7 +601,7 @@ function OriginalClockTab({ colors }: { colors: any }) {
                   </td>
                   <td style={{ ...tdS(colors), width: 90, fontSize: '11px', color: colors.textMuted }}>{row.note || <span style={{ color: colors.textMuted }}>—</span>}</td>
                   <td style={{ ...tdS(colors), width: 75, textAlign: 'center' }}>
-                    {row.hasPhoto ? <button onClick={() => setPhotoTarget(row.name)} style={{ fontSize: '11px', color: colors.primary, border: `1px solid ${colors.primary}`, borderRadius: 4, padding: '2px 7px', cursor: 'pointer', backgroundColor: 'transparent' }}>查看</button>
+                    {row.hasPhoto ? <button onClick={() => setPhotoTarget({ name: row.name, photoUrl: row.photoUrl, photoTakenAt: row.photoTakenAt || row.createTime, note: row.note })} style={{ fontSize: '11px', color: colors.primary, border: `1px solid ${colors.primary}`, borderRadius: 4, padding: '2px 7px', cursor: 'pointer', backgroundColor: 'transparent' }}>查看</button>
                       : <span style={{ color: colors.textMuted }}>—</span>}
                   </td>
                   <td style={{ ...tdS(colors), width: 70, fontSize: '11px', color: colors.textMuted }}>{row.creator}</td>
@@ -609,7 +618,7 @@ function OriginalClockTab({ colors }: { colors: any }) {
         </table>
       </div>
       <PaginationBar total={filteredRows.length} page={page} pageSize={pageSize} totalPages={totalPages} onPage={setPage} onPageSize={n => { setPageSize(n); setPage(1); }} colors={colors}/>
-      {photoTarget && <PhotoModal title="打卡照片" onClose={() => setPhotoTarget(null)} colors={colors}/>}
+      {photoTarget && <PhotoModal title="打卡照片" target={photoTarget} onClose={() => setPhotoTarget(null)} colors={colors}/>}
     </div>
   );
 }
@@ -620,7 +629,7 @@ function MakeupClockTab({ colors }: { colors: any }) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [photoTarget, setPhotoTarget] = useState<string | null>(null);
+  const [photoTarget, setPhotoTarget] = useState<PhotoPreview | null>(null);
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateRange, setDateRange] = useState<DateRangeFilter>({ start: '', end: '' });
   const [deptFilter, setDeptFilter] = useState('');
@@ -1307,7 +1316,8 @@ function PhotoClockTab({ colors }: { colors: any }) {
                   <td style={{ ...tdS(colors), width: 160, fontSize: '11px', color: colors.textMuted }}>{row.location}</td>
                   <td style={{ ...tdS(colors), width: 100, fontSize: '11px', color: colors.textMuted }}>{row.note || <span style={{ color: colors.textMuted }}>—</span>}</td>
                   <td style={{ ...tdS(colors), width: 75, textAlign: 'center' }}>
-                    <button onClick={() => setPhotoTarget(row.name)} style={{ fontSize: '11px', color: colors.primary, border: `1px solid ${colors.primary}`, borderRadius: 4, padding: '2px 7px', cursor: 'pointer', backgroundColor: 'transparent' }}>查看</button>
+                    {row.hasPhoto ? <button onClick={() => setPhotoTarget({ name: row.name, photoUrl: row.photoUrl, photoTakenAt: row.photoTakenAt || row.completeTime, note: row.note })} style={{ fontSize: '11px', color: colors.primary, border: `1px solid ${colors.primary}`, borderRadius: 4, padding: '2px 7px', cursor: 'pointer', backgroundColor: 'transparent' }}>查看</button>
+                      : <span style={{ color: colors.textMuted }}>—</span>}
                   </td>
                   <td style={{ ...tdS(colors), width: 85 }}><StatusBadge status={row.reviewStatus} colors={colors}/></td>
                   <td style={{ ...tdS(colors), width: 60, textAlign: 'center' }}>
@@ -1320,7 +1330,7 @@ function PhotoClockTab({ colors }: { colors: any }) {
         </table>
       </div>
       <PaginationBar total={filteredRows.length} page={page} pageSize={pageSize} totalPages={totalPages} onPage={setPage} onPageSize={n => { setPageSize(n); setPage(1); }} colors={colors}/>
-      {photoTarget && <PhotoModal title="拍照打卡照片" onClose={() => setPhotoTarget(null)} colors={colors}/>}
+      {photoTarget && <PhotoModal title="拍照打卡照片" target={photoTarget} onClose={() => setPhotoTarget(null)} colors={colors}/>}
     </div>
   );
 }

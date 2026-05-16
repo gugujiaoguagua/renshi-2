@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { fetchAttendanceEmployees, type AttendanceEmployee } from '../api/realData';
+import { todayISO } from '../utils/date';
 import {
   Calendar, Search, RefreshCw, ChevronDown, Settings2,
   ChevronLeft, ChevronRight, X, ChevronUp, RotateCcw,
@@ -83,8 +84,8 @@ type Filters = {
 };
 
 const DEFAULT_FILTERS: Filters = {
-  startDate: '2026-05-06',
-  endDate: '2026-05-07',
+  startDate: todayISO(),
+  endDate: todayISO(),
   dept: '',
   attendGroup: '',
   shift: '',

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
+import { todayISO } from '../utils/date';
 import {
   fetchClockRecords,
   fetchMakeupClockRecords,
@@ -182,7 +183,7 @@ function PhotoModal({ title, onClose, colors }: { title: string; onClose: () => 
             <Camera size={36} style={{ color: colors.textMuted }}/>
             <span style={{ fontSize: '12px', color: colors.textMuted }}>照片预览（示例）</span>
           </div>
-          <span style={{ fontSize: '11px', color: colors.textMuted }}>拍摄时间：2026-05-07 09:00:08</span>
+          <span style={{ fontSize: '11px', color: colors.textMuted }}>拍摄时间：{todayISO()} 09:00:08</span>
         </div>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { fetchMonthlyAttendanceEmployees, type MonthlyAttendanceEmployee as RealMonthlyEmployee } from '../api/realData';
+import { todayISO } from '../utils/date';
 import {
   ChevronDown, ChevronLeft, ChevronRight, Search, X,
   Info, Settings2, Download, Calendar,
@@ -26,8 +27,8 @@ const ATTEND_GROUPS = ['华托大厦考勤组', '综合考勤组', '研发中心
 const WEEKDAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
 const MONTH_LABELS = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
 
-// Today in app: 2026-05-07
-const TODAY = { year: 2026, month: 4, day: 7 }; // month is 0-indexed
+const NOW = new Date();
+const TODAY = { year: NOW.getFullYear(), month: NOW.getMonth(), day: NOW.getDate() };
 
 const EMPLOYEES: Employee[] = [];
 
@@ -270,8 +271,8 @@ function FilterSel({
 // ─── Main Component ───────────────────────────
 export default function MonthlyAttendanceStats() {
   const { colors } = useTheme();
-  const [year, setYear] = useState(2026);
-  const [month, setMonth] = useState(4); // 0-indexed May
+  const [year, setYear] = useState(TODAY.year);
+  const [month, setMonth] = useState(TODAY.month);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('result');
   const [hideResigned, setHideResigned] = useState(false);
@@ -403,11 +404,6 @@ export default function MonthlyAttendanceStats() {
     if (isWeekend) return <span style={{ fontSize: '11px', color: colors.textMuted }}>—</span>;
     const state = getPastFuture(year, month, day);
     if (state === 'future') return <span style={{ fontSize: '11px', color: colors.textMuted }}>—</span>;
-    if (emp.empId === 'CP25023' && day <= 6) {
-      return <div style={{ fontSize: '10px', color: colors.text, lineHeight: 1.4 }}>
-        <div>09:02</div><div>18:05</div>
-      </div>;
-    }
     return <span style={{ fontSize: '11px', color: colors.textMuted }}>未打卡</span>;
   };
 
@@ -434,17 +430,17 @@ export default function MonthlyAttendanceStats() {
       const left = visibleColDefs.map(col => `${(emp as any)[col.key] ?? '-'}`);
       const right = days.map(day => {
         if (viewMode === 'result') {
+          const realValue = emp.dayResults?.[String(day.day)]?.trim();
+          if (realValue) return realValue.replace(/\n/g, ' / ');
           if (day.isWeekend) return '休';
           const state = getPastFuture(year, month, day.day);
           if (state === 'future') return '未核算';
-          if (emp.empId === 'CP25023' && day.day <= 6) return '正常';
           return '未排班';
         }
 
         if (day.isWeekend) return '—';
         const state = getPastFuture(year, month, day.day);
         if (state === 'future') return '—';
-        if (emp.empId === 'CP25023' && day.day <= 6) return '09:02/18:05';
         return '未打卡';
       });
       return [...left, ...right];
@@ -696,7 +692,7 @@ export default function MonthlyAttendanceStats() {
               <p style={{ marginBottom: 4, fontWeight: 500 }}>数据说明</p>
               <p style={{ color: colors.textMuted, lineHeight: 1.5 }}>
                 月考勤数据每日凌晨 02:00 自动更新，如有疑问请联系 HR 管理员。
-                最近更新时间：2026-05-07 02:00
+                最近更新时间：{todayISO()} 02:00
               </p>
             </div>
           )}

@@ -1,4 +1,5 @@
 import React from 'react';
+import { todayISO } from '../utils/date';
 import {
   ArrowRight,
   Bell,
@@ -390,7 +391,7 @@ export function EmployeeManagementPage() {
           <Surface style={{ padding: '14px 14px 12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <div style={{ fontSize: '13px', fontWeight: 700, color: colors.text }}>人事提醒</div>
-              <div style={{ fontSize: '11px', color: colors.textMuted }}>更新时间：2026-05-08 14:29　切换　刷新</div>
+              <div style={{ fontSize: '11px', color: colors.textMuted }}>更新时间：{todayISO()} 14:29　切换　刷新</div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12, paddingTop: 4 }}>
               {[

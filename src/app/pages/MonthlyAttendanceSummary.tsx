@@ -777,8 +777,9 @@ function ModalFormRow({
 export default function MonthlyAttendanceSummary() {
   const { colors } = useTheme();
 
-  const [year, setYear] = useState(2026);
-  const [month, setMonth] = useState(4);
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth());
   const [rows, setRows] = useState<MonthEmployee[]>([]);
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [sortKey, setSortKey] = useState<keyof MonthEmployee | null>(null);

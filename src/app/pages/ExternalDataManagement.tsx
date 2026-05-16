@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { fetchExternalRecords, type ExternalRecord as RealExternalRecord } from '../api/realData';
+import { currentMonthLabel } from '../utils/date';
 import {
   ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X, Search,
   Plus, Upload, Download, Trash2, Info, Settings2, GripVertical, Minus,
@@ -26,7 +27,11 @@ const ALL_COLS_DEFAULT: ColDef[] = [
 // ─── Constants ───────────────────────────────
 const MODULE_OPTIONS = ['基础考勤', '薪资核算', '假期管理', '绩效管理'];
 const BIZ_TYPE_OPTIONS = ['工时', '天数', '金额', '次数'];
-const PERIOD_OPTIONS = ['2026年05月', '2026年04月', '2026年03月', '2026年02月'];
+const PERIOD_OPTIONS = Array.from({ length: 4 }, (_, index) => {
+  const date = new Date();
+  date.setMonth(date.getMonth() - index);
+  return currentMonthLabel(date);
+});
 const STAT_ITEMS = ['正班工时', '加班工时', '餐补工时', '外部加班工时', '津贴工时', '请假天数', '出差天数'];
 const DEPT_OPTIONS = ['产品研发中心', '产品运营部', '研发设计一部', '研发设计二部', '工艺开发部', '技术支持部'];
 

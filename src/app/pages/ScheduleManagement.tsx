@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
+import { monthEndISO, monthStartISO } from '../utils/date';
 import {
   Calendar,
   ChevronDown,
@@ -387,9 +388,9 @@ function DateRangeField({
       <span style={{ fontSize: '12px', color: colors.text, whiteSpace: 'nowrap' }}>{label}</span>
       <div style={fieldShell(colors, width)}>
         <Calendar size={12} style={{ color: colors.textMuted }} />
-        <input defaultValue="2026-05-01" type="date" style={dateInput(colors)} />
+        <input defaultValue={monthStartISO()} type="date" style={dateInput(colors)} />
         <span style={{ fontSize: '12px', color: colors.textMuted }}>—</span>
-        <input defaultValue="2026-05-31" type="date" style={dateInput(colors)} />
+        <input defaultValue={monthEndISO()} type="date" style={dateInput(colors)} />
       </div>
     </div>
   );

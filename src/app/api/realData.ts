@@ -16,42 +16,8 @@ export type DataResponse<T> = {
   rows: T[];
 };
 
-const DEMO_PERSON_LIMIT = 5;
-
-function getPersonKey(row: unknown): string {
-  if (Array.isArray(row)) {
-    return String(row[1] || row[0] || '').trim();
-  }
-
-  if (!row || typeof row !== 'object') return '';
-
-  const record = row as Record<string, unknown>;
-  return String(
-    record.empId
-      || record.employeeNo
-      || record.employeeId
-      || record.applicantId
-      || record.initiatorId
-      || record.name
-      || record.applicant
-      || record.employeeName
-      || '',
-  ).trim();
-}
-
-function limitDemoPeople<T>(rows: T[], limit = DEMO_PERSON_LIMIT): T[] {
-  const seen = new Set<string>();
-  return rows.filter((row) => {
-    const key = getPersonKey(row) || `row-${seen.size}`;
-    if (seen.has(key)) return true;
-    if (seen.size >= limit) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
 function limitDataResponse<T>(response: DataResponse<T>): DataResponse<T> {
-  const rows = limitDemoPeople(response.rows || []);
+  const rows = response.rows || [];
   return { ...response, total: rows.length, rows };
 }
 
@@ -206,6 +172,8 @@ export type OnboardEmployeePayload = {
   employeeNo: string;
   department?: string;
   deptFullPath?: string;
+  managerNo?: string;
+  managerName?: string;
   position?: string;
   hireDate?: string;
   userId?: string;

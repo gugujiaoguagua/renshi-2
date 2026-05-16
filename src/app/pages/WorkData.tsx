@@ -267,7 +267,7 @@ export default function WorkData() {
     if (quickFilter === 'all') return true;
     const date = new Date(String(dateText || '').slice(0, 10));
     if (Number.isNaN(date.getTime())) return true;
-    const today = new Date('2026-05-09');
+    const today = new Date();
     const diffDays = Math.floor((today.getTime() - date.getTime()) / 86400000);
     if (quickFilter === 'today') return diffDays === 0;
     if (quickFilter === 'week') return diffDays >= 0 && diffDays <= 6;

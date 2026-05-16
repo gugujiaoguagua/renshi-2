@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
 import { deleteOnboardedEmployees, fetchSettingsFace, fetchSettingsPeople, fetchSettingsShifts, onboardEmployee } from '../api/realData';
+import { monthEndISO, monthStartISO, todayISO } from '../utils/date';
 import {
   AlertCircle,
   Calendar,
@@ -1007,8 +1008,10 @@ function FaceView({
     name: '',
     employeeNo: '',
     department: '新人培训组',
+    managerNo: '',
+    managerName: '',
     position: '员工',
-    hireDate: new Date().toISOString().slice(0, 10),
+    hireDate: todayISO(),
     attendanceGroupName: '华托大厦',
     shiftName: '早九晚六',
     faceStatus: '已录入',
@@ -1050,8 +1053,10 @@ function FaceView({
       ...current,
       name: '',
       employeeNo: '',
+      managerNo: '',
+      managerName: '',
       userId: '',
-      hireDate: new Date().toISOString().slice(0, 10),
+      hireDate: todayISO(),
     }));
     setShowCreateModal(true);
   };
@@ -1075,15 +1080,20 @@ function FaceView({
     try {
       setSavingEmployee(true);
       const department = employeeDraft.department.trim() || '未分配部门';
+      const managerNo = employeeDraft.managerNo.trim();
+      const managerRow = rowsData.find(row => String(row[1] ?? '').trim() === managerNo);
+      const managerName = managerNo ? String(managerRow?.[0] ?? employeeDraft.managerName).trim() : '';
       const result = await onboardEmployee({
         name: trimmedName,
         employeeNo: trimmedNo,
         department,
         deptFullPath: DEPT_FULL_PATH_BY_NAME[department] || `上海拉迷家具有限公司/${department}`,
+        managerNo,
+        managerName,
         position: employeeDraft.position.trim() || '员工',
         attendanceGroupName: employeeDraft.attendanceGroupName.trim() || '华托大厦',
         shiftName: employeeDraft.shiftName.trim() || '早九晚六',
-        hireDate: employeeDraft.hireDate.trim() || new Date().toISOString().slice(0, 10),
+        hireDate: employeeDraft.hireDate.trim() || todayISO(),
         userId: employeeDraft.userId.trim() || `wecom_${trimmedNo}`,
         faceStatus: employeeDraft.faceStatus,
       });
@@ -1148,6 +1158,9 @@ function FaceView({
     window.alert(`人脸详情\n姓名：${row[0] ?? '-'}\n录入状态：${row[6] ?? '-'}`);
   })]);
   const deptOptions = uniqueOptions(rowsData, 2);
+  const managerOptions = rowsData
+    .map(row => ({ employeeNo: String(row[1] ?? '').trim(), name: String(row[0] ?? '').trim() }))
+    .filter(item => item.employeeNo && item.employeeNo !== employeeDraft.employeeNo.trim());
   const groupOptions = uniqueOptions(rowsData, 4);
   const statusOptions = uniqueOptions(rowsData, 6);
 
@@ -1240,6 +1253,16 @@ function FaceView({
               <FormField label="部门" required colors={colors}>
                 <select value={employeeDraft.department} onChange={event => updateEmployeeDraft('department', event.target.value)} style={modalInput(colors)}>
                   {ONBOARD_DEPARTMENTS.map(dept => <option key={dept} value={dept}>{dept}</option>)}
+                </select>
+              </FormField>
+              <FormField label="归属管理者" colors={colors}>
+                <select value={employeeDraft.managerNo} onChange={event => {
+                  const managerNo = event.target.value;
+                  const manager = managerOptions.find(item => item.employeeNo === managerNo);
+                  setEmployeeDraft(current => ({ ...current, managerNo, managerName: manager?.name || '' }));
+                }} style={modalInput(colors)}>
+                  <option value="">请选择管理者</option>
+                  {managerOptions.map(manager => <option key={manager.employeeNo} value={manager.employeeNo}>{manager.name} {manager.employeeNo}</option>)}
                 </select>
               </FormField>
               <FormField label="岗位" colors={colors}>
@@ -1678,8 +1701,8 @@ function SelectField({ label, placeholder, colors, width = 148, options = [], va
 }
 
 function DateRangeField({ label, colors, width = 236, start, end, onChange }: { label: string; colors: any; width?: number; start?: string; end?: string; onChange?: (start: string, end: string) => void }) {
-  const [innerStart, setInnerStart] = useState('2026-05-01');
-  const [innerEnd, setInnerEnd] = useState('2026-05-31');
+  const [innerStart, setInnerStart] = useState(monthStartISO());
+  const [innerEnd, setInnerEnd] = useState(monthEndISO());
   const currentStart = start ?? innerStart;
   const currentEnd = end ?? innerEnd;
   const setStart = (value: string) => onChange ? onChange(value, currentEnd) : setInnerStart(value);

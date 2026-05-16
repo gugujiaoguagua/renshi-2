@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
 import { fetchLeaveBalances, fetchLeaveDetails, fetchLeaveRecords } from '../api/realData';
+import { monthRange } from '../utils/date';
 import {
   AlertCircle,
   Calendar,
@@ -168,7 +169,7 @@ function LeaveRecordView({
 }) {
   const [statusFilter, setStatusFilter] = useState('all');
   const [tableRows, setTableRows] = useState<Array<Array<React.ReactNode>>>(LEAVE_RECORD_ROWS);
-  const [dateRange, setDateRange] = useState({ start: '2026-05-01', end: '2026-05-31' });
+  const [dateRange, setDateRange] = useState(monthRange());
   const [deptFilter, setDeptFilter] = useState('');
   const [applicantFilter, setApplicantFilter] = useState('');
   const [initiatorFilter, setInitiatorFilter] = useState('');
@@ -229,7 +230,7 @@ function LeaveRecordView({
     { key: '审批中', label: '审批中', count: tableRows.filter(row => row[0] === '审批中').length },
     { key: '已拒绝', label: '已拒绝', count: tableRows.filter(row => row[0] === '已拒绝').length },
   ];
-  const resetFilters = () => { setDateRange({ start: '2026-05-01', end: '2026-05-31' }); setDeptFilter(''); setApplicantFilter(''); setInitiatorFilter(''); setLeaveTypeFilter(''); setStartTypeFilter(''); setRecordStatusFilter(''); setFlowStatusFilter(''); setStatusFilter('all'); setSortConfig(null); };
+  const resetFilters = () => { setDateRange(monthRange()); setDeptFilter(''); setApplicantFilter(''); setInitiatorFilter(''); setLeaveTypeFilter(''); setStartTypeFilter(''); setRecordStatusFilter(''); setFlowStatusFilter(''); setStatusFilter('all'); setSortConfig(null); };
 
   const exportRows = () => {
     const csv = [LEAVE_RECORD_COLUMNS, ...rows].map(row => row.map(cell => String(cell ?? '')).join(',')).join('\n');
@@ -1030,7 +1031,7 @@ function DropdownButton({
 }
 
 function DateRangeField({ label, colors, width = 236, required = false, value, onChange }: { label: string; colors: any; width?: number; required?: boolean; value?: { start: string; end: string }; onChange?: (value: { start: string; end: string }) => void }) {
-  const [innerValue, setInnerValue] = useState({ start: '2026-05-01', end: '2026-05-31' });
+  const [innerValue, setInnerValue] = useState(monthRange());
   const current = value ?? innerValue;
   const setCurrent = (next: { start: string; end: string }) => onChange ? onChange(next) : setInnerValue(next);
   return (

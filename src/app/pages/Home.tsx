@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
+import { currentDateLabel, currentWeekdayLabel, monthEndISO, monthStartISO } from '../utils/date';
 import { BarChart2, AlertTriangle, Clock, Coffee, MapPin, Calendar, Umbrella, Settings, TrendingUp, Users, FileText } from 'lucide-react';
 
 const quickCards = [
@@ -24,6 +25,8 @@ const stats = [
 export default function Home() {
   const { colors } = useTheme();
   const navigate = useNavigate();
+  const monthStartLabel = monthStartISO().replace(/-/g, '年').replace(/年(\d{2})年/, '年$1月') + '日';
+  const monthEndLabel = monthEndISO().replace(/-/g, '年').replace(/年(\d{2})年/, '年$1月') + '日';
 
   return (
     <div style={{ padding: '20px 24px', overflow: 'auto' }}>
@@ -48,11 +51,11 @@ export default function Home() {
         <div>
           <div style={{ color: '#F1E6D8', fontSize: '12px', marginBottom: '6px', opacity: 0.8 }}>欢迎使用 · 人事薪税</div>
           <div style={{ color: '#fff', fontSize: '22px', fontWeight: 600, marginBottom: '4px' }}>上海拉达家具有限公司</div>
-          <div style={{ color: '#D0C5B5', fontSize: '13px' }}>今天是 2026年05月08日 星期五 · 考勤管理中心</div>
+          <div style={{ color: '#D0C5B5', fontSize: '13px' }}>今天是 {currentDateLabel()} {currentWeekdayLabel()} · 考勤管理中心</div>
         </div>
         <div style={{ flexShrink: 0, textAlign: 'right' }}>
           <div style={{ color: '#F1E6D8', fontSize: '12px', marginBottom: '4px', opacity: 0.8 }}>当前考勤周期</div>
-          <div style={{ color: '#fff', fontSize: '14px', fontWeight: 500 }}>2026年05月01日 — 2026年05月31日</div>
+          <div style={{ color: '#fff', fontSize: '14px', fontWeight: 500 }}>{monthStartLabel} — {monthEndLabel}</div>
         </div>
       </div>
 

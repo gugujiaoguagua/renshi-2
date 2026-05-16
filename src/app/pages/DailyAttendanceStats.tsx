@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { fetchDailyAttendanceEmployees, saveDailyAttendanceEmployees, type DailyAttendanceEmployee as RealDailyEmployee } from '../api/realData';
+import { addDaysISO, monthEndISO, monthStartISO, todayISO } from '../utils/date';
 import {
   Calendar, Search, ChevronDown, ChevronLeft, ChevronRight,
   ChevronUp, X, Settings2, Filter, Upload, Plus, Trash2,
@@ -40,9 +41,10 @@ const MONTH_NAMES = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8�
 
 // Calendar event markers
 const CAL_EVENTS: Record<string, '请假' | '外务' | '节假'> = {
-  '2026-05-01': '节假', '2026-05-04': '节假', '2026-05-05': '节假',
-  '2026-05-09': '请假', '2026-05-15': '外务', '2026-05-22': '请假',
-  '2026-06-07': '请假', '2026-06-16': '节假', '2026-06-22': '外务',
+  [monthStartISO()]: '节假',
+  [addDaysISO(-7)]: '请假',
+  [addDaysISO(-1)]: '外务',
+  [addDaysISO(7)]: '请假',
 };
 const EVENT_COLORS = { 请假: '#F59E0B', 外务: '#0891B2', 节假: '#DC2626' };
 
@@ -114,8 +116,9 @@ function DateRangePicker({ colors, initStart, initEnd, onApply, onClose }: {
   colors: any; initStart: string; initEnd: string;
   onApply: (s: string, e: string) => void; onClose: () => void;
 }) {
-  const [leftYear, setLeftYear] = useState(2026);
-  const [leftMonth, setLeftMonth] = useState(4); // May
+  const initialDate = new Date(initStart || todayISO());
+  const [leftYear, setLeftYear] = useState(Number.isNaN(initialDate.getTime()) ? new Date().getFullYear() : initialDate.getFullYear());
+  const [leftMonth, setLeftMonth] = useState(Number.isNaN(initialDate.getTime()) ? new Date().getMonth() : initialDate.getMonth());
   const [selStart, setSelStart] = useState<string>(initStart);
   const [selEnd, setSelEnd] = useState<string>(initEnd);
   const [hoverDate, setHoverDate] = useState<string>('');
@@ -144,11 +147,18 @@ function DateRangePicker({ colors, initStart, initEnd, onApply, onClose }: {
 
   const applyShortcut = (s: string, e: string) => { setSelStart(s); setSelEnd(e); };
 
-  const today = '2026-05-07';
-  const startOfWeek = '2026-05-04'; const endOfWeek = '2026-05-10';
-  const startOfMonth = '2026-05-01'; const endOfMonth = '2026-05-31';
-  const startLastWeek = '2026-04-27'; const endLastWeek = '2026-05-03';
-  const startLastMonth = '2026-04-01'; const endLastMonth = '2026-04-30';
+  const today = todayISO();
+  const now = new Date();
+  const dayOffset = (now.getDay() + 6) % 7;
+  const startOfWeek = addDaysISO(-dayOffset);
+  const endOfWeek = addDaysISO(6 - dayOffset);
+  const startOfMonth = monthStartISO();
+  const endOfMonth = monthEndISO();
+  const startLastWeek = addDaysISO(-dayOffset - 7);
+  const endLastWeek = addDaysISO(-dayOffset - 1);
+  const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const startLastMonth = monthStartISO(previousMonth);
+  const endLastMonth = monthEndISO(previousMonth);
 
   const renderMonth = (year: number, month: number) => {
     const days = getCalendarDays(year, month);
@@ -584,7 +594,7 @@ function CalcRangeModal({ colors, onClose }: { colors: any; onClose: () => void 
       <div style={{ ...mbox(colors), width: 460 }}>
         <div style={mhead(colors)}><span style={{ fontWeight: 600, fontSize: '14px', color: colors.text }}>选择核算范围</span><button onClick={onClose} style={iconBtn(colors)}><X size={15} /></button></div>
         <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={frow}><label style={flabel(colors)}>考勤日期</label><div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ ...srchBox(colors), flex: 1 }}><input type="date" defaultValue="2026-05-06" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }} /></div><span style={{ color: colors.textMuted, fontSize: '12px' }}>→</span><div style={{ ...srchBox(colors), flex: 1 }}><input type="date" defaultValue="2026-05-06" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }} /></div></div></div>
+          <div style={frow}><label style={flabel(colors)}>考勤日期</label><div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ ...srchBox(colors), flex: 1 }}><input type="date" defaultValue={todayISO()} style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }} /></div><span style={{ color: colors.textMuted, fontSize: '12px' }}>→</span><div style={{ ...srchBox(colors), flex: 1 }}><input type="date" defaultValue={todayISO()} style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }} /></div></div></div>
           <div style={frow}><label style={flabel(colors)}>员工</label><div style={{ ...srchBox(colors), flex: 1 }}><input value={empSearch} onChange={e => setEmpSearch(e.target.value)} placeholder="输入姓名或选择人员" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }} /><Search size={12} style={{ color: colors.textMuted }} /></div></div>
           <div style={frow}><label style={flabel(colors)}>部门</label><div style={{ flex: 1 }}><FilterSelect label="" options={DEPT_OPTIONS} colors={colors} /></div></div>
           <div style={frow}><label style={flabel(colors)}>考勤组</label><div style={{ flex: 1 }}><FilterSelect label="" options={ATTEND_GROUPS} colors={colors} /></div></div>
@@ -725,8 +735,8 @@ export default function DailyAttendanceStats() {
   const [colOrder, setColOrder] = useState<string[]>(SETTABLE_COLS.map(c => c.key));
   const [freezeCount, setFreezeCount] = useState(1);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [dateStart, setDateStart] = useState('2026-05-06');
-  const [dateEnd, setDateEnd] = useState('2026-05-06');
+  const [dateStart, setDateStart] = useState(todayISO());
+  const [dateEnd, setDateEnd] = useState(todayISO());
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [checkedRows, setCheckedRows] = useState<Set<string>>(new Set());
@@ -737,7 +747,7 @@ export default function DailyAttendanceStats() {
   const [employees, setEmployees] = useState<DailyEmployee[]>([]);
   const [sourceFile, setSourceFile] = useState('');
   const [loadError, setLoadError] = useState('');
-  const [initialDateRange, setInitialDateRange] = useState({ start: '2026-05-06', end: '2026-05-06' });
+  const [initialDateRange, setInitialDateRange] = useState({ start: todayISO(), end: todayISO() });
 
   const loadDailyAttendance = useCallback(async (syncDateRange = false) => {
     try {

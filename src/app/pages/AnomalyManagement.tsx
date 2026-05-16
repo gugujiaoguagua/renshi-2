@@ -841,10 +841,10 @@ function AnomalyBusiness({ colors }: { colors: any }) {
         setBizRowsByTab({
           leave: rows
             .filter((row: any) => String(row.applyType).includes('假'))
-            .map((row: any, index: number) => toBizRow(row, 980000 + index + 1, '联动演示：请假时长进入业务异常复核')),
+            .map((row: any, index: number) => toBizRow(row, 980000 + index + 1, '请假时长进入业务异常复核')),
           fieldout: rows
             .filter((row: any) => row.applyType === '外勤')
-            .map((row: any, index: number) => toBizRow(row, 981000 + index + 1, '联动演示：外勤时段与打卡范围联动校验')),
+            .map((row: any, index: number) => toBizRow(row, 981000 + index + 1, '外勤时段与打卡范围联动校验')),
         });
       })
       .catch(() => {

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
-import { fetchSettingsFace, fetchSettingsPeople, fetchSettingsShifts, onboardEmployee } from '../api/realData';
+import { deleteOnboardedEmployees, fetchSettingsFace, fetchSettingsPeople, fetchSettingsShifts, onboardEmployee } from '../api/realData';
 import {
   AlertCircle,
   Calendar,
@@ -174,6 +174,34 @@ const DEVICE_MODELS = {
   '恩点科技': ['Xface600P机型模板', 'Vista810考勤机模板', 'UI60考勤机模板'],
 };
 
+const ONBOARD_DEPARTMENTS = [
+  '新人培训组',
+  '产品研发中心',
+  '产品运营部',
+  '研发设计一部',
+  '研发设计二部',
+  '工艺开发部',
+  '技术支持部',
+  '直营样品组',
+  '综合人员',
+];
+
+const ONBOARD_ATTEND_GROUPS = ['华托大厦', '综合考勤组', '研发中心考勤组', '工艺部考勤组'];
+const ONBOARD_SHIFTS = ['早九晚六', '早九点到六点', '早八点半到五点半', '早七点半到五点半', '弹性工作制（8小时）'];
+const ONBOARD_FACE_STATUSES = ['已录入', '未录入'];
+
+const DEPT_FULL_PATH_BY_NAME: Record<string, string> = {
+  新人培训组: '上海拉迷家具有限公司/上海直营管理中心/运营管理部/运营赋能组/新人培训组',
+  产品研发中心: '上海拉迷家具有限公司/产品研发中心',
+  产品运营部: '上海拉迷家具有限公司/产品研发中心/产品运营部',
+  研发设计一部: '上海拉迷家具有限公司/产品研发中心/研发设计一部',
+  研发设计二部: '上海拉迷家具有限公司/产品研发中心/研发设计二部',
+  工艺开发部: '上海拉迷家具有限公司/产品研发中心/工艺开发部',
+  技术支持部: '上海拉迷家具有限公司/产品研发中心/技术支持部',
+  直营样品组: '上海拉迷家具有限公司/产品研发中心/直营样品组',
+  综合人员: '上海拉迷家具有限公司/综合人员',
+};
+
 const LEGACY_ALIAS: Record<string, SettingView> = {
   rules: 'shifts',
   card: 'card-rules',
@@ -265,6 +293,12 @@ export default function AttendanceSettings() {
           setPeopleRows(current => [peopleRow, ...current.filter(row => row[1] !== peopleRow[1])]);
           setFaceRows(current => [faceRow, ...current.filter(row => row[1] !== faceRow[1])]);
           setSourceInfo('员工主数据 + 人脸管理 + 考勤人员');
+        }}
+        onEmployeeDeleted={(employeeNos) => {
+          const employeeNoSet = new Set(employeeNos);
+          setPeopleRows(current => current.filter(row => !employeeNoSet.has(String(row[1] ?? ''))));
+          setFaceRows(current => current.filter(row => !employeeNoSet.has(String(row[1] ?? ''))));
+          setSourceInfo('员工主数据 + 人脸管理 + 考勤人员已同步删除');
         }}
       />}
       {activeView === 'devices' && <DevicesView colors={colors} />}
@@ -948,6 +982,7 @@ function FaceView({
   sourceInfo,
   loadError,
   onEmployeeCreated,
+  onEmployeeDeleted,
 }: {
   colors: any;
   showMore: boolean;
@@ -956,6 +991,7 @@ function FaceView({
   sourceInfo?: string;
   loadError?: string;
   onEmployeeCreated: (peopleRow: string[], faceRow: string[]) => void;
+  onEmployeeDeleted: (employeeNos: string[]) => void;
 }) {
   const [rowsData, setRowsData] = useState<string[][]>(faceRows);
   const [draftFilters, setDraftFilters] = useState({ employee: '', dept: '', group: '', status: '', start: '', end: '' });
@@ -964,6 +1000,20 @@ function FaceView({
   const [hideDeparted, setHideDeparted] = useState(false);
   const [reminderRecords, setReminderRecords] = useState<string[]>([]);
   const [showReminderRecords, setShowReminderRecords] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [savingEmployee, setSavingEmployee] = useState(false);
+  const [deletingEmployee, setDeletingEmployee] = useState(false);
+  const [employeeDraft, setEmployeeDraft] = useState({
+    name: '',
+    employeeNo: '',
+    department: '新人培训组',
+    position: '员工',
+    hireDate: new Date().toISOString().slice(0, 10),
+    attendanceGroupName: '华托大厦',
+    shiftName: '早九晚六',
+    faceStatus: '已录入',
+    userId: '',
+  });
 
   useEffect(() => {
     setRowsData(faceRows);
@@ -995,48 +1045,55 @@ function FaceView({
     setRowsData(current => current.map(row => targetIds.has(createRowId(row)) ? setRowCell(setRowCell(row, 6, '已录入'), 9, '批量导入') : row));
   };
 
+  const openCreateEmployeeModal = () => {
+    setEmployeeDraft(current => ({
+      ...current,
+      name: '',
+      employeeNo: '',
+      userId: '',
+      hireDate: new Date().toISOString().slice(0, 10),
+    }));
+    setShowCreateModal(true);
+  };
+
+  const updateEmployeeDraft = (key: keyof typeof employeeDraft, value: string) => {
+    setEmployeeDraft(current => ({
+      ...current,
+      [key]: value,
+      ...(key === 'employeeNo' && (!current.userId || current.userId === `wecom_${current.employeeNo.trim()}`) ? { userId: value ? `wecom_${value.trim()}` : '' } : {}),
+    }));
+  };
+
   const createEmployeeWithFace = async () => {
-    const name = window.prompt('请输入新员工姓名');
-    if (name === null) return;
-    const employeeNo = window.prompt('请输入员工号');
-    if (employeeNo === null) return;
-    const trimmedName = name.trim();
-    const trimmedNo = employeeNo.trim();
+    const trimmedName = employeeDraft.name.trim();
+    const trimmedNo = employeeDraft.employeeNo.trim();
     if (!trimmedName || !trimmedNo) {
       window.alert('姓名和员工号必填');
       return;
     }
 
-    const department = window.prompt('请输入部门', '新人培训组');
-    if (department === null) return;
-    const position = window.prompt('请输入岗位', '-');
-    if (position === null) return;
-    const attendanceGroupName = window.prompt('请输入考勤组', '华托大厦');
-    if (attendanceGroupName === null) return;
-    const shiftName = window.prompt('请输入班次', '早九晚六');
-    if (shiftName === null) return;
-    const hireDate = window.prompt('请输入入职日期', new Date().toISOString().slice(0, 10));
-    if (hireDate === null) return;
-    const userId = window.prompt('请输入企业微信UserID，测试阶段可留空', `wecom_${trimmedNo}`);
-    if (userId === null) return;
-
     try {
+      setSavingEmployee(true);
+      const department = employeeDraft.department.trim() || '未分配部门';
       const result = await onboardEmployee({
         name: trimmedName,
         employeeNo: trimmedNo,
-        department: department.trim() || '未分配部门',
-        position: position.trim() || '-',
-        attendanceGroupName: attendanceGroupName.trim() || '华托大厦',
-        shiftName: shiftName.trim() || '早九晚六',
-        hireDate: hireDate.trim() || new Date().toISOString().slice(0, 10),
-        userId: userId.trim() || `wecom_${trimmedNo}`,
-        faceStatus: '已录入',
+        department,
+        deptFullPath: DEPT_FULL_PATH_BY_NAME[department] || `上海拉迷家具有限公司/${department}`,
+        position: employeeDraft.position.trim() || '员工',
+        attendanceGroupName: employeeDraft.attendanceGroupName.trim() || '华托大厦',
+        shiftName: employeeDraft.shiftName.trim() || '早九晚六',
+        hireDate: employeeDraft.hireDate.trim() || new Date().toISOString().slice(0, 10),
+        userId: employeeDraft.userId.trim() || `wecom_${trimmedNo}`,
+        faceStatus: employeeDraft.faceStatus,
       });
       onEmployeeCreated(result.peopleRow, result.faceRow);
       setRowsData(current => [result.faceRow, ...current.filter(row => row[1] !== result.faceRow[1])]);
-      window.alert(`${trimmedName} 已录入员工主数据和人脸信息`);
+      setShowCreateModal(false);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : '新增员工失败');
+    } finally {
+      setSavingEmployee(false);
     }
   };
 
@@ -1050,15 +1107,37 @@ function FaceView({
     setRowsData(current => current.map(row => targetIds.has(createRowId(row)) ? setRowCell(row, 8, '已重刷') : row));
   };
 
-  const deleteSelected = () => {
+  const deleteSelected = async () => {
     const visibleSelectedIds = rowIds.filter(rowId => selectedRowIds.has(rowId));
     if (!visibleSelectedIds.length) {
       window.alert('请先选择要删除的人脸记录');
       return;
     }
-    if (!window.confirm(`确认删除选中的 ${visibleSelectedIds.length} 条人脸记录？`)) return;
-    setRowsData(current => current.filter(row => !visibleSelectedIds.includes(createRowId(row))));
-    setSelectedRowIds(new Set());
+    const selectedEmployeeNos = Array.from(new Set(
+      filteredRows
+        .filter(row => visibleSelectedIds.includes(createRowId(row)))
+        .map(row => String(row[1] ?? '').trim())
+        .filter(Boolean),
+    ));
+    if (!selectedEmployeeNos.length) {
+      window.alert('选中记录缺少员工号，无法同步删除员工主数据');
+      return;
+    }
+    if (!window.confirm(`确认删除选中的 ${selectedEmployeeNos.length} 名员工？删除后将同步移除考勤人员、人脸、小程序打卡记录和所有联动统计。`)) return;
+    try {
+      setDeletingEmployee(true);
+      await deleteOnboardedEmployees(selectedEmployeeNos);
+      const employeeNoSet = new Set(selectedEmployeeNos);
+      setRowsData(current => current.filter(row => !employeeNoSet.has(String(row[1] ?? '').trim())));
+      onEmployeeDeleted(selectedEmployeeNos);
+      setSelectedRowIds(new Set());
+      setReminderRecords(current => [`${nowText()} 已同步删除员工：${selectedEmployeeNos.join('、')}`, ...current]);
+      setShowReminderRecords(true);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : '删除员工失败');
+    } finally {
+      setDeletingEmployee(false);
+    }
   };
 
   const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['详情', '发送录入提醒'], label => {
@@ -1088,11 +1167,11 @@ function FaceView({
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button onClick={createEmployeeWithFace} style={primaryBtn(colors)}>新增员工并录入人脸</button>
+        <button onClick={openCreateEmployeeModal} style={primaryBtn(colors)}>新增员工并录入人脸</button>
         <button onClick={importFaces} style={primaryBtn(colors)}>批量导入人脸</button>
         <button onClick={() => addReminderRecord(`已配置录入提醒：覆盖${targetRows.length}人`)} style={outlineBtn(colors)}>配置录入提醒</button>
         <button onClick={refreshFaces} style={outlineBtn(colors)}>批量重刷</button>
-        <button onClick={deleteSelected} disabled={!selectedRowIds.size} style={selectedRowIds.size ? outlineBtn(colors) : disabledBtn(colors)}>批量删除</button>
+        <button onClick={deleteSelected} disabled={!selectedRowIds.size || deletingEmployee} style={selectedRowIds.size && !deletingEmployee ? outlineBtn(colors) : disabledBtn(colors)}>{deletingEmployee ? '删除中...' : '批量删除'}</button>
         <button onClick={onToggleMore} style={toggleBtn(colors, showMore)}>
           管理组织分组
           {showMore ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -1117,6 +1196,86 @@ function FaceView({
         onToggleAll={() => toggleAllVisibleRows(setSelectedRowIds, rowIds)}
         footerText={`共${filteredRows.length}笔 / 总${rowsData.length}笔`}
       />
+      {showCreateModal ? (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.38)',
+          zIndex: 900,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+        }}>
+          <div style={{
+            width: 620,
+            maxWidth: 'calc(100vw - 48px)',
+            backgroundColor: colors.cardBg,
+            border: `1px solid ${colors.cardBorder}`,
+            borderRadius: 8,
+            boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: 48,
+              padding: '0 18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderBottom: `1px solid ${colors.cardBorder}`,
+            }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>新增员工并录入人脸</div>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>保存后会同步到考勤人员、人脸管理、小程序登录和联动统计</div>
+              </div>
+              <button onClick={() => setShowCreateModal(false)} style={iconBtn(colors)} disabled={savingEmployee}>×</button>
+            </div>
+            <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+              <FormField label="姓名" required colors={colors}>
+                <input value={employeeDraft.name} onChange={event => updateEmployeeDraft('name', event.target.value)} placeholder="例如：张青" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="员工号" required colors={colors}>
+                <input value={employeeDraft.employeeNo} onChange={event => updateEmployeeDraft('employeeNo', event.target.value)} placeholder="例如：ZY26612" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="部门" required colors={colors}>
+                <select value={employeeDraft.department} onChange={event => updateEmployeeDraft('department', event.target.value)} style={modalInput(colors)}>
+                  {ONBOARD_DEPARTMENTS.map(dept => <option key={dept} value={dept}>{dept}</option>)}
+                </select>
+              </FormField>
+              <FormField label="岗位" colors={colors}>
+                <input value={employeeDraft.position} onChange={event => updateEmployeeDraft('position', event.target.value)} placeholder="员工" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="入职日期" colors={colors}>
+                <input type="date" value={employeeDraft.hireDate} onChange={event => updateEmployeeDraft('hireDate', event.target.value)} style={modalInput(colors)} />
+              </FormField>
+              <FormField label="考勤组" colors={colors}>
+                <select value={employeeDraft.attendanceGroupName} onChange={event => updateEmployeeDraft('attendanceGroupName', event.target.value)} style={modalInput(colors)}>
+                  {ONBOARD_ATTEND_GROUPS.map(group => <option key={group} value={group}>{group}</option>)}
+                </select>
+              </FormField>
+              <FormField label="班次" colors={colors}>
+                <select value={employeeDraft.shiftName} onChange={event => updateEmployeeDraft('shiftName', event.target.value)} style={modalInput(colors)}>
+                  {ONBOARD_SHIFTS.map(shift => <option key={shift} value={shift}>{shift}</option>)}
+                </select>
+              </FormField>
+              <FormField label="人脸状态" colors={colors}>
+                <select value={employeeDraft.faceStatus} onChange={event => updateEmployeeDraft('faceStatus', event.target.value)} style={modalInput(colors)}>
+                  {ONBOARD_FACE_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
+                </select>
+              </FormField>
+              <FormField label="企业微信 UserID" colors={colors} full>
+                <input value={employeeDraft.userId} onChange={event => updateEmployeeDraft('userId', event.target.value)} placeholder={employeeDraft.employeeNo ? `wecom_${employeeDraft.employeeNo}` : '测试阶段可留空'} style={modalInput(colors)} />
+              </FormField>
+            </div>
+            <div style={{ padding: '12px 18px 16px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${colors.cardBorder}` }}>
+              <button onClick={() => setShowCreateModal(false)} disabled={savingEmployee} style={outlineBtn(colors)}>取消</button>
+              <button onClick={createEmployeeWithFace} disabled={savingEmployee || !employeeDraft.name.trim() || !employeeDraft.employeeNo.trim()} style={savingEmployee || !employeeDraft.name.trim() || !employeeDraft.employeeNo.trim() ? disabledBtn(colors) : primaryBtn(colors)}>
+                {savingEmployee ? '保存中...' : '保存并录入'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </ListPage>
   );
 }
@@ -1559,6 +1718,18 @@ function CheckboxGroup({ label, items, colors, value, onChange }: { label: strin
   );
 }
 
+function FormField({ label, required = false, full = false, colors, children }: { label: string; required?: boolean; full?: boolean; colors: any; children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6, gridColumn: full ? '1 / -1' : undefined }}>
+      <span style={{ fontSize: 12, color: colors.textMuted }}>
+        {required ? <span style={{ color: colors.primary, marginRight: 3 }}>*</span> : null}
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
 function ToggleSwitch({ checked, onClick, colors }: { checked?: boolean; onClick?: () => void; colors: any }) {
   return (
     <button onClick={onClick} style={{ width: 30, height: 16, borderRadius: 999, border: 'none', backgroundColor: checked ? colors.primary : withAlpha(colors.textMuted, 0.32), position: 'relative', cursor: 'pointer', padding: 0 }}>
@@ -1894,6 +2065,21 @@ function dateInput(colors: any): React.CSSProperties {
   return { width: 92, border: 'none', outline: 'none', background: 'transparent', fontSize: '12px', color: colors.text };
 }
 
+function modalInput(colors: any): React.CSSProperties {
+  return {
+    width: '100%',
+    height: 34,
+    border: `1px solid ${colors.inputBorder}`,
+    borderRadius: 4,
+    backgroundColor: colors.inputBg,
+    color: colors.text,
+    fontSize: 13,
+    outline: 'none',
+    padding: '0 10px',
+    boxSizing: 'border-box',
+  };
+}
+
 function primaryBtn(colors: any): React.CSSProperties {
   return { height: 30, padding: '0 14px', border: 'none', borderRadius: 4, backgroundColor: colors.primary, color: '#fff', fontSize: '12px', cursor: 'pointer' };
 }
@@ -1912,6 +2098,10 @@ function toggleBtn(colors: any, active: boolean): React.CSSProperties {
 
 function linkBtn(colors: any): React.CSSProperties {
   return { border: 'none', background: 'transparent', color: colors.primary, fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' };
+}
+
+function iconBtn(colors: any): React.CSSProperties {
+  return { width: 28, height: 28, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, backgroundColor: 'transparent', color: colors.textMuted, fontSize: '14px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
 }
 
 function textLink(colors: any): React.CSSProperties {

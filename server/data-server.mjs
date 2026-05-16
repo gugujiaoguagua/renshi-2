@@ -906,6 +906,56 @@ function buildLinkedExternalRows() {
   ]);
 }
 
+function rowMatchesEmployeeNo(row, employeeNoSet) {
+  if (!row) return false;
+  if (Array.isArray(row)) {
+    return employeeNoSet.has(asRawText(row[1] || row[2] || row[0]));
+  }
+  return employeeNoSet.has(asRawText(
+    row.employeeNo
+    || row.empId
+    || row.employeeId
+    || row.applicantId
+    || row.initiatorId
+    || row.id,
+  ));
+}
+
+function deleteOnboardedEmployees(employeeNos) {
+  const employeeNoSet = new Set(employeeNos.map(asRawText).filter(Boolean));
+  const store = readStore();
+  const beforeEmployees = Array.isArray(store.onboardedEmployees) ? store.onboardedEmployees : [];
+  const removedEmployees = beforeEmployees.filter((row) => employeeNoSet.has(asRawText(row.employeeNo)));
+  const removedIds = new Set(removedEmployees.map((row) => asRawText(row.id)).filter(Boolean));
+  const matchesEmployee = (row) => rowMatchesEmployeeNo(row, employeeNoSet) || removedIds.has(asRawText(row?.employeeId));
+
+  store.onboardedEmployees = beforeEmployees.filter((row) => !employeeNoSet.has(asRawText(row.employeeNo)));
+
+  [
+    'mobileClockRecords',
+    'mobileAnomalies',
+    'mobileMakeupRequests',
+    'dailyAttendance',
+    'monthlyAttendance',
+    'monthlySummary',
+    'attendanceAnomalies',
+    'workData',
+    'externalRecords',
+  ].forEach((key) => {
+    if (Array.isArray(store[key])) {
+      store[key] = store[key].filter((row) => !matchesEmployee(row));
+    }
+  });
+
+  store.updatedAt = new Date().toISOString();
+  writeStore(store);
+  return {
+    removed: removedEmployees.length,
+    remaining: store.onboardedEmployees.length,
+    removedEmployees,
+  };
+}
+
 function mapStatItemRows(rows) {
   const sample = rows[0] || {};
   return Object.keys(sample).map((name, index) => {
@@ -1170,6 +1220,32 @@ app.post('/api/employees/onboard', (req, res) => {
     peopleRow: onboardedEmployeeToPeopleRow(employee),
     faceRow: onboardedEmployeeToFaceRow(employee),
     attendanceRow: onboardedEmployeeToAttendanceStatsRow(employee),
+  });
+});
+
+app.delete('/api/employees/:employeeNo', (req, res) => {
+  const employeeNo = asRawText(req.params.employeeNo);
+  if (!employeeNo) {
+    return res.status(400).json({ message: '缺少员工号' });
+  }
+  const result = deleteOnboardedEmployees([employeeNo]);
+  return res.json({
+    ok: true,
+    employeeNo,
+    ...result,
+  });
+});
+
+app.delete('/api/employees', (req, res) => {
+  const employeeNos = Array.isArray(req.body?.employeeNos) ? req.body.employeeNos.map(asRawText).filter(Boolean) : [];
+  if (!employeeNos.length) {
+    return res.status(400).json({ message: 'employeeNos必须是非空数组' });
+  }
+  const result = deleteOnboardedEmployees(employeeNos);
+  return res.json({
+    ok: true,
+    employeeNos,
+    ...result,
   });
 });
 

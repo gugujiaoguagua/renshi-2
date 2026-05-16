@@ -1,6 +1,6 @@
 {
   "dailyAttendance": [],
-  "updatedAt": "2026-05-15T08:17:38.629Z",
+  "updatedAt": "2026-05-15T10:03:07.514Z",
   "mobileClockRecords": [
     {
       "id": "clock_1778833058627",
@@ -28,6 +28,38 @@
   ],
   "mobileAnomalies": [],
   "onboardedEmployees": [
+    {
+      "id": "emp_002",
+      "userId": "wecom_002",
+      "name": "李",
+      "employeeNo": "002",
+      "department": "研发设计二部",
+      "deptFullPath": "上海拉迷家具有限公司/产品研发中心/研发设计二部",
+      "position": "员工",
+      "hireDate": "2026-05-15",
+      "employeeType": "全职",
+      "employeeStatus": "在职",
+      "businessGroup": "-",
+      "workPlace": "-",
+      "attendanceGroupId": "group_huatuo",
+      "attendanceGroupName": "华托大厦",
+      "shiftId": "shift_0900_1800",
+      "shiftName": "早九晚六",
+      "statScheme": "默认方案",
+      "faceStatus": "已录入",
+      "reviewStatus": "已通过",
+      "faceScore": "系统录入",
+      "dataSource": "后台录入",
+      "office": {
+        "id": "loc_huatuo",
+        "name": "华托大厦",
+        "latitude": 31.2304,
+        "longitude": 121.4737,
+        "radius": 300
+      },
+      "createdAt": "2026-05-15 17:54:46",
+      "updatedAt": "2026-05-15 17:54:46"
+    },
     {
       "id": "emp_ZY26611",
       "userId": "wecom_ZY26611",

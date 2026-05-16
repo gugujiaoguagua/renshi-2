@@ -403,6 +403,14 @@ export async function onboardEmployee(payload: OnboardEmployeePayload) {
   });
 }
 
+export async function deleteOnboardedEmployees(employeeNos: string[]) {
+  return requestJson<{ ok: boolean; removed: number; remaining: number; employeeNos?: string[] }>('/api/employees', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ employeeNos }),
+  });
+}
+
 export async function fetchStatItems() {
   return requestJson<DataResponse<StatItemRecord>>('/api/stat-items');
 }

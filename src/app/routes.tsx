@@ -17,9 +17,9 @@ import UnderDevelopment from './pages/UnderDevelopment';
 import WorkData from './pages/WorkData';
 import ExternalDataManagement from './pages/ExternalDataManagement';
 import StatItemsManagement from './pages/StatItemsManagement';
+import OrganizationManagementPage from './pages/OrganizationManagement';
 import {
   EmployeeManagementPage,
-  OrganizationManagementPage,
   PayrollPage,
   RecruitManagementPage,
 } from './pages/BusinessModules';

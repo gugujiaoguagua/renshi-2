@@ -1,17 +1,14 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router';
-import { Bell, HelpCircle, Grid3X3, Search, Sun, Moon, ChevronDown, User } from 'lucide-react';
+import { Bell, HelpCircle, Grid3X3, Search, Sun, Moon } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
 const topTabs = [
-  { label: '首页', path: '/' },
-  { label: '招标管理', path: '/tender' },
   { label: '组织管理', path: '/organization' },
   { label: '招聘管理', path: '/recruit' },
   { label: '员工管理', path: '/employee' },
   { label: '考勤管理', path: '/attendance' },
   { label: '电子工资单', path: '/payroll' },
-  { label: '全部应用', path: '/apps' },
 ];
 
 export const TopNav: React.FC = () => {
@@ -67,25 +64,6 @@ export const TopNav: React.FC = () => {
         <span style={{ color: '#FFFFFF', fontSize: '14px', fontWeight: 600, whiteSpace: 'nowrap' }}>
           人事薪税
         </span>
-      </div>
-
-      {/* Company selector */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '4px',
-          padding: '0 16px',
-          cursor: 'pointer',
-          borderRight: `1px solid rgba(255,255,255,0.08)`,
-          height: '100%',
-          fontSize: '12px',
-          color: colors.topNavText,
-        }}
-      >
-        <span style={{ fontSize: '12px' }}>🏢</span>
-        <span>上海拉达家具有限公司</span>
-        <ChevronDown size={12} />
       </div>
 
       {/* Nav tabs */}

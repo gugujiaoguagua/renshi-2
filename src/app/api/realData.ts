@@ -307,6 +307,136 @@ export type ExternalRecord = {
   modifyTime: string;
 };
 
+export type EmployeeManagementSummary = {
+  employeeTotal: number;
+  active: number;
+  trial: number;
+  outsourced: number;
+  fullTime: number;
+  pendingOnboard: number;
+  onboarded: number;
+  resigning: number;
+  transferring: number;
+  regularized: number;
+  contracts: number;
+  contractPendingSign: number;
+  contractExpiring: number;
+  identityUnverified: number;
+  sourceFile: string;
+};
+
+export type EmployeeRosterRecord = {
+  id: number;
+  name: string;
+  phone: string;
+  employeeNo: string;
+  dept: string;
+  deptFullPath: string;
+  position: string;
+  hireDate: string;
+  employeeType: string;
+  employeeStatus: string;
+  identityVerify: string;
+  managerName?: string;
+  managerNo?: string;
+  source: string;
+};
+
+export type EmployeeContractRecord = {
+  id: number;
+  name: string;
+  employeeNo: string;
+  dept: string;
+  deptFullPath: string;
+  position: string;
+  company: string;
+  contractNo: string;
+  contractType: string;
+  contractTerm: string;
+  startDate: string;
+  endDate: string;
+  contractStatus: string;
+  signMethod: string;
+  signProgress: string;
+  employeeAuthStatus: string;
+  dataSource: string;
+  initiator: string;
+  handler: string;
+  initiateTime: string;
+};
+
+export type EmployeeGenericRecord = Record<string, string | number | boolean | null | undefined>;
+
+export type OrganizationSummary = {
+  organizationTotal: number;
+  activeOrganizationTotal: number;
+  positionTotal: number;
+  enabledPositionTotal: number;
+  rankTotal: number;
+  linkedEmployeeTotal: number;
+  sourceFile: string;
+};
+
+export type OrganizationRecord = {
+  id: number;
+  code: string;
+  name: string;
+  fullPath: string;
+  parentCode?: string;
+  parentName?: string;
+  institutionNo?: string;
+  leader?: string;
+  approvalManager?: string;
+  employeeCount: number;
+  linkedEmployeeCount: number;
+  directMemberCount: number;
+  linkedDirectMemberCount: number;
+  orgType: string;
+  effectiveDate: string;
+  status: string;
+  remark?: string;
+  depth?: number;
+  source?: string;
+};
+
+export type OrganizationPositionRecord = {
+  id: number;
+  code: string;
+  name: string;
+  parentName?: string;
+  orgText: string;
+  companyText: string;
+  sequence?: string;
+  subSequence?: string;
+  status: string;
+  linkedEmployeeCount: number;
+  linkedEmployees?: EmployeeRosterRecord[];
+  source?: string;
+};
+
+export type OrganizationRankRecord = {
+  id: number;
+  sequence: string;
+  subSequence?: string;
+  company?: string;
+  code: string;
+  name: string;
+  grade?: string;
+  desc?: string;
+  employeeCount: number;
+  linkedEmployeeCount: number;
+  status: string;
+  source?: string;
+};
+
+export type OrganizationSettingRecord = {
+  id: number;
+  setting: string;
+  value: string;
+  status: string;
+  linkedModule: string;
+};
+
 export async function fetchAttendanceEmployees() {
   return limitDataResponse(await requestJson<DataResponse<AttendanceEmployee>>('/api/attendance-stats'));
 }
@@ -667,4 +797,110 @@ export async function saveExternalRecords(rows: ExternalRecord[]) {
 
 export async function fetchDataSources() {
   return requestJson<{ dataDir: string; files: Array<{ name: string; mtime: string; size: number }> }>('/api/data-sources');
+}
+
+export async function fetchEmployeeManagementSummary() {
+  return requestJson<EmployeeManagementSummary & { ok: boolean }>('/api/employee-management/summary');
+}
+
+export async function fetchEmployeeRoster() {
+  return limitDataResponse(await requestJson<DataResponse<EmployeeRosterRecord>>('/api/employee-management/roster'));
+}
+
+export async function fetchEmployeeArchive() {
+  return limitDataResponse(await requestJson<DataResponse<EmployeeRosterRecord>>('/api/employee-management/archive'));
+}
+
+export async function fetchEmployeeEducation() {
+  return limitDataResponse(await requestJson<DataResponse<EmployeeGenericRecord>>('/api/employee-management/education'));
+}
+
+export async function fetchEmployeeArchiveApprovals() {
+  return limitDataResponse(await requestJson<DataResponse<EmployeeGenericRecord>>('/api/employee-management/archive-approvals'));
+}
+
+export async function fetchEmployeeCare() {
+  return limitDataResponse(await requestJson<DataResponse<EmployeeGenericRecord>>('/api/employee-management/care'));
+}
+
+export async function fetchEmployeeReports() {
+  return limitDataResponse(await requestJson<DataResponse<EmployeeGenericRecord>>('/api/employee-management/reports'));
+}
+
+export async function fetchEmployeeEmployment(type: string) {
+  return limitDataResponse(await requestJson<DataResponse<EmployeeGenericRecord>>(`/api/employee-management/employment/${encodeURIComponent(type)}`));
+}
+
+export async function fetchEmployeeContracts(type: string) {
+  return limitDataResponse(await requestJson<DataResponse<EmployeeContractRecord>>(`/api/employee-management/contracts/${encodeURIComponent(type)}`));
+}
+
+export async function fetchEmployeeSettings() {
+  return limitDataResponse(await requestJson<DataResponse<EmployeeGenericRecord>>('/api/employee-management/settings'));
+}
+
+export async function fetchEmployeeServices() {
+  return limitDataResponse(await requestJson<DataResponse<EmployeeGenericRecord>>('/api/employee-management/services'));
+}
+
+export async function fetchEmployeeThirdParty() {
+  return limitDataResponse(await requestJson<DataResponse<EmployeeGenericRecord>>('/api/employee-management/third-party'));
+}
+
+export async function fetchOrganizationSummary() {
+  return requestJson<OrganizationSummary & { ok: boolean }>('/api/organization-management/summary');
+}
+
+export async function fetchOrganizations() {
+  return limitDataResponse(await requestJson<DataResponse<OrganizationRecord>>('/api/organization-management/organizations'));
+}
+
+export async function saveOrganization(row: Partial<OrganizationRecord>) {
+  return requestJson<{ ok: boolean; created: boolean; row: OrganizationRecord }>('/api/organization-management/organizations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(row),
+  });
+}
+
+export async function deleteOrganization(code: string) {
+  return requestJson<{ ok: boolean; removed: number; remaining: number }>(`/api/organization-management/organizations/${encodeURIComponent(code)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function fetchOrganizationPositions() {
+  return limitDataResponse(await requestJson<DataResponse<OrganizationPositionRecord>>('/api/organization-management/positions'));
+}
+
+export async function saveOrganizationPosition(row: Partial<OrganizationPositionRecord>) {
+  return requestJson<{ ok: boolean; created: boolean; row: OrganizationPositionRecord }>('/api/organization-management/positions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(row),
+  });
+}
+
+export async function fetchOrganizationRanks() {
+  return limitDataResponse(await requestJson<DataResponse<OrganizationRankRecord>>('/api/organization-management/ranks'));
+}
+
+export async function saveOrganizationRank(row: Partial<OrganizationRankRecord>) {
+  return requestJson<{ ok: boolean; created: boolean; row: OrganizationRankRecord }>('/api/organization-management/ranks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(row),
+  });
+}
+
+export async function fetchOrganizationSettings() {
+  return limitDataResponse(await requestJson<DataResponse<OrganizationSettingRecord>>('/api/organization-management/settings'));
+}
+
+export async function saveOrganizationSettings(rows: OrganizationSettingRecord[]) {
+  return requestJson<DataResponse<OrganizationSettingRecord> & { ok: boolean }>('/api/organization-management/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
 }

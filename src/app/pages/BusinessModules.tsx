@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { todayISO } from '../utils/date';
 import {
   ArrowRight,
@@ -6,7 +6,9 @@ import {
   Briefcase,
   Building2,
   CalendarDays,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   CircleAlert,
   CircleHelp,
   CreditCard,
@@ -19,12 +21,34 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import {
+  fetchEmployeeArchive,
+  fetchEmployeeArchiveApprovals,
+  fetchEmployeeCare,
+  fetchEmployeeContracts,
+  fetchEmployeeEducation,
+  fetchEmployeeEmployment,
+  fetchEmployeeManagementSummary,
+  fetchEmployeeReports,
+  fetchEmployeeRoster,
+  fetchEmployeeServices,
+  fetchEmployeeSettings,
+  fetchEmployeeThirdParty,
+  onboardEmployee,
+  type EmployeeGenericRecord,
+  type EmployeeManagementSummary,
+} from '../api/realData';
 
 type SidebarItem = {
   label: string;
   icon?: React.ReactNode;
   active?: boolean;
   arrow?: boolean;
+  onClick?: () => void;
+  depth?: number;
+  group?: boolean;
+  groupActive?: boolean;
+  expanded?: boolean;
 };
 
 type ModuleWorkspaceProps = {
@@ -36,6 +60,20 @@ type ModuleWorkspaceProps = {
 };
 
 type Tone = 'primary' | 'soft' | 'warning';
+type SortDirection = 'asc' | 'desc';
+type SortState = { key: string; direction: SortDirection } | null;
+type EmployeeRosterFilterKey =
+  | 'all'
+  | 'fullTime'
+  | 'intern'
+  | 'retired'
+  | 'outsourcedAicai'
+  | 'outsourcedKexun'
+  | 'agency'
+  | 'trial'
+  | 'regular'
+  | 'leaving'
+  | 'blank';
 
 function withAlpha(color: string, alpha: number) {
   if (color.startsWith('#')) {
@@ -55,6 +93,181 @@ function withAlpha(color: string, alpha: number) {
   }
 
   return color;
+}
+
+function normalizeTableSortValue(value: unknown) {
+  const text = String(value ?? '').trim();
+  if (!text || text === '-') return '';
+
+  const numeric = Number(text.replace(/,/g, ''));
+  if (!Number.isNaN(numeric) && /^-?\d+(\.\d+)?$/.test(text.replace(/,/g, ''))) {
+    return numeric;
+  }
+
+  const timestamp = Date.parse(text);
+  if (!Number.isNaN(timestamp) && /^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(text)) {
+    return timestamp;
+  }
+
+  return text.toLowerCase();
+}
+
+function compareTableValues(left: unknown, right: unknown, direction: SortDirection) {
+  const a = normalizeTableSortValue(left);
+  const b = normalizeTableSortValue(right);
+  const factor = direction === 'asc' ? 1 : -1;
+
+  if (typeof a === 'number' && typeof b === 'number') return (a - b) * factor;
+  return String(a).localeCompare(String(b), 'zh-CN', { numeric: true, sensitivity: 'base' }) * factor;
+}
+
+function SortableHeaderLabel({
+  label,
+  active,
+  direction,
+}: {
+  label: string;
+  active: boolean;
+  direction?: SortDirection;
+}) {
+  const { colors } = useTheme();
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+      <span style={{ display: 'inline-flex', flexDirection: 'column', flexShrink: 0, opacity: active ? 1 : 0.35 }}>
+        <ChevronUp size={9} style={{ color: active && direction === 'asc' ? colors.primary : colors.textMuted }} />
+        <ChevronDown size={9} style={{ marginTop: -3, color: active && direction === 'desc' ? colors.primary : colors.textMuted }} />
+      </span>
+    </span>
+  );
+}
+
+function getPaginationPages(currentPage: number, totalPages: number) {
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1);
+
+  const pages: Array<number | 'ellipsis'> = [1];
+  const start = Math.max(2, currentPage - 2);
+  const end = Math.min(totalPages - 1, currentPage + 2);
+
+  if (start > 2) pages.push('ellipsis');
+  for (let page = start; page <= end; page += 1) pages.push(page);
+  if (end < totalPages - 1) pages.push('ellipsis');
+  pages.push(totalPages);
+  return pages;
+}
+
+function PaginationBar({
+  total,
+  page,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+  pageSizeOptions = [20, 50, 100],
+}: {
+  total: number;
+  page: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+  pageSizeOptions?: number[];
+}) {
+  const { colors } = useTheme();
+  const [jumpPage, setJumpPage] = useState('');
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const goToPage = (nextPage: number) => onPageChange(Math.min(Math.max(1, nextPage), totalPages));
+  const pages = getPaginationPages(safePage, totalPages);
+
+  const pageButton = (active = false, disabled = false): React.CSSProperties => ({
+    minWidth: 28,
+    height: 28,
+    padding: '0 8px',
+    borderRadius: 5,
+    border: active ? `1px solid ${colors.primary}` : '1px solid transparent',
+    backgroundColor: active ? '#FFFFFF' : 'transparent',
+    color: disabled ? colors.textMuted : active ? colors.primary : colors.text,
+    fontSize: 12,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+  });
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        gap: 8,
+        padding: '10px 8px',
+        borderTop: `1px solid ${colors.tableBorder}`,
+        backgroundColor: colors.cardBg,
+        color: colors.text,
+        fontSize: 12,
+        flexShrink: 0,
+      }}
+    >
+      <span style={{ marginRight: 2 }}>共 {total} 条</span>
+      <button type="button" disabled={safePage === 1} onClick={() => goToPage(safePage - 1)} style={pageButton(false, safePage === 1)}>
+        {'<'}
+      </button>
+      {pages.map((item, index) => (
+        item === 'ellipsis'
+          ? <span key={`ellipsis-${index}`} style={{ color: colors.textMuted, padding: '0 2px' }}>...</span>
+          : (
+            <button key={item} type="button" onClick={() => goToPage(item)} style={pageButton(item === safePage)}>
+              {item}
+            </button>
+          )
+      ))}
+      <button type="button" disabled={safePage === totalPages} onClick={() => goToPage(safePage + 1)} style={pageButton(false, safePage === totalPages)}>
+        {'>'}
+      </button>
+      <select
+        value={pageSize}
+        onChange={event => onPageSizeChange(Number(event.target.value))}
+        style={{
+          height: 30,
+          border: `1px solid ${colors.inputBorder}`,
+          borderRadius: 5,
+          backgroundColor: colors.cardBg,
+          color: colors.text,
+          fontSize: 12,
+          padding: '0 8px',
+          outline: 'none',
+        }}
+      >
+        {pageSizeOptions.map(option => <option key={option} value={option}>{option} 条/页</option>)}
+      </select>
+      <span>跳至</span>
+      <input
+        value={jumpPage}
+        onChange={event => setJumpPage(event.target.value.replace(/[^\d]/g, ''))}
+        onKeyDown={event => {
+          if (event.key === 'Enter') {
+            goToPage(Number(jumpPage || 1));
+            setJumpPage('');
+          }
+        }}
+        onBlur={() => {
+          if (!jumpPage) return;
+          goToPage(Number(jumpPage));
+          setJumpPage('');
+        }}
+        style={{
+          width: 54,
+          height: 30,
+          border: `1px solid ${colors.inputBorder}`,
+          borderRadius: 5,
+          backgroundColor: colors.cardBg,
+          color: colors.text,
+          fontSize: 12,
+          padding: '0 8px',
+          outline: 'none',
+        }}
+      />
+      <span>页</span>
+    </div>
+  );
 }
 
 function ModuleWorkspace({ sidebarTitle, contentTitle, sidebarItems, sidebarWidth = 180, children }: ModuleWorkspaceProps) {
@@ -77,34 +290,77 @@ function ModuleWorkspace({ sidebarTitle, contentTitle, sidebarItems, sidebarWidt
         }}
       >
         {sidebarTitle ? <div style={{ padding: '2px 14px 8px', fontSize: '11px', color: colors.sidebarMuted, fontWeight: 600 }}>{sidebarTitle}</div> : null}
-        {sidebarItems.map(item => (
-          <div
-            key={item.label}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '9px 14px',
-              cursor: 'default',
-              fontSize: '13px',
-              color: item.active ? '#FFFFFF' : colors.sidebarText,
-              backgroundColor: item.active ? colors.sidebarActiveBg : 'transparent',
-              transition: 'background 0.15s',
-              borderLeft: item.active ? '3px solid rgba(255,255,255,0.4)' : '3px solid transparent',
-              boxSizing: 'border-box',
-            }}
-          >
-            <span style={{ flexShrink: 0, opacity: item.active ? 1 : 0.82, display: 'flex', alignItems: 'center' }}>{item.icon}</span>
-            <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: item.active ? 600 : 400 }}>
-              {item.label}
-            </span>
-            {item.arrow ? (
-              <span style={{ flexShrink: 0, opacity: item.active ? 0.86 : 0.6, display: 'flex', alignItems: 'center' }}>
-                <ChevronRight size={12} />
+        {sidebarItems.map(item => {
+          const isChild = Boolean(item.depth);
+          const isActive = Boolean(item.active);
+          const isGroupActive = Boolean(item.groupActive);
+          const baseColor = isActive || isGroupActive ? '#FFFFFF' : isChild ? colors.sidebarMuted : colors.sidebarText;
+          const baseBackground = isActive
+            ? colors.sidebarActiveBg
+            : isGroupActive
+              ? 'rgba(170, 43, 58, 0.15)'
+              : isChild
+                ? 'rgba(0,0,0,0.15)'
+                : 'transparent';
+
+          return (
+            <div
+              key={item.label}
+              onClick={item.onClick}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: isChild ? '8px 14px 8px 36px' : '9px 14px',
+                cursor: item.onClick ? 'pointer' : 'default',
+                fontSize: isChild ? '12px' : '13px',
+                color: baseColor,
+                backgroundColor: baseBackground,
+                transition: 'background 0.15s, color 0.15s',
+                borderLeft: isActive
+                  ? '3px solid rgba(255,255,255,0.4)'
+                  : isGroupActive
+                    ? `3px solid ${colors.sidebarActiveBg}`
+                    : '3px solid transparent',
+                boxSizing: 'border-box',
+                minHeight: isChild ? 34 : 38,
+                fontWeight: item.group ? 600 : 400,
+              }}
+              title={item.label}
+              onMouseEnter={e => {
+                if (!isActive && !isGroupActive) {
+                  e.currentTarget.style.backgroundColor = colors.sidebarHover;
+                  e.currentTarget.style.color = colors.sidebarText;
+                }
+              }}
+              onMouseLeave={e => {
+                if (!isActive && !isGroupActive) {
+                  e.currentTarget.style.backgroundColor = isChild ? 'rgba(0,0,0,0.15)' : 'transparent';
+                  e.currentTarget.style.color = isChild ? colors.sidebarMuted : colors.sidebarText;
+                }
+              }}
+            >
+              {isChild ? null : <span style={{ flexShrink: 0, opacity: isActive || isGroupActive ? 1 : 0.82, display: 'flex', alignItems: 'center' }}>{item.icon}</span>}
+              <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: isActive ? 600 : 400 }}>
+                {item.label}
               </span>
-            ) : null}
-          </div>
-        ))}
+              {item.arrow ? (
+                <span
+                  style={{
+                    flexShrink: 0,
+                    opacity: isActive || isGroupActive ? 0.86 : 0.6,
+                    display: 'flex',
+                    alignItems: 'center',
+                    transition: 'transform 0.2s',
+                    transform: item.expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                  }}
+                >
+                  <ChevronRight size={12} />
+                </span>
+              ) : null}
+            </div>
+          );
+        })}
       </aside>
 
       <div style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '10px 14px 14px' }}>
@@ -327,8 +583,2093 @@ export function PayrollPage() {
   );
 }
 
-export function EmployeeManagementPage() {
+type EmployeeViewKey =
+  | 'home'
+  | 'roster'
+  | 'archive'
+  | 'archiveApprovals'
+  | 'care'
+  | 'reports'
+  | 'reportsNew'
+  | 'pendingOnboard'
+  | 'onboarded'
+  | 'regularized'
+  | 'transferring'
+  | 'abandoned'
+  | 'concurrent'
+  | 'tempStore'
+  | 'resigning'
+  | 'mainJobRecords'
+  | 'contracts'
+  | 'newSign'
+  | 'renewal'
+  | 'signing'
+  | 'contractApproval'
+  | 'contractRelease'
+  | 'contractLedger'
+  | 'esignSettings'
+  | 'settings'
+  | 'blacklist'
+  | 'services'
+  | 'certificates'
+  | 'customPrint'
+  | 'templates'
+  | 'thirdParty';
+
+type EmployeeDataView = {
+  key: EmployeeViewKey;
+  title: string;
+  desc: string;
+  columns: { key: string; label: string; width?: number }[];
+  fetcher: () => Promise<{ total: number; rows: EmployeeGenericRecord[]; sourceFile?: string; sheetName?: string }>;
+};
+
+const employeeViewMap: Record<Exclude<EmployeeViewKey, 'home'>, EmployeeDataView> = {
+  roster: {
+    key: 'roster',
+    title: '员工花名册',
+    desc: '来自参考目录员工花名册，并与考勤人员主数据同源。',
+    fetcher: fetchEmployeeRoster as EmployeeDataView['fetcher'],
+    columns: [
+      { key: 'name', label: '姓名', width: 110 },
+      { key: 'phone', label: '手机号', width: 130 },
+      { key: 'employeeNo', label: '员工号', width: 110 },
+      { key: 'dept', label: '部门', width: 160 },
+      { key: 'deptFullPath', label: '部门全路径', width: 280 },
+      { key: 'position', label: '岗位', width: 150 },
+      { key: 'hireDate', label: '入职日期', width: 120 },
+      { key: 'employeeType', label: '员工类型', width: 120 },
+      { key: 'employeeStatus', label: '员工状态', width: 110 },
+      { key: 'identityVerify', label: '身份核验', width: 120 },
+    ],
+  },
+  archive: {
+    key: 'archive',
+    title: '员工档案库',
+    desc: '档案字段与花名册主数据保持一致，后续可继续展开教育、合同、工作经历详情。',
+    fetcher: fetchEmployeeArchive as EmployeeDataView['fetcher'],
+    columns: [
+      { key: 'name', label: '姓名', width: 110 },
+      { key: 'employeeNo', label: '员工号', width: 110 },
+      { key: 'dept', label: '部门', width: 160 },
+      { key: 'position', label: '岗位', width: 150 },
+      { key: 'managerName', label: '汇报上级', width: 130 },
+      { key: 'employeeStatus', label: '员工状态', width: 110 },
+      { key: 'source', label: '数据来源', width: 160 },
+    ],
+  },
+  archiveApprovals: {
+    key: 'archiveApprovals',
+    title: '档案变更审批',
+    desc: '按档案缺失和身份核验状态生成待处理审批视图。',
+    fetcher: fetchEmployeeArchiveApprovals,
+    columns: [
+      { key: 'applicant', label: '申请人', width: 110 },
+      { key: 'employeeNo', label: '员工号', width: 110 },
+      { key: 'dept', label: '部门', width: 160 },
+      { key: 'changeType', label: '变更类型', width: 150 },
+      { key: 'field', label: '字段', width: 240 },
+      { key: 'status', label: '状态', width: 100 },
+      { key: 'initiator', label: '发起人', width: 120 },
+      { key: 'createTime', label: '发起时间', width: 160 },
+    ],
+  },
+  care: {
+    key: 'care',
+    title: '员工关怀',
+    desc: '入职、转正、续签、档案补全等提醒。',
+    fetcher: fetchEmployeeCare,
+    columns: [
+      { key: 'name', label: '姓名', width: 110 },
+      { key: 'employeeNo', label: '员工号', width: 110 },
+      { key: 'dept', label: '部门', width: 160 },
+      { key: 'careType', label: '关怀类型', width: 150 },
+      { key: 'dueDate', label: '提醒日期', width: 120 },
+      { key: 'status', label: '状态', width: 100 },
+      { key: 'owner', label: '负责人', width: 120 },
+    ],
+  },
+  reports: {
+    key: 'reports',
+    title: '员工统计报表',
+    desc: '按部门统计人员、在职、试用、外包结构。',
+    fetcher: fetchEmployeeReports,
+    columns: [
+      { key: 'dept', label: '部门', width: 180 },
+      { key: 'total', label: '总人数', width: 100 },
+      { key: 'active', label: '在职', width: 100 },
+      { key: 'trial', label: '试用', width: 100 },
+      { key: 'outsourced', label: '外包', width: 100 },
+    ],
+  },
+  reportsNew: {
+    key: 'reportsNew',
+    title: '员工统计报表（新版）',
+    desc: '新版员工统计报表，和实时统计共用员工主数据。',
+    fetcher: fetchEmployeeReports,
+    columns: [
+      { key: 'dept', label: '部门', width: 180 },
+      { key: 'total', label: '总人数', width: 100 },
+      { key: 'active', label: '在职', width: 100 },
+      { key: 'trial', label: '试用', width: 100 },
+      { key: 'outsourced', label: '外包', width: 100 },
+    ],
+  },
+  pendingOnboard: {
+    key: 'pendingOnboard',
+    title: '待入职',
+    desc: '任职管理中的入职办理列表。',
+    fetcher: () => fetchEmployeeEmployment('pendingOnboard'),
+    columns: [
+      { key: '姓名', label: '姓名', width: 110 },
+      { key: '入职末级部门', label: '入职部门', width: 160 },
+      { key: '实际入职日期', label: '入职日期', width: 120 },
+      { key: '员工类型', label: '员工类型', width: 110 },
+      { key: '岗位', label: '岗位', width: 160 },
+      { key: '审批状态', label: '审批状态', width: 110 },
+      { key: '数据来源', label: '数据来源', width: 140 },
+    ],
+  },
+  onboarded: {
+    key: 'onboarded',
+    title: '已入职',
+    desc: '已入职员工记录。',
+    fetcher: () => fetchEmployeeEmployment('onboarded'),
+    columns: [
+      { key: '姓名', label: '姓名', width: 110 },
+      { key: '入职末级部门', label: '部门', width: 160 },
+      { key: '实际入职日期', label: '入职日期', width: 120 },
+      { key: '员工类型', label: '员工类型', width: 110 },
+      { key: '岗位', label: '岗位', width: 160 },
+      { key: '审批状态', label: '审批状态', width: 110 },
+    ],
+  },
+  regularized: {
+    key: 'regularized',
+    title: '转正管理',
+    desc: '已转正和转正申请记录。',
+    fetcher: () => fetchEmployeeEmployment('regularized'),
+    columns: [
+      { key: '姓名', label: '姓名', width: 110 },
+      { key: '员工号', label: '员工号', width: 110 },
+      { key: '转正部门', label: '部门', width: 160 },
+      { key: '转正岗位', label: '岗位', width: 160 },
+      { key: '入职日期', label: '入职日期', width: 120 },
+      { key: '实际转正日期', label: '转正日期', width: 120 },
+      { key: '表单状态', label: '表单状态', width: 110 },
+    ],
+  },
+  transferring: {
+    key: 'transferring',
+    title: '调动管理',
+    desc: '员工调岗、调部门记录。',
+    fetcher: () => fetchEmployeeEmployment('transferAll'),
+    columns: [
+      { key: '姓名', label: '姓名', width: 110 },
+      { key: '调动申请日期', label: '申请日期', width: 120 },
+      { key: '调动类型', label: '调动类型', width: 110 },
+      { key: '表单状态', label: '表单状态', width: 110 },
+      { key: '原部门', label: '原部门', width: 160 },
+      { key: '调动后部门', label: '调动后部门', width: 180 },
+      { key: '原岗位', label: '原岗位', width: 150 },
+      { key: '调动后岗位', label: '调动后岗位', width: 150 },
+    ],
+  },
+  abandoned: {
+    key: 'abandoned',
+    title: '弃入管理',
+    desc: '放弃入职人员记录。',
+    fetcher: () => fetchEmployeeEmployment('abandoned'),
+    columns: [
+      { key: '姓名', label: '姓名', width: 110 },
+      { key: '手机号', label: '手机号', width: 130 },
+      { key: '预计入职日期', label: '预计入职日期', width: 130 },
+      { key: '入职末级部门', label: '入职部门', width: 160 },
+      { key: '岗位', label: '岗位', width: 160 },
+      { key: '审批状态', label: '审批状态', width: 110 },
+      { key: '放弃原因', label: '放弃原因', width: 160 },
+      { key: '添加人', label: '添加人', width: 110 },
+    ],
+  },
+  concurrent: {
+    key: 'concurrent',
+    title: '借调管理',
+    desc: '兼任、借调和跨部门任职记录。',
+    fetcher: () => fetchEmployeeEmployment('concurrent'),
+    columns: [
+      { key: '姓名', label: '姓名', width: 110 },
+      { key: '申请日期', label: '申请日期', width: 120 },
+      { key: '开始日期', label: '开始日期', width: 120 },
+      { key: '结束日期', label: '结束日期', width: 120 },
+      { key: '部门', label: '部门', width: 160 },
+      { key: '兼任部门', label: '兼任部门', width: 160 },
+      { key: '兼任岗位', label: '兼任岗位', width: 160 },
+      { key: '任职状态', label: '任职状态', width: 120 },
+    ],
+  },
+  tempStore: {
+    key: 'tempStore',
+    title: '临时调店管理',
+    desc: '临时调店记录，当前使用调动记录联动展示。',
+    fetcher: () => fetchEmployeeEmployment('transferring'),
+    columns: [
+      { key: '姓名', label: '姓名', width: 110 },
+      { key: '调动申请日期', label: '申请日期', width: 120 },
+      { key: '调动类型', label: '类型', width: 110 },
+      { key: '原部门', label: '原部门', width: 160 },
+      { key: '调动后部门', label: '调动后部门', width: 180 },
+      { key: '表单状态', label: '状态', width: 110 },
+      { key: '添加人', label: '添加人', width: 110 },
+    ],
+  },
+  resigning: {
+    key: 'resigning',
+    title: '离职管理',
+    desc: '离职中、已离职、全部离职记录。',
+    fetcher: () => fetchEmployeeEmployment('resignAll'),
+    columns: [
+      { key: '姓名', label: '姓名', width: 110 },
+      { key: '离职部门', label: '离职部门', width: 160 },
+      { key: '计划离职日期', label: '计划离职日期', width: 130 },
+      { key: '实际离职日期', label: '实际离职日期', width: 130 },
+      { key: '实际离职类型', label: '离职类型', width: 120 },
+      { key: '表单状态', label: '表单状态', width: 110 },
+      { key: '添加人', label: '添加人', width: 110 },
+    ],
+  },
+  mainJobRecords: {
+    key: 'mainJobRecords',
+    title: '任职记录',
+    desc: '主岗任职历史记录。',
+    fetcher: () => fetchEmployeeEmployment('mainJobRecords'),
+    columns: [
+      { key: '姓名', label: '姓名', width: 110 },
+      { key: '生效日期', label: '生效日期', width: 120 },
+      { key: '部门', label: '部门', width: 260 },
+      { key: '业务分组', label: '业务分组', width: 140 },
+      { key: '任职类型', label: '任职类型', width: 110 },
+      { key: '数据来源', label: '数据来源', width: 120 },
+      { key: '任职状态', label: '任职状态', width: 110 },
+    ],
+  },
+  contracts: {
+    key: 'contracts',
+    title: '员工合同',
+    desc: '员工合同主表。',
+    fetcher: () => fetchEmployeeContracts('all').then(res => ({ ...res, rows: res.rows as unknown as EmployeeGenericRecord[] })),
+    columns: [
+      { key: 'name', label: '姓名', width: 110 },
+      { key: 'employeeNo', label: '员工号', width: 110 },
+      { key: 'dept', label: '部门', width: 160 },
+      { key: 'position', label: '岗位', width: 150 },
+      { key: 'company', label: '合同公司', width: 220 },
+      { key: 'contractType', label: '合同类型', width: 160 },
+      { key: 'startDate', label: '起始日', width: 120 },
+      { key: 'endDate', label: '到期日', width: 120 },
+      { key: 'contractStatus', label: '状态', width: 120 },
+      { key: 'signMethod', label: '签署方式', width: 120 },
+    ],
+  },
+  newSign: {
+    key: 'newSign',
+    title: '入职新签',
+    desc: '待新签劳动合同或员工手册。',
+    fetcher: () => fetchEmployeeContracts('newSign').then(res => ({ ...res, rows: res.rows as unknown as EmployeeGenericRecord[] })),
+    columns: [
+      { key: 'name', label: '姓名', width: 110 },
+      { key: 'dept', label: '部门', width: 160 },
+      { key: 'employeeNo', label: '员工号', width: 110 },
+      { key: 'position', label: '岗位', width: 160 },
+      { key: 'contractStatus', label: '员工状态', width: 110 },
+      { key: 'signProgress', label: '签署进度', width: 140 },
+      { key: 'employeeAuthStatus', label: '授权状态', width: 120 },
+    ],
+  },
+  renewal: {
+    key: 'renewal',
+    title: '到期续签',
+    desc: '到期需续签合同。',
+    fetcher: () => fetchEmployeeContracts('renewal').then(res => ({ ...res, rows: res.rows as unknown as EmployeeGenericRecord[] })),
+    columns: [
+      { key: 'name', label: '姓名', width: 110 },
+      { key: 'employeeNo', label: '员工号', width: 110 },
+      { key: 'dept', label: '部门', width: 160 },
+      { key: 'company', label: '合同公司', width: 220 },
+      { key: 'contractType', label: '合同类型', width: 160 },
+      { key: 'endDate', label: '合同到期日', width: 130 },
+      { key: 'contractStatus', label: '合同状态', width: 120 },
+      { key: 'signProgress', label: '签署进度', width: 120 },
+    ],
+  },
+  signing: {
+    key: 'signing',
+    title: '签署中',
+    desc: '当前签署中记录。',
+    fetcher: () => fetchEmployeeContracts('signing').then(res => ({ ...res, rows: res.rows as unknown as EmployeeGenericRecord[] })),
+    columns: [
+      { key: 'name', label: '姓名', width: 110 },
+      { key: 'dept', label: '部门', width: 160 },
+      { key: 'company', label: '合同公司', width: 220 },
+      { key: 'contractType', label: '合同类型', width: 160 },
+      { key: 'signProgress', label: '电子签署进度', width: 150 },
+      { key: 'dataSource', label: '数据来源', width: 120 },
+      { key: 'initiator', label: '发起人', width: 110 },
+      { key: 'initiateTime', label: '发起时间', width: 160 },
+    ],
+  },
+  contractApproval: {
+    key: 'contractApproval',
+    title: '合同审批',
+    desc: '合同签署记录和审批流记录。',
+    fetcher: () => fetchEmployeeContracts('signRecords').then(res => ({ ...res, rows: res.rows as unknown as EmployeeGenericRecord[] })),
+    columns: [
+      { key: 'name', label: '姓名', width: 110 },
+      { key: 'dept', label: '部门', width: 160 },
+      { key: 'company', label: '合同公司', width: 220 },
+      { key: 'contractType', label: '合同类型', width: 160 },
+      { key: 'signProgress', label: '签署进度', width: 140 },
+      { key: 'dataSource', label: '数据来源', width: 120 },
+      { key: 'initiator', label: '发起人', width: 110 },
+      { key: 'initiateTime', label: '发起时间', width: 160 },
+    ],
+  },
+  contractRelease: {
+    key: 'contractRelease',
+    title: '合同解除',
+    desc: '合同解除记录。',
+    fetcher: () => fetchEmployeeContracts('releaseRecords').then(res => ({ ...res, rows: res.rows as unknown as EmployeeGenericRecord[] })),
+    columns: [
+      { key: 'name', label: '姓名', width: 110 },
+      { key: 'dept', label: '部门', width: 160 },
+      { key: 'company', label: '合同公司', width: 220 },
+      { key: 'contractType', label: '合同类型', width: 160 },
+      { key: 'startDate', label: '合同起始日', width: 130 },
+      { key: 'endDate', label: '合同到期日', width: 130 },
+      { key: 'contractStatus', label: '合同状态', width: 120 },
+      { key: 'signProgress', label: '解除进度', width: 120 },
+    ],
+  },
+  contractLedger: {
+    key: 'contractLedger',
+    title: '合同台账',
+    desc: '合同台账和合同主表数据。',
+    fetcher: () => fetchEmployeeContracts('all').then(res => ({ ...res, rows: res.rows as unknown as EmployeeGenericRecord[] })),
+    columns: [
+      { key: 'name', label: '姓名', width: 110 },
+      { key: 'employeeNo', label: '员工号', width: 110 },
+      { key: 'company', label: '合同公司', width: 220 },
+      { key: 'contractNo', label: '合同编号', width: 160 },
+      { key: 'contractType', label: '合同类型', width: 160 },
+      { key: 'contractTerm', label: '合同期限', width: 120 },
+      { key: 'startDate', label: '起始日', width: 120 },
+      { key: 'endDate', label: '到期日', width: 120 },
+      { key: 'contractStatus', label: '状态', width: 120 },
+    ],
+  },
+  esignSettings: {
+    key: 'esignSettings',
+    title: '电子签署设置',
+    desc: '电子合同签署相关配置。',
+    fetcher: fetchEmployeeSettings,
+    columns: [
+      { key: 'setting', label: '设置项', width: 180 },
+      { key: 'value', label: '配置内容', width: 360 },
+      { key: 'status', label: '状态', width: 120 },
+    ],
+  },
+  settings: {
+    key: 'settings',
+    title: '员工管理设置',
+    desc: '员工管理相关基础配置。',
+    fetcher: fetchEmployeeSettings,
+    columns: [
+      { key: 'setting', label: '设置项', width: 180 },
+      { key: 'value', label: '配置内容', width: 360 },
+      { key: 'status', label: '状态', width: 120 },
+    ],
+  },
+  blacklist: {
+    key: 'blacklist',
+    title: '黑名单管理',
+    desc: '员工黑名单管理，联动离职和档案记录。',
+    fetcher: () => fetchEmployeeEmployment('resignAll'),
+    columns: [
+      { key: '姓名', label: '姓名', width: 120 },
+      { key: '离职部门', label: '部门', width: 180 },
+      { key: '实际离职日期', label: '离职日期', width: 130 },
+      { key: '是否加入黑名单', label: '是否加入黑名单', width: 150 },
+      { key: '实际离职原因', label: '原因', width: 220 },
+      { key: '添加人', label: '添加人', width: 120 },
+      { key: '添加时间', label: '添加时间', width: 160 },
+    ],
+  },
+  services: {
+    key: 'services',
+    title: '员工服务',
+    desc: '员工自助服务、材料提交与合同提醒。',
+    fetcher: fetchEmployeeServices,
+    columns: [
+      { key: 'service', label: '服务', width: 180 },
+      { key: 'scope', label: '范围', width: 180 },
+      { key: 'status', label: '状态', width: 120 },
+      { key: 'linkedData', label: '联动数据', width: 320 },
+    ],
+  },
+  certificates: {
+    key: 'certificates',
+    title: '证明开具',
+    desc: '员工证明开具服务。',
+    fetcher: fetchEmployeeRoster as EmployeeDataView['fetcher'],
+    columns: [
+      { key: 'name', label: '姓名', width: 120 },
+      { key: 'employeeNo', label: '员工号', width: 120 },
+      { key: 'dept', label: '部门', width: 180 },
+      { key: 'position', label: '岗位', width: 160 },
+      { key: 'hireDate', label: '入职日期', width: 130 },
+      { key: 'employeeStatus', label: '员工状态', width: 120 },
+      { key: 'source', label: '数据来源', width: 160 },
+    ],
+  },
+  customPrint: {
+    key: 'customPrint',
+    title: '自定义打印',
+    desc: '员工服务自定义打印配置。',
+    fetcher: fetchEmployeeServices,
+    columns: [
+      { key: 'service', label: '服务', width: 180 },
+      { key: 'scope', label: '适用范围', width: 180 },
+      { key: 'status', label: '状态', width: 120 },
+      { key: 'linkedData', label: '联动数据', width: 320 },
+    ],
+  },
+  templates: {
+    key: 'templates',
+    title: '模板管理',
+    desc: '员工证明和打印模板管理。',
+    fetcher: fetchEmployeeServices,
+    columns: [
+      { key: 'service', label: '模板名称', width: 180 },
+      { key: 'scope', label: '使用范围', width: 180 },
+      { key: 'status', label: '状态', width: 120 },
+      { key: 'linkedData', label: '字段来源', width: 320 },
+    ],
+  },
+  thirdParty: {
+    key: 'thirdParty',
+    title: '员工对接日志',
+    desc: '企业微信、电子合同、考勤小程序等员工数据对接状态。',
+    fetcher: fetchEmployeeThirdParty,
+    columns: [
+      { key: 'platform', label: '平台', width: 180 },
+      { key: 'data', label: '同步数据', width: 300 },
+      { key: 'status', label: '状态', width: 120 },
+      { key: 'syncMode', label: '同步方式', width: 260 },
+    ],
+  },
+};
+
+function EmployeeDataTable({ view }: { view: EmployeeDataView }) {
   const { colors } = useTheme();
+  const [rows, setRows] = useState<EmployeeGenericRecord[]>([]);
+  const [query, setQuery] = useState('');
+  const [sortState, setSortState] = useState<SortState>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [meta, setMeta] = useState({ total: 0, sourceFile: '', sheetName: '' });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    view.fetcher()
+      .then((res) => {
+        if (cancelled) return;
+        setRows(res.rows || []);
+        setMeta({ total: res.total || 0, sourceFile: res.sourceFile || '', sheetName: res.sheetName || '' });
+      })
+      .catch((err) => {
+        if (!cancelled) setError(String(err?.message || err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [view]);
+
+  useEffect(() => {
+    setSortState(null);
+    setPage(1);
+  }, [view.key]);
+
+  const visibleRows = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    const filteredRows = keyword
+      ? rows.filter(row => Object.values(row).some(value => String(value ?? '').toLowerCase().includes(keyword)))
+      : rows;
+
+    const sortedRows = sortState
+      ? [...filteredRows].sort((left, right) => compareTableValues(left[sortState.key], right[sortState.key], sortState.direction))
+      : filteredRows;
+
+    return sortedRows;
+  }, [query, rows, sortState]);
+  const pageRows = visibleRows.slice((page - 1) * pageSize, page * pageSize);
+
+  const toggleSort = (key: string) => {
+    setSortState(prev => (
+      prev?.key === key
+        ? { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+        : { key, direction: 'asc' }
+    ));
+    setPage(1);
+  };
+  useEffect(() => {
+    setPage(1);
+  }, [query]);
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(visibleRows.length / pageSize));
+    if (page > totalPages) setPage(totalPages);
+  }, [page, pageSize, visibleRows.length]);
+
+  return (
+    <Surface style={{ minHeight: 'calc(100vh - 92px)', overflow: 'hidden' }}>
+      <div style={{ padding: '14px 16px 12px', borderBottom: `1px solid ${colors.tableBorder}` }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: colors.text }}>{view.title}</div>
+            <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 6 }}>{view.desc}</div>
+          </div>
+          <div style={{ fontSize: 12, color: colors.textMuted, textAlign: 'right', lineHeight: 1.7 }}>
+            共 {meta.total} 条<br />{meta.sourceFile}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14 }}>
+          <ToolbarButton primary>+ 新增</ToolbarButton>
+          <ToolbarButton>导入</ToolbarButton>
+          <ToolbarButton>导出</ToolbarButton>
+          <input
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder="搜索姓名、员工号、部门"
+            style={{ marginLeft: 'auto', width: 260, height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 6, padding: '0 10px', fontSize: 12, outline: 'none', backgroundColor: colors.cardBg, color: colors.text }}
+          />
+        </div>
+      </div>
+      {error ? (
+        <div style={{ padding: 20, color: colors.primary, fontSize: 13 }}>真实数据连接失败：{error}</div>
+      ) : loading ? (
+        <div style={{ padding: 20, color: colors.textMuted, fontSize: 13 }}>加载中...</div>
+      ) : (
+        <div style={{ height: 'calc(100vh - 196px)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ overflow: 'auto', flex: 1, minHeight: 0 }}>
+          <table style={{ minWidth: view.columns.reduce((sum, col) => sum + (col.width || 140), 0), width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+            <thead>
+              <tr>
+                {view.columns.map(column => (
+                  <th
+                    key={column.key}
+                    onClick={() => toggleSort(column.key)}
+                    style={{
+                      width: column.width || 140,
+                      padding: '10px 12px',
+                      textAlign: 'left',
+                      backgroundColor: colors.tableHeaderBg,
+                      borderBottom: `1px solid ${colors.tableBorder}`,
+                      color: colors.text,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                    }}
+                  >
+                    <SortableHeaderLabel label={column.label} active={sortState?.key === column.key} direction={sortState?.direction} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pageRows.map((row, index) => (
+                <tr key={String(row.id ?? index)} style={{ borderBottom: `1px solid ${colors.tableBorder}` }}>
+                  {view.columns.map(column => (
+                    <td key={column.key} style={{ padding: '10px 12px', color: colors.text, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(row[column.key] ?? '')}>
+                      {String(row[column.key] ?? '') || '-'}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+          {visibleRows.length === 0 ? <div style={{ padding: 20, color: colors.textMuted, fontSize: 13 }}>暂无内容</div> : null}
+          <PaginationBar total={visibleRows.length} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(1); }} />
+        </div>
+      )}
+    </Surface>
+  );
+}
+
+function EmployeeFilterBar({
+  children,
+  right,
+}: {
+  children: React.ReactNode;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '14px 16px 10px', flexWrap: 'wrap' }}>
+      {children}
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>{right}</div>
+    </div>
+  );
+}
+
+function FilterInput({ label, placeholder = '多个用；号隔开，支持Excel复制', wide = false }: { label: string; placeholder?: string; wide?: boolean }) {
+  const { colors } = useTheme();
+  return (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: colors.text }}>
+      <span style={{ whiteSpace: 'nowrap' }}>{label}</span>
+      <input
+        placeholder={placeholder}
+        style={{
+          width: wide ? 274 : 180,
+          height: 32,
+          border: `1px solid ${colors.inputBorder}`,
+          borderRadius: 5,
+          padding: '0 10px',
+          fontSize: 12,
+          color: colors.text,
+          backgroundColor: colors.cardBg,
+          outline: 'none',
+        }}
+      />
+    </label>
+  );
+}
+
+function SelectBox({ label, placeholder = '请选择', width = 210 }: { label: string; placeholder?: string; width?: number }) {
+  const { colors } = useTheme();
+  return (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: colors.text }}>
+      <span style={{ whiteSpace: 'nowrap' }}>{label}</span>
+      <div style={{ width, height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 5, padding: '0 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: colors.textMuted, backgroundColor: colors.cardBg }}>
+        <span>{placeholder}</span>
+        <ChevronRight size={12} style={{ transform: 'rotate(90deg)' }} />
+      </div>
+    </label>
+  );
+}
+
+function ToolbarButton({ children, primary = false, onClick }: { children: React.ReactNode; primary?: boolean; onClick?: () => void }) {
+  const { colors } = useTheme();
+  const buttonStyle: React.CSSProperties = primary
+    ? {
+      padding: '5px 14px',
+      fontSize: 12,
+      border: 'none',
+      borderRadius: 4,
+      cursor: 'pointer',
+      backgroundColor: colors.primary,
+      color: '#fff',
+      whiteSpace: 'nowrap',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+    }
+    : {
+      padding: '5px 12px',
+      fontSize: 12,
+      border: `1px solid ${colors.inputBorder}`,
+      borderRadius: 4,
+      cursor: 'pointer',
+      backgroundColor: 'transparent',
+      color: colors.text,
+      whiteSpace: 'nowrap',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+    };
+  return (
+    <button type="button" onClick={onClick} style={buttonStyle}>
+      {children}
+    </button>
+  );
+}
+
+function TextAction({ children }: { children: React.ReactNode }) {
+  return <button style={{ border: 'none', background: 'transparent', color: '#1F6BFF', fontSize: 12, cursor: 'pointer', padding: 0 }}>{children}</button>;
+}
+
+function EmployeeTable({
+  columns,
+  rows,
+  maxHeight = 'calc(100vh - 276px)',
+  emptyText = '暂无内容',
+  pagination = true,
+  page,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  columns: { key: string; label: string; width?: number; link?: boolean; status?: boolean }[];
+  rows: EmployeeGenericRecord[];
+  maxHeight?: number | string;
+  emptyText?: string;
+  pagination?: boolean;
+  page?: number;
+  pageSize?: number;
+  onPageChange?: (page: number) => void;
+  onPageSizeChange?: (pageSize: number) => void;
+}) {
+  const { colors } = useTheme();
+  const [sortState, setSortState] = useState<SortState>(null);
+  const [internalPage, setInternalPage] = useState(1);
+  const [internalPageSize, setInternalPageSize] = useState(20);
+  const minWidth = columns.reduce((sum, col) => sum + (col.width || 140), 0);
+  const effectivePage = page ?? internalPage;
+  const effectivePageSize = pageSize ?? internalPageSize;
+  const sortedRows = useMemo(() => {
+    if (!sortState) return rows;
+    return [...rows].sort((left, right) => compareTableValues(left[sortState.key], right[sortState.key], sortState.direction));
+  }, [rows, sortState]);
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / effectivePageSize));
+  const safePage = Math.min(Math.max(1, effectivePage), totalPages);
+  const displayRows = pagination
+    ? sortedRows.slice((safePage - 1) * effectivePageSize, safePage * effectivePageSize)
+    : sortedRows;
+  useEffect(() => {
+    if (effectivePage <= totalPages) return;
+    if (onPageChange) onPageChange(totalPages);
+    else setInternalPage(totalPages);
+  }, [effectivePage, onPageChange, totalPages]);
+  const toggleSort = (key: string) => {
+    setSortState(prev => (
+      prev?.key === key
+        ? { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+        : { key, direction: 'asc' }
+    ));
+    if (onPageChange) onPageChange(1);
+    else setInternalPage(1);
+  };
+  const handlePageChange = (nextPage: number) => {
+    if (onPageChange) onPageChange(nextPage);
+    else setInternalPage(nextPage);
+  };
+  const handlePageSizeChange = (nextPageSize: number) => {
+    if (onPageSizeChange) onPageSizeChange(nextPageSize);
+    else setInternalPageSize(nextPageSize);
+    if (onPageChange) onPageChange(1);
+    else setInternalPage(1);
+  };
+
+  return (
+    <div style={{ border: `1px solid ${colors.tableBorder}`, borderRadius: 4, overflow: 'hidden', backgroundColor: colors.cardBg, display: 'flex', flexDirection: 'column', height: maxHeight }}>
+      <div style={{ overflow: 'auto', flex: 1, minHeight: 0 }}>
+        <table style={{ width: '100%', minWidth, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+          <thead>
+            <tr>
+              {columns.map(column => (
+                <th
+                  key={column.key}
+                  onClick={() => toggleSort(column.key)}
+                  style={{
+                    width: column.width || 140,
+                    padding: '11px 12px',
+                    textAlign: 'left',
+                    backgroundColor: colors.tableHeaderBg,
+                    borderBottom: `1px solid ${colors.tableBorder}`,
+                    borderRight: `1px solid ${colors.tableBorder}`,
+                    color: colors.text,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                  }}
+                >
+                  <SortableHeaderLabel label={column.label} active={sortState?.key === column.key} direction={sortState?.direction} />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {displayRows.map((row, index) => (
+              <tr key={String(row.id ?? index)} style={{ backgroundColor: index % 2 === 1 ? withAlpha(colors.textMuted, 0.055) : colors.cardBg, borderBottom: `1px solid ${colors.tableBorder}` }}>
+                {columns.map(column => {
+                  const value = String(row[column.key] ?? '') || '-';
+                  const isStatus = column.status || ['试用', '正式', '待离职', '在职'].includes(value);
+                  return (
+                    <td key={column.key} style={{ padding: '10px 12px', borderRight: `1px solid ${colors.tableBorder}`, color: column.link ? '#1F6BFF' : colors.text, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={value}>
+                      {isStatus && value !== '-' ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: value.includes('正式') || value.includes('在职') ? '#1CBF7A' : '#F3BE32' }} />{value}</span> : value}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {sortedRows.length === 0 ? <div style={{ height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center', color: colors.textMuted, fontSize: 13 }}>{emptyText}</div> : null}
+      </div>
+      {pagination ? (
+        <PaginationBar
+          total={sortedRows.length}
+          page={safePage}
+          pageSize={effectivePageSize}
+          onPageChange={handlePageChange}
+          onPageSizeChange={handlePageSizeChange}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function StatStrip({
+  stats,
+  activeKey,
+  onSelect,
+}: {
+  stats: Array<{ key: EmployeeRosterFilterKey; label: string; value: string }>;
+  activeKey: EmployeeRosterFilterKey;
+  onSelect: (key: EmployeeRosterFilterKey) => void;
+}) {
+  const { colors } = useTheme();
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${stats.length}, minmax(0, 1fr))`, border: `1px solid ${colors.tableBorder}`, borderRadius: 5, overflow: 'hidden', margin: '6px 16px 14px' }}>
+      {stats.map((stat, index) => {
+        const active = activeKey === stat.key;
+        return (
+          <button
+            key={stat.key}
+            type="button"
+            onClick={() => onSelect(stat.key)}
+            style={{
+              minHeight: 62,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexDirection: 'column',
+              gap: 5,
+              backgroundColor: active ? '#E8F1FF' : colors.cardBg,
+              border: 'none',
+              borderRight: index === stats.length - 1 ? 'none' : `1px solid ${colors.tableBorder}`,
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >
+            <div style={{ fontSize: 12, color: active ? '#1F6BFF' : colors.textMuted }}>{stat.label}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: active ? '#1F6BFF' : colors.text }}>{stat.value}</div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+type EmployeeFormState = {
+  name: string;
+  phone: string;
+  employeeNo: string;
+  department: string;
+  deptFullPath: string;
+  position: string;
+  managerName: string;
+  managerNo: string;
+  userId: string;
+  email: string;
+  rosterName: string;
+  hireDate: string;
+  employeeType: string;
+  employeeStatus: string;
+  plannedProbation: string;
+  actualProbation: string;
+  plannedRegularDate: string;
+  actualRegularDate: string;
+  seniorityStartDate: string;
+  probationReduction: string;
+  probationReportStatus: string;
+  probationTeacher: string;
+  probationCycle: string;
+  probationFollowup: string;
+  selfReview1: string;
+  selfScore1: string;
+  selfReview2: string;
+  selfScore2: string;
+  supervisorReview1: string;
+  supervisorScore1: string;
+  supervisorReview2: string;
+  supervisorScore2: string;
+  idType: string;
+  idNo: string;
+  gender: string;
+  birthday: string;
+  idAddress: string;
+  idIssueDate: string;
+  idExpireDate: string;
+  nationality: string;
+  ethnic: string;
+  politicalStatus: string;
+  currentAddressRegion: string;
+  currentAddress: string;
+  maritalStatus: string;
+  pregnant: string;
+  emergencyContact: string;
+  emergencyRelation: string;
+  emergencyPhone: string;
+  socialSecurityNo: string;
+  fundNo: string;
+  socialSecurityTransferDate: string;
+  socialSecuritySubject: string;
+  socialSecurityBase: string;
+  fundBase: string;
+  bankCard: string;
+  bankName: string;
+  bankBranch: string;
+  salaryLevel: string;
+  salaryStructure: string;
+  salaryCalculationDate: string;
+  leaveEstimateDate: string;
+  actualLeaveTime: string;
+  accountRetainDate: string;
+  wecomEnabled: string;
+  vacationReturnDate: string;
+  dormStatus: string;
+  dormNo: string;
+  dormAddress: string;
+  schoolStayDuration: string;
+  clubStayDuration: string;
+  contractStartDate: string;
+  contractEndDate: string;
+  checkInDate: string;
+  moveOutDate: string;
+  stayDuration: string;
+  checkInNote: string;
+  moveOutReason: string;
+  moveOutNote: string;
+};
+
+const employeeFormInitialState = (): EmployeeFormState => ({
+  name: '',
+  phone: '',
+  employeeNo: '',
+  department: '',
+  deptFullPath: '',
+  position: '',
+  managerName: '',
+  managerNo: '',
+  userId: '',
+  email: '',
+  rosterName: '',
+  hireDate: todayISO(),
+  employeeType: '全职',
+  employeeStatus: '正式',
+  plannedProbation: '',
+  actualProbation: '',
+  plannedRegularDate: '',
+  actualRegularDate: '',
+  seniorityStartDate: todayISO(),
+  probationReduction: '',
+  probationReportStatus: '',
+  probationTeacher: '',
+  probationCycle: '',
+  probationFollowup: '',
+  selfReview1: '',
+  selfScore1: '',
+  selfReview2: '',
+  selfScore2: '',
+  supervisorReview1: '',
+  supervisorScore1: '',
+  supervisorReview2: '',
+  supervisorScore2: '',
+  idType: '居民身份证',
+  idNo: '',
+  gender: '',
+  birthday: '',
+  idAddress: '',
+  idIssueDate: '',
+  idExpireDate: '',
+  nationality: '中国',
+  ethnic: '',
+  politicalStatus: '',
+  currentAddressRegion: '',
+  currentAddress: '',
+  maritalStatus: '',
+  pregnant: '',
+  emergencyContact: '',
+  emergencyRelation: '',
+  emergencyPhone: '',
+  socialSecurityNo: '',
+  fundNo: '',
+  socialSecurityTransferDate: '',
+  socialSecuritySubject: '',
+  socialSecurityBase: '',
+  fundBase: '',
+  bankCard: '',
+  bankName: '',
+  bankBranch: '',
+  salaryLevel: '',
+  salaryStructure: '',
+  salaryCalculationDate: '',
+  leaveEstimateDate: '',
+  actualLeaveTime: '',
+  accountRetainDate: '',
+  wecomEnabled: '',
+  vacationReturnDate: '',
+  dormStatus: '',
+  dormNo: '',
+  dormAddress: '',
+  schoolStayDuration: '',
+  clubStayDuration: '',
+  contractStartDate: '',
+  contractEndDate: '',
+  checkInDate: '',
+  moveOutDate: '',
+  stayDuration: '',
+  checkInNote: '',
+  moveOutReason: '',
+  moveOutNote: '',
+});
+
+function generateEmployeeNo() {
+  return `ZZ${String(Date.now()).slice(-6)}`;
+}
+
+function EmployeeAddPage({ onBack, onSaved }: { onBack: () => void; onSaved: () => void }) {
+  const { colors } = useTheme();
+  const [form, setForm] = useState<EmployeeFormState>(() => employeeFormInitialState());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [activeSection, setActiveSection] = useState('basic');
+  const update = (key: keyof EmployeeFormState, value: string) => setForm(prev => ({ ...prev, [key]: value }));
+  const sectionRefs = useMemo(() => [
+    { key: 'basic', label: '基本信息' },
+    { key: 'employment', label: '在职信息' },
+    { key: 'probation', label: '试用期信息' },
+    { key: 'personal', label: '个人信息' },
+    { key: 'education', label: '教育经历' },
+    { key: 'work', label: '工作经历' },
+    { key: 'family', label: '家庭成员' },
+    { key: 'emergency', label: '紧急联系人' },
+    { key: 'payroll', label: '工资社保' },
+    { key: 'materials', label: '个人材料' },
+    { key: 'custom', label: '自定义字段' },
+    { key: 'housing', label: '住宿信息' },
+  ], []);
+
+  const goSection = (key: string) => {
+    setActiveSection(key);
+    document.getElementById(`employee-add-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const submit = async (mode: 'save' | 'continue' | 'archive') => {
+    if (!form.name.trim()) {
+      setError('请填写姓名');
+      goSection('basic');
+      return;
+    }
+    if (!form.department.trim()) {
+      setError('请选择部门');
+      goSection('basic');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    const employeeNo = form.employeeNo.trim() || generateEmployeeNo();
+    try {
+      await onboardEmployee({
+        ...(form as unknown as Record<string, string>),
+        employeeNo,
+        name: form.name.trim(),
+        phone: form.phone.trim(),
+        department: form.department.trim(),
+        deptFullPath: form.deptFullPath.trim() || `上海拉迷家具有限公司/${form.department.trim()}`,
+        position: form.position.trim(),
+        hireDate: form.hireDate,
+        employeeType: form.employeeType,
+        employeeStatus: form.employeeStatus,
+        managerName: form.managerName,
+        managerNo: form.managerNo,
+        userId: form.userId || `wecom_${employeeNo}`,
+        dataSource: mode === 'archive' ? '后台录入并补充档案' : '后台录入',
+      } as any);
+      if (mode === 'continue') {
+        setForm(employeeFormInitialState());
+        goSection('basic');
+        onSaved();
+      } else {
+        onSaved();
+        onBack();
+      }
+    } catch (err: any) {
+      setError(String(err?.message || err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ flex: 1, backgroundColor: colors.appBg, overflow: 'auto' }}>
+      <div style={{ height: 34, display: 'flex', alignItems: 'center', gap: 10, padding: '0 18px', color: colors.text, fontSize: 12 }}>
+        <button type="button" onClick={onBack} style={{ border: 'none', background: 'transparent', color: colors.textMuted, cursor: 'pointer', padding: 0 }}>{'< 返回'}</button>
+        <span style={{ color: colors.textMuted }}>|</span>
+        <span>新增员工</span>
+      </div>
+      <div style={{ margin: '0 18px 18px', borderRadius: 8, backgroundColor: colors.cardBg, minHeight: 'calc(100vh - 88px)', display: 'grid', gridTemplateColumns: '220px minmax(0, 1fr)', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ padding: '24px 0 80px', borderRight: `1px solid ${colors.tableBorder}`, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+          {sectionRefs.map(section => {
+            const active = activeSection === section.key;
+            return (
+              <button
+                key={section.key}
+                type="button"
+                onClick={() => goSection(section.key)}
+                style={{
+                  width: 132,
+                  height: 28,
+                  border: 'none',
+                  borderRight: active ? `3px solid ${colors.primary}` : '3px solid transparent',
+                  background: 'transparent',
+                  color: active ? colors.primary : colors.text,
+                  fontSize: 13,
+                  fontWeight: active ? 600 : 400,
+                  textAlign: 'right',
+                  paddingRight: 14,
+                  cursor: 'pointer',
+                }}
+              >
+                {section.label}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ padding: '22px 110px 86px 42px', overflow: 'auto', maxHeight: 'calc(100vh - 88px)' }}>
+          {error ? <div style={{ marginBottom: 14, color: colors.primary, fontSize: 12 }}>{error}</div> : null}
+          <EmployeeFormSection id="basic" title="基本信息" setActive={setActiveSection}>
+            <EmployeeFormGrid>
+              <EmployeeInput label="姓名" required value={form.name} onChange={value => update('name', value)} />
+              <EmployeeInput label="企微账号" value={form.userId} onChange={value => update('userId', value)} />
+              <EmployeeInput label="手机号" value={form.phone} onChange={value => update('phone', value)} />
+              <EmployeeInput label="邮箱" value={form.email} onChange={value => update('email', value)} />
+              <EmployeeInput label="员工号" value={form.employeeNo} onChange={value => update('employeeNo', value)} placeholder="系统自动生成" />
+              <EmployeeSelect label="部门" required value={form.department} onChange={value => update('department', value)} options={['制造供应中心', '售后组', '清洁组', '包装组', '封边组', '喷涂组', '人事部']} />
+              <EmployeeSelect label="岗位" value={form.position} onChange={value => update('position', value)} options={['普工', '售后', '保洁', '包装', '封边操作工', '仓管员', '人事专员']} />
+              <EmployeeInput label="花名" value={form.rosterName} onChange={value => update('rosterName', value)} />
+              <EmployeeSelect label="职级" value={form.salaryLevel} onChange={value => update('salaryLevel', value)} options={['P1', 'P2', 'P3', '主管', '经理']} />
+              <EmployeeInput label="汇报上级" value={form.managerName} onChange={value => update('managerName', value)} />
+              <EmployeeSelect label="所属" value={form.deptFullPath} onChange={value => update('deptFullPath', value)} options={['上海拉迷家具有限公司/制造供应中心', '制造供应中心/生产制造中心/水晶板厂', '制造供应中心/供应链中心/仓储管理部']} />
+              <div />
+              <EmployeeTextArea label="备注" value={form.deptFullPath} onChange={value => update('deptFullPath', value)} maxLength={256} />
+            </EmployeeFormGrid>
+          </EmployeeFormSection>
+
+          <EmployeeFormSection id="employment" title="在职信息" setActive={setActiveSection}>
+            <EmployeeFormGrid>
+              <EmployeeInput label="入职日期" type="date" value={form.hireDate} onChange={value => update('hireDate', value)} />
+              <EmployeeInput label="到岗日期" type="date" value={form.hireDate} onChange={value => update('hireDate', value)} />
+              <EmployeeSelect label="员工类型" value={form.employeeType} onChange={value => update('employeeType', value)} options={['全职', '实习', '退休返聘', '外包-爱才', '外包-科讯', '总部-代缴']} />
+              <EmployeeSelect label="员工状态" value={form.employeeStatus} onChange={value => update('employeeStatus', value)} options={['正式', '试用', '待离职', '在职']} />
+              <EmployeeSelect label="计划试用期" value={form.plannedProbation} onChange={value => update('plannedProbation', value)} options={['无', '1个月', '2个月', '3个月', '6个月']} />
+              <EmployeeSelect label="实际试用期" value={form.actualProbation} onChange={value => update('actualProbation', value)} options={['无', '1个月', '2个月', '3个月', '6个月']} />
+              <EmployeeInput label="计划转正日期" type="date" value={form.plannedRegularDate} onChange={value => update('plannedRegularDate', value)} />
+              <EmployeeInput label="实际转正日期" type="date" value={form.actualRegularDate} onChange={value => update('actualRegularDate', value)} />
+              <EmployeeInput label="司龄开始日期" type="date" value={form.seniorityStartDate} onChange={value => update('seniorityStartDate', value)} />
+              <EmployeeInput label="司龄扣减期" value={form.probationReduction} onChange={value => update('probationReduction', value)} />
+              <EmployeeInput label="司龄" value="0天" readOnly onChange={() => {}} />
+              <EmployeeSelect label="体检报告提供情况" value={form.probationReportStatus} onChange={value => update('probationReportStatus', value)} options={['未提供', '已提供', '无需提供']} />
+              <EmployeeInput label="报销体检金额" type="number" value={form.socialSecurityBase} onChange={value => update('socialSecurityBase', value)} />
+            </EmployeeFormGrid>
+          </EmployeeFormSection>
+
+          <EmployeeFormSection id="probation" title="试用期信息" setActive={setActiveSection}>
+            <EmployeeFormGrid>
+              <EmployeeInput label="带教老师" value={form.probationTeacher} onChange={value => update('probationTeacher', value)} />
+              <EmployeeInput label="带教周期" value={form.probationCycle} onChange={value => update('probationCycle', value)} />
+              <EmployeeInput label="试用期跟进情况" value={form.probationFollowup} onChange={value => update('probationFollowup', value)} />
+              <div />
+              <EmployeeTextArea label="第一次自我鉴定" value={form.selfReview1} onChange={value => update('selfReview1', value)} maxLength={500} />
+              <EmployeeInput label="第一次自我评分" type="number" value={form.selfScore1} onChange={value => update('selfScore1', value)} />
+              <EmployeeTextArea label="第二次自我鉴定" value={form.selfReview2} onChange={value => update('selfReview2', value)} maxLength={500} />
+              <EmployeeInput label="第二次自我评分" type="number" value={form.selfScore2} onChange={value => update('selfScore2', value)} />
+              <EmployeeTextArea label="第一次主管评价" value={form.supervisorReview1} onChange={value => update('supervisorReview1', value)} maxLength={500} />
+              <EmployeeInput label="第一次主管评分" type="number" value={form.supervisorScore1} onChange={value => update('supervisorScore1', value)} />
+              <EmployeeTextArea label="第二次主管评价" value={form.supervisorReview2} onChange={value => update('supervisorReview2', value)} maxLength={500} />
+              <EmployeeInput label="第二次主管评分" type="number" value={form.supervisorScore2} onChange={value => update('supervisorScore2', value)} />
+            </EmployeeFormGrid>
+          </EmployeeFormSection>
+
+          <EmployeeFormSection id="personal" title="个人信息" setActive={setActiveSection}>
+            <EmployeeFormGrid>
+              <EmployeeSelect label="证件类型" required value={form.idType} onChange={value => update('idType', value)} options={['居民身份证', '护照', '港澳台通行证']} />
+              <EmployeeInput label="证件号码" required value={form.idNo} onChange={value => update('idNo', value)} />
+              <EmployeeRadio label="性别" value={form.gender} onChange={value => update('gender', value)} options={['男', '女']} />
+              <EmployeeInput label="出生日期" type="date" value={form.birthday} onChange={value => update('birthday', value)} />
+              <EmployeeInput label="年龄" type="number" value="" placeholder="系统自动计算" readOnly onChange={() => {}} />
+              <EmployeeInput label="身份证地址" value={form.idAddress} onChange={value => update('idAddress', value)} />
+              <EmployeeRadio label="证件有效期" value="具体日期" onChange={() => {}} options={['具体日期', '长期']} />
+              <EmployeeInput label="证件签发日期" type="date" value={form.idIssueDate} onChange={value => update('idIssueDate', value)} />
+              <EmployeeInput label="证件到期日期" type="date" value={form.idExpireDate} onChange={value => update('idExpireDate', value)} />
+              <EmployeeSelect label="国籍/地区" value={form.nationality} onChange={value => update('nationality', value)} options={['中国', '中国香港', '中国澳门', '中国台湾', '其他']} />
+              <EmployeeSelect label="民族" value={form.ethnic} onChange={value => update('ethnic', value)} options={['汉族', '回族', '满族', '壮族', '其他']} />
+              <EmployeeSelect label="政治面貌" value={form.politicalStatus} onChange={value => update('politicalStatus', value)} options={['群众', '共青团员', '中共党员']} />
+              <EmployeeSelect label="现住址" value={form.currentAddressRegion} onChange={value => update('currentAddressRegion', value)} options={['上海', '江苏', '浙江', '安徽', '云南']} />
+              <EmployeeInput label="" value={form.currentAddress} onChange={value => update('currentAddress', value)} />
+              <EmployeeSelect label="婚姻状态" value={form.maritalStatus} onChange={value => update('maritalStatus', value)} options={['未婚', '已婚', '离异']} />
+              <EmployeeRadio label="是否已育" value={form.pregnant} onChange={value => update('pregnant', value)} options={['是', '否']} />
+            </EmployeeFormGrid>
+          </EmployeeFormSection>
+
+          <EmployeeFormSection id="education" title="教育经历" setActive={setActiveSection}>
+            <EmployeeAddLine label="添加教育经历" />
+          </EmployeeFormSection>
+          <EmployeeFormSection id="work" title="工作经历" setActive={setActiveSection}>
+            <EmployeeAddLine label="添加工作经历" />
+          </EmployeeFormSection>
+          <EmployeeFormSection id="family" title="家庭成员" setActive={setActiveSection}>
+            <EmployeeAddLine label="添加家庭成员" />
+          </EmployeeFormSection>
+
+          <EmployeeFormSection id="emergency" title="紧急联系人" setActive={setActiveSection}>
+            <EmployeeFormGrid>
+              <EmployeeInput label="紧急联系人" value={form.emergencyContact} onChange={value => update('emergencyContact', value)} />
+              <EmployeeSelect label="紧急联系人关系" value={form.emergencyRelation} onChange={value => update('emergencyRelation', value)} options={['父母', '配偶', '子女', '朋友', '其他']} />
+              <EmployeeInput label="紧急联系人电话" value={form.emergencyPhone} onChange={value => update('emergencyPhone', value)} />
+            </EmployeeFormGrid>
+          </EmployeeFormSection>
+
+          <EmployeeFormSection id="payroll" title="工资社保" setActive={setActiveSection}>
+            <EmployeeFormGrid>
+              <EmployeeInput label="个人社保账号" value={form.socialSecurityNo} onChange={value => update('socialSecurityNo', value)} />
+              <EmployeeInput label="个人公积金账号" value={form.fundNo} onChange={value => update('fundNo', value)} />
+              <EmployeeInput label="社保公积金转入时间" type="date" value={form.socialSecurityTransferDate} onChange={value => update('socialSecurityTransferDate', value)} />
+              <EmployeeSelect label="社保缴纳主体" value={form.socialSecuritySubject} onChange={value => update('socialSecuritySubject', value)} options={['上海拉迷家具有限公司', '外包主体', '代缴主体']} />
+              <EmployeeInput label="社保基数" type="number" value={form.socialSecurityBase} onChange={value => update('socialSecurityBase', value)} />
+              <EmployeeInput label="公积金基数" type="number" value={form.fundBase} onChange={value => update('fundBase', value)} />
+              <EmployeeInput label="工资卡号" value={form.bankCard} onChange={value => update('bankCard', value)} />
+              <EmployeeSelect label="开户银行" value={form.bankName} onChange={value => update('bankName', value)} options={['中国银行', '工商银行', '农业银行', '建设银行', '招商银行']} />
+              <EmployeeInput label="开户支行" value={form.bankBranch} onChange={value => update('bankBranch', value)} />
+              <EmployeeInput label="薪级" value={form.salaryLevel} onChange={value => update('salaryLevel', value)} />
+              <EmployeeInput label="薪资结构" value={form.salaryStructure} onChange={value => update('salaryStructure', value)} />
+              <EmployeeInput label="工资结算日" value={form.salaryCalculationDate} onChange={value => update('salaryCalculationDate', value)} />
+              <EmployeeInput label="预计退休时间" type="date" value={form.leaveEstimateDate} onChange={value => update('leaveEstimateDate', value)} />
+            </EmployeeFormGrid>
+          </EmployeeFormSection>
+
+          <EmployeeFormSection id="materials" title="个人材料" setActive={setActiveSection}>
+            <div style={{ display: 'grid', gridTemplateColumns: '90px 220px 220px', gap: 24, alignItems: 'start', marginBottom: 24 }}>
+              <div style={{ textAlign: 'right', fontSize: 13, color: colors.text }}>身份证</div>
+              <EmployeeUploadCard label="身份证人像面" />
+              <EmployeeUploadCard label="身份证国徽面" />
+              <div style={{ textAlign: 'right', fontSize: 13, color: colors.text }}>其他</div>
+              <EmployeeUploadCard label="银行卡" />
+            </div>
+            {['学历证书', '学位证书', '体检报告', '前公司离职证明', '征信报告', '无犯罪证明', '入职承诺书'].map(label => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '12px 0 0 90px' }}>
+                <span style={{ width: 110, textAlign: 'right', fontSize: 13 }}>{label}</span>
+                <button type="button" style={{ height: 28, padding: '0 14px', borderRadius: 5, border: `1px solid ${colors.inputBorder}`, backgroundColor: colors.cardBg, color: colors.text, cursor: 'pointer' }}>上传</button>
+              </div>
+            ))}
+          </EmployeeFormSection>
+
+          <EmployeeFormSection id="custom" title="自定义字段" setActive={setActiveSection}>
+            <EmployeeFormGrid>
+              <EmployeeInput label="实际离职时间" type="date" value={form.actualLeaveTime} onChange={value => update('actualLeaveTime', value)} />
+              <EmployeeInput label="账号保留日期" type="date" value={form.accountRetainDate} onChange={value => update('accountRetainDate', value)} />
+              <EmployeeSelect label="是否使用企业微信" required value={form.wecomEnabled} onChange={value => update('wecomEnabled', value)} options={['是', '否']} />
+              <EmployeeInput label="休假返岗日期" type="date" value={form.vacationReturnDate} onChange={value => update('vacationReturnDate', value)} />
+            </EmployeeFormGrid>
+          </EmployeeFormSection>
+
+          <EmployeeFormSection id="housing" title="住宿信息" setActive={setActiveSection}>
+            <EmployeeFormGrid>
+              <EmployeeSelect label="住宿情况" value={form.dormStatus} onChange={value => update('dormStatus', value)} options={['住宿', '不住宿']} />
+              <EmployeeSelect label="宿舍号" value={form.dormNo} onChange={value => update('dormNo', value)} options={['A101', 'A102', 'B201', 'B202']} />
+              <EmployeeSelect label="校招/社招" value={form.schoolStayDuration} onChange={value => update('schoolStayDuration', value)} options={['校招', '社招']} />
+              <EmployeeInput label="宿舍地址" value={form.dormAddress} onChange={value => update('dormAddress', value)} />
+              <EmployeeInput label="预计入住时长（校招）" type="number" value={form.schoolStayDuration} onChange={value => update('schoolStayDuration', value)} />
+              <EmployeeInput label="预计入住时长（社招）" type="number" value={form.clubStayDuration} onChange={value => update('clubStayDuration', value)} />
+              <EmployeeInput label="合同开始日期" type="date" value={form.contractStartDate} onChange={value => update('contractStartDate', value)} />
+              <EmployeeInput label="合同结束日期" type="date" value={form.contractEndDate} onChange={value => update('contractEndDate', value)} />
+              <EmployeeInput label="入住时间" type="date" value={form.checkInDate} onChange={value => update('checkInDate', value)} />
+              <EmployeeInput label="撤离时间" type="date" value={form.moveOutDate} onChange={value => update('moveOutDate', value)} />
+              <EmployeeInput label="实际住宿时长" type="number" value={form.stayDuration} onChange={value => update('stayDuration', value)} />
+              <EmployeeInput label="入住备注" value={form.checkInNote} onChange={value => update('checkInNote', value)} />
+              <EmployeeInput label="搬出原因" value={form.moveOutReason} onChange={value => update('moveOutReason', value)} />
+              <EmployeeInput label="搬离备注" value={form.moveOutNote} onChange={value => update('moveOutNote', value)} />
+            </EmployeeFormGrid>
+          </EmployeeFormSection>
+        </div>
+        <div style={{ position: 'absolute', left: 220, right: 0, bottom: 0, minHeight: 56, borderTop: `1px solid ${colors.tableBorder}`, backgroundColor: colors.cardBg, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <button type="button" disabled={saving} onClick={() => submit('save')} style={{ height: 32, padding: '0 20px', borderRadius: 5, border: `1px solid ${colors.inputBorder}`, backgroundColor: colors.cardBg, color: colors.text, cursor: 'pointer' }}>提交</button>
+          <button type="button" disabled={saving} onClick={() => submit('archive')} style={{ height: 32, padding: '0 20px', borderRadius: 5, border: `1px solid ${colors.inputBorder}`, backgroundColor: colors.cardBg, color: colors.text, cursor: 'pointer' }}>提交并补充其他档案</button>
+          <button type="button" disabled={saving} onClick={() => submit('continue')} style={{ height: 32, padding: '0 20px', borderRadius: 5, border: 'none', backgroundColor: colors.primary, color: '#fff', cursor: 'pointer' }}>{saving ? '提交中...' : '提交并新增下一个员工'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmployeeFormSection({ id, title, setActive, children }: { id: string; title: string; setActive: (id: string) => void; children: React.ReactNode }) {
+  return (
+    <section id={`employee-add-${id}`} onMouseEnter={() => setActive(id)} style={{ scrollMarginTop: 18, marginBottom: 30 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#001B44', fontWeight: 700, fontSize: 16, marginBottom: 16 }}>
+        <span style={{ width: 3, height: 16, backgroundColor: '#1F6BFF', borderRadius: 2 }} />
+        {title}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function EmployeeFormGrid({ children }: { children: React.ReactNode }) {
+  return <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', columnGap: 84, rowGap: 14 }}>{children}</div>;
+}
+
+function EmployeeFieldShell({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+  const { colors } = useTheme();
+  return (
+    <label style={{ display: 'grid', gridTemplateColumns: '112px minmax(0, 1fr)', alignItems: 'center', gap: 8, fontSize: 13, color: colors.text }}>
+      <span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{required ? <span style={{ color: '#D93026' }}>* </span> : null}{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function employeeInputStyle(colors: any): React.CSSProperties {
+  return {
+    height: 32,
+    border: `1px solid ${colors.inputBorder}`,
+    borderRadius: 5,
+    padding: '0 10px',
+    color: colors.text,
+    backgroundColor: colors.cardBg,
+    outline: 'none',
+    fontSize: 13,
+    boxSizing: 'border-box',
+    minWidth: 0,
+    width: '100%',
+  };
+}
+
+function EmployeeInput({ label, value, onChange, placeholder = '请输入', type = 'text', required = false, readOnly = false }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; type?: string; required?: boolean; readOnly?: boolean }) {
+  const { colors } = useTheme();
+  return (
+    <EmployeeFieldShell label={label} required={required}>
+      <input type={type} value={value} readOnly={readOnly} placeholder={placeholder} onChange={event => onChange(event.target.value)} style={{ ...employeeInputStyle(colors), backgroundColor: readOnly ? colors.tableHeaderBg : colors.cardBg }} />
+    </EmployeeFieldShell>
+  );
+}
+
+function EmployeeSelect({ label, value, onChange, options, required = false }: { label: string; value: string; onChange: (value: string) => void; options: string[]; required?: boolean }) {
+  const { colors } = useTheme();
+  return (
+    <EmployeeFieldShell label={label} required={required}>
+      <select value={value} onChange={event => onChange(event.target.value)} style={employeeInputStyle(colors)}>
+        <option value="">请选择</option>
+        {options.map(option => <option key={option} value={option}>{option}</option>)}
+      </select>
+    </EmployeeFieldShell>
+  );
+}
+
+function EmployeeRadio({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) {
+  const { colors } = useTheme();
+  return (
+    <EmployeeFieldShell label={label}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 18, color: colors.text, minHeight: 32 }}>
+        {options.map(option => (
+          <label key={option} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <input type="radio" checked={value === option} onChange={() => onChange(option)} style={{ accentColor: colors.primary }} />
+            {option}
+          </label>
+        ))}
+      </div>
+    </EmployeeFieldShell>
+  );
+}
+
+function EmployeeTextArea({ label, value, onChange, maxLength }: { label: string; value: string; onChange: (value: string) => void; maxLength: number }) {
+  const { colors } = useTheme();
+  return (
+    <div style={{ gridColumn: '1 / -1' }}>
+      <EmployeeFieldShell label={label}>
+        <div>
+          <textarea value={value} maxLength={maxLength} placeholder="请输入" onChange={event => onChange(event.target.value)} style={{ ...employeeInputStyle(colors), height: 54, paddingTop: 8, resize: 'vertical' }} />
+          <div style={{ textAlign: 'right', fontSize: 11, color: colors.textMuted }}>{value.length} / {maxLength}</div>
+        </div>
+      </EmployeeFieldShell>
+    </div>
+  );
+}
+
+function EmployeeAddLine({ label }: { label: string }) {
+  const { colors } = useTheme();
+  return <button type="button" style={{ width: '100%', height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 5, backgroundColor: colors.cardBg, color: colors.text, cursor: 'pointer' }}>+ {label}</button>;
+}
+
+function EmployeeUploadCard({ label }: { label: string }) {
+  const { colors } = useTheme();
+  return (
+    <div>
+      <button type="button" style={{ width: 180, height: 112, border: `1px dashed ${colors.inputBorder}`, borderRadius: 5, backgroundColor: colors.tableHeaderBg, color: colors.text, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
+        <span style={{ width: 26, height: 26, borderRadius: '50%', border: `2px solid ${colors.textMuted}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>+</span>
+        上传
+      </button>
+      <div style={{ marginTop: 8, textAlign: 'center', color: colors.text, fontSize: 12 }}>{label}</div>
+    </div>
+  );
+}
+
+function EmployeeRosterView() {
+  const { colors } = useTheme();
+  const [rows, setRows] = useState<EmployeeGenericRecord[]>([]);
+  const [total, setTotal] = useState(0);
+  const [activeStatFilter, setActiveStatFilter] = useState<EmployeeRosterFilterKey>('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [showAddEmployee, setShowAddEmployee] = useState(false);
+
+  const loadRoster = () => {
+    fetchEmployeeRoster().then(res => {
+      setTotal(res.total);
+      setRows(res.rows as unknown as EmployeeGenericRecord[]);
+    }).catch(() => {
+      setRows([]);
+      setTotal(0);
+    });
+  };
+
+  useEffect(() => {
+    loadRoster();
+  }, []);
+
+  const matchesStatFilter = (row: EmployeeGenericRecord, filter: EmployeeRosterFilterKey) => {
+    const employeeType = String(row.employeeType || '');
+    const employeeStatus = String(row.employeeStatus || '').trim();
+
+    if (filter === 'all') return true;
+    if (filter === 'fullTime') return employeeType.includes('全职');
+    if (filter === 'intern') return employeeType.includes('实习');
+    if (filter === 'retired') return employeeType.includes('退休');
+    if (filter === 'outsourcedAicai') return employeeType.includes('爱才');
+    if (filter === 'outsourcedKexun') return employeeType.includes('科讯');
+    if (filter === 'agency') return employeeType.includes('代缴');
+    if (filter === 'trial') return employeeStatus.includes('试用');
+    if (filter === 'regular') return employeeStatus.includes('正式');
+    if (filter === 'leaving') return employeeStatus.includes('待离职') || employeeStatus.includes('离职');
+    if (filter === 'blank') return !employeeStatus;
+    return true;
+  };
+  const filteredRows = useMemo(
+    () => rows.filter(row => matchesStatFilter(row, activeStatFilter)),
+    [activeStatFilter, rows],
+  );
+  const stats = useMemo(() => {
+    const count = (tester: (row: EmployeeGenericRecord) => boolean) => rows.filter(tester).length;
+    return [
+      { key: 'all' as const, label: `共${total || rows.length}人`, value: '' },
+      { key: 'fullTime' as const, label: '全职', value: String(count(row => String(row.employeeType || '').includes('全职'))) },
+      { key: 'intern' as const, label: '实习', value: String(count(row => String(row.employeeType || '').includes('实习'))) },
+      { key: 'retired' as const, label: '退休返聘', value: String(count(row => String(row.employeeType || '').includes('退休'))) },
+      { key: 'outsourcedAicai' as const, label: '外包-爱才', value: String(count(row => String(row.employeeType || '').includes('爱才'))) },
+      { key: 'outsourcedKexun' as const, label: '外包-科讯', value: String(count(row => String(row.employeeType || '').includes('科讯'))) },
+      { key: 'agency' as const, label: '总部-代缴', value: String(count(row => String(row.employeeType || '').includes('代缴'))) },
+      { key: 'trial' as const, label: '试用', value: String(count(row => String(row.employeeStatus || '').includes('试用'))) },
+      { key: 'regular' as const, label: '正式', value: String(count(row => String(row.employeeStatus || '').includes('正式'))) },
+      { key: 'leaving' as const, label: '待离职', value: String(count(row => String(row.employeeStatus || '').includes('待离职') || String(row.employeeStatus || '').includes('离职'))) },
+      { key: 'blank' as const, label: '未填写', value: String(count(row => !String(row.employeeStatus || '').trim())) },
+    ];
+  }, [rows, total]);
+  const handleStatSelect = (key: EmployeeRosterFilterKey) => {
+    setActiveStatFilter(key);
+    setPage(1);
+  };
+
+  if (showAddEmployee) {
+    return <EmployeeAddPage onBack={() => setShowAddEmployee(false)} onSaved={loadRoster} />;
+  }
+
+  return (
+    <Surface style={{ minHeight: 'calc(100vh - 92px)', padding: 0, overflow: 'hidden' }}>
+      <EmployeeFilterBar right={<><ToolbarButton>重置</ToolbarButton><ToolbarButton primary>查询</ToolbarButton><TextAction>更多筛选 ▾</TextAction></>}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: colors.text }}>
+          员工状态
+          <input type="checkbox" defaultChecked /> 在职
+          <input type="checkbox" /> 离职
+          <input type="checkbox" defaultChecked /> 未填写
+        </label>
+        <FilterInput label="姓名" />
+        <SelectBox label="部门" />
+        <FilterInput label="员工号" />
+        <FilterInput label="手机号" />
+      </EmployeeFilterBar>
+      <StatStrip stats={stats} activeKey={activeStatFilter} onSelect={handleStatSelect} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px 12px' }}>
+        <ToolbarButton primary onClick={() => setShowAddEmployee(true)}>+ 新增员工</ToolbarButton>
+        <ToolbarButton>导入⌄</ToolbarButton>
+        <ToolbarButton>导出⌄</ToolbarButton>
+        <ToolbarButton>开具证明</ToolbarButton>
+        <ToolbarButton>更多操作⌄</ToolbarButton>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 14 }}>
+          <TextAction>字段设置</TextAction>
+          <TextAction>排序</TextAction>
+          <TextAction>表头设置</TextAction>
+          <TextAction>全屏</TextAction>
+        </div>
+      </div>
+      <div style={{ padding: '0 16px 12px' }}>
+        <EmployeeTable
+          columns={[
+            { key: 'name', label: '姓名', width: 140, link: true },
+            { key: 'phone', label: '手机号', width: 150 },
+            { key: 'employeeNo', label: '员工号', width: 140 },
+            { key: 'dept', label: '部门', width: 160 },
+            { key: 'deptFullPath', label: '部门全路径', width: 280 },
+            { key: 'position', label: '岗位', width: 170 },
+            { key: 'hireDate', label: '入职日期', width: 140 },
+            { key: 'employeeType', label: '员工类型', width: 140 },
+            { key: 'employeeStatus', label: '员工状态', width: 140, status: true },
+            { key: 'identityVerify', label: '身份核验', width: 140 },
+          ]}
+          rows={filteredRows}
+          maxHeight="calc(100vh - 252px)"
+          page={page}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
+      </div>
+    </Surface>
+  );
+}
+
+function ProgressBarRow({ label, percent, count }: { label: string; percent: number; count: string }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '112px 1fr 86px', alignItems: 'center', gap: 12, fontSize: 12 }}>
+      <span>{label}</span>
+      <div style={{ height: 12, backgroundColor: '#F0F2F6', borderRadius: 999, overflow: 'hidden' }}>
+        <div style={{ width: `${Math.min(100, Math.max(0, percent))}%`, height: '100%', backgroundColor: '#1F6BFF', borderRadius: 999 }} />
+      </div>
+      <span>{percent.toFixed(1)}%　{count}</span>
+    </div>
+  );
+}
+
+function RingProgress({ value }: { value: string }) {
+  return (
+    <div style={{ width: 170, height: 170, borderRadius: '50%', background: 'conic-gradient(#1F6BFF 1deg, #F0F2F6 1deg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ width: 116, height: 116, borderRadius: '50%', backgroundColor: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: '#68758C' }}>完整率</div>
+        <div style={{ fontSize: 32, color: '#22304A' }}>{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function ArchiveOverviewPanel({ title, centerText, rows }: { title: string; centerText: string; rows: Array<{ label: string; percent: number; count: string }> }) {
+  const { colors } = useTheme();
+  return (
+    <div style={{ border: `1px solid ${colors.tableBorder}`, borderRadius: 5, overflow: 'hidden', marginTop: 14 }}>
+      <div style={{ height: 46, display: 'flex', alignItems: 'center', padding: '0 20px', backgroundColor: colors.tableHeaderBg, fontWeight: 700, color: colors.text }}>{title}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '42% 1fr', alignItems: 'center', minHeight: 300, padding: '26px 36px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+          <div style={{ fontSize: 12, color: colors.text }}>{centerText} <ToolbarButton>去上传</ToolbarButton></div>
+          <RingProgress value={title.includes('材料') ? '0.0%' : '0.1%'} />
+        </div>
+        <div style={{ borderLeft: `1px solid ${colors.tableBorder}`, paddingLeft: 34, display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {rows.map(row => <ProgressBarRow key={row.label} {...row} />)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmployeeArchiveView() {
+  const { colors } = useTheme();
+  const [tab, setTab] = useState<'overview' | 'education' | 'work' | 'family'>('overview');
+  const [rows, setRows] = useState<EmployeeGenericRecord[]>([]);
+  const [educationRows, setEducationRows] = useState<EmployeeGenericRecord[]>([]);
+
+  useEffect(() => {
+    fetchEmployeeArchive().then(res => setRows(res.rows as unknown as EmployeeGenericRecord[]));
+    fetchEmployeeEducation().then(res => setEducationRows(res.rows));
+  }, []);
+
+  const tabs = [
+    ['overview', '员工档案概况'],
+    ['education', '教育经历'],
+    ['work', '工作经历'],
+    ['family', '家庭成员'],
+  ] as const;
+
+  return (
+    <Surface style={{ minHeight: 'calc(100vh - 92px)', padding: '0 20px 20px', overflow: 'auto' }}>
+      <div style={{ display: 'flex', height: 46, borderBottom: `1px solid ${colors.tableBorder}`, gap: 28 }}>
+        {tabs.map(item => (
+          <button key={item[0]} onClick={() => setTab(item[0])} style={{ border: 'none', background: 'transparent', borderBottom: tab === item[0] ? '2px solid #1F6BFF' : '2px solid transparent', color: tab === item[0] ? '#1F6BFF' : colors.text, fontSize: 13, cursor: 'pointer' }}>{item[1]}</button>
+        ))}
+      </div>
+      {tab === 'overview' ? (
+        <>
+          <EmployeeFilterBar right={<div style={{ fontSize: 12, color: colors.text }}>数据获取时间：2026-05-22 10:22:54</div>}>
+            <SelectBox label="" placeholder="选择部门" width={200} />
+            <SelectBox label="" placeholder="选择在职员工状态" width={200} />
+          </EmployeeFilterBar>
+          <div style={{ fontSize: 12, color: colors.text, padding: '0 0 6px' }}>统计范围：全部在职员工{rows.length || 1035}人　 <span style={{ color: '#1F6BFF' }}>●</span> 提升员工档案完整率，有利于降低用工风险</div>
+          <ArchiveOverviewPanel
+            title="材料概况"
+            centerText={`0人已上传完整，${rows.length || 1035}人未上传完整`}
+            rows={[
+              { label: '身份证(正反面)', percent: 7.5, count: '78份' },
+              { label: '学历证书', percent: 3.9, count: '40份' },
+              { label: '体检报告', percent: 4.1, count: '42份' },
+              { label: '当前合同附件', percent: 25.1, count: '260份' },
+              { label: '头像', percent: 1.8, count: '19份' },
+            ]}
+          />
+          <ArchiveOverviewPanel
+            title="重要信息概况"
+            centerText={`1人已补充完整，${Math.max(0, (rows.length || 1035) - 1)}人未补充完整`}
+            rows={[
+              { label: '当前合同起始日', percent: 86.2, count: '892份' },
+              { label: '公积金账号', percent: 8.8, count: '91份' },
+              { label: '现住址', percent: 36.1, count: '374份' },
+              { label: '紧急联系人', percent: 70.6, count: '731份' },
+              { label: '社保账号', percent: 0.1, count: '1份' },
+              { label: '工资卡号', percent: 5.8, count: '60份' },
+            ]}
+          />
+        </>
+      ) : (
+        <div style={{ paddingTop: 16 }}>
+          <EmployeeTable
+            rows={tab === 'education' ? educationRows : rows}
+            columns={tab === 'education' ? [
+              { key: '姓名', label: '姓名', width: 120 },
+              { key: '员工号', label: '员工号', width: 120 },
+              { key: '部门', label: '部门', width: 180 },
+              { key: '岗位', label: '岗位', width: 160 },
+              { key: '学历', label: '学历', width: 120 },
+              { key: '毕业院校', label: '毕业院校', width: 220 },
+              { key: '专业', label: '专业', width: 160 },
+              { key: '毕业时间', label: '毕业时间', width: 140 },
+            ] : [
+              { key: 'name', label: '姓名', width: 120 },
+              { key: 'employeeNo', label: '员工号', width: 120 },
+              { key: 'dept', label: '部门', width: 180 },
+              { key: 'position', label: '岗位', width: 160 },
+              { key: 'source', label: '数据来源', width: 180 },
+            ]}
+          />
+        </div>
+      )}
+    </Surface>
+  );
+}
+
+function ArchiveApprovalView() {
+  const { colors } = useTheme();
+  const [rows, setRows] = useState<EmployeeGenericRecord[]>([]);
+
+  useEffect(() => {
+    fetchEmployeeArchiveApprovals().then(res => setRows(res.rows));
+  }, []);
+
+  return (
+    <Surface style={{ minHeight: 'calc(100vh - 92px)', padding: '0 16px 16px', overflow: 'hidden' }}>
+      <EmployeeFilterBar right={<><ToolbarButton>重置</ToolbarButton><ToolbarButton primary>查询</ToolbarButton></>}>
+        <FilterInput label="变更前姓名" />
+        <FilterInput label="变更前员工号" />
+        <SelectBox label="变更前部门" />
+        <FilterInput label="表单名称" />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: colors.text }}>发起日期 <input value="2025-05-22    →    2026-05-22" readOnly style={{ width: 220, height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 5, padding: '0 10px', color: colors.text, backgroundColor: colors.cardBg }} /></label>
+      </EmployeeFilterBar>
+      <div style={{ padding: '6px 0 16px' }}>
+        <button style={{ height: 40, minWidth: 78, border: 'none', borderRadius: 6, backgroundColor: '#E8F1FF', color: colors.text, fontSize: 13 }}>全部 <b>{rows.length}</b></button>
+      </div>
+      <ToolbarButton>+ 申请变更</ToolbarButton>
+      <div style={{ marginTop: 16 }}>
+        <EmployeeTable
+          rows={rows.length ? rows : []}
+          emptyText="暂无内容"
+          columns={[
+            { key: 'applicant', label: '姓名', width: 130 },
+            { key: 'oldName', label: '变更前姓名', width: 140 },
+            { key: 'newName', label: '变更后姓名', width: 140 },
+            { key: 'employeeNo', label: '变更前员工号', width: 150 },
+            { key: 'newEmployeeNo', label: '变更后员工号', width: 150 },
+            { key: 'dept', label: '变更前部门', width: 160 },
+            { key: 'newDept', label: '变更后部门', width: 160 },
+            { key: 'status', label: '审批状态', width: 130 },
+            { key: 'changeType', label: '表单名称', width: 160 },
+            { key: 'initiator', label: '当前处理人', width: 140 },
+            { key: 'createTime', label: '发起时间', width: 160 },
+          ]}
+        />
+      </div>
+    </Surface>
+  );
+}
+
+function EmployeeCareView() {
+  const { colors } = useTheme();
+  const [rows, setRows] = useState<EmployeeGenericRecord[]>([]);
+  const [tab, setTab] = useState<'birthday' | 'anniversary'>('birthday');
+
+  useEffect(() => {
+    fetchEmployeeCare().then(res => setRows(res.rows));
+  }, []);
+
+  return (
+    <Surface style={{ minHeight: 'calc(100vh - 92px)', padding: '0 20px 16px', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', height: 46, borderBottom: `1px solid ${colors.tableBorder}`, gap: 28 }}>
+        <button onClick={() => setTab('birthday')} style={{ border: 'none', background: 'transparent', borderBottom: tab === 'birthday' ? '2px solid #1F6BFF' : '2px solid transparent', color: tab === 'birthday' ? '#1F6BFF' : colors.text, fontSize: 13, cursor: 'pointer' }}>生日提醒</button>
+        <button onClick={() => setTab('anniversary')} style={{ border: 'none', background: 'transparent', borderBottom: tab === 'anniversary' ? '2px solid #1F6BFF' : '2px solid transparent', color: tab === 'anniversary' ? '#1F6BFF' : colors.text, fontSize: 13, cursor: 'pointer' }}>入职周年提醒</button>
+        <div style={{ marginLeft: 'auto', alignSelf: 'center' }}><TextAction>智能祝福配置</TextAction></div>
+      </div>
+      <EmployeeFilterBar right={<><ToolbarButton>重置</ToolbarButton><ToolbarButton primary>查询</ToolbarButton><TextAction>更多筛选 ▾</TextAction></>}>
+        <SelectBox label="部门" />
+        <FilterInput label="姓名/员工号" placeholder="请输入" />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: colors.text }}>{tab === 'birthday' ? '生日日期' : '入职日期'} <input value="2026-05-01    →    2026-05-31" readOnly style={{ width: 220, height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 5, padding: '0 10px', color: colors.text, backgroundColor: colors.cardBg }} /></label>
+      </EmployeeFilterBar>
+      <ToolbarButton>发送生日红包</ToolbarButton>
+      <div style={{ marginTop: 16 }}>
+        <EmployeeTable
+          rows={rows}
+          columns={[
+            { key: 'name', label: '姓名', width: 140 },
+            { key: 'employeeNo', label: '员工号', width: 160 },
+            { key: 'phone', label: '手机号', width: 180 },
+            { key: 'dept', label: '部门', width: 220 },
+            { key: 'dueDate', label: tab === 'birthday' ? '生日日期' : '入职周年', width: 160 },
+            { key: 'careType', label: '提醒类型', width: 180 },
+            { key: 'status', label: '红包活动', width: 160 },
+          ]}
+        />
+      </div>
+    </Surface>
+  );
+}
+
+function SimpleBarChart({ rows }: { rows: EmployeeGenericRecord[] }) {
+  const max = Math.max(1, ...rows.map(row => Number(row.total || row.active || 0)));
+  const showRows = rows.slice(0, 14);
+  return (
+    <div style={{ height: 330, display: 'grid', gridTemplateColumns: `repeat(${showRows.length}, minmax(48px, 1fr))`, alignItems: 'end', gap: 18, padding: '30px 50px 20px', borderTop: '1px solid #E2E7F0' }}>
+      {showRows.map(row => {
+        const value = Number(row.total || row.active || 0);
+        return (
+          <div key={String(row.dept)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', gap: 10, height: '100%' }}>
+            <div title={`${row.dept}: ${value}`} style={{ width: 24, height: `${Math.max(4, value / max * 220)}px`, backgroundColor: '#8DBDFF' }} />
+            <div style={{ height: 62, fontSize: 11, color: '#52617A', writingMode: 'vertical-rl', transform: 'rotate(35deg)', whiteSpace: 'nowrap' }}>{String(row.dept || '')}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function EmployeeReportsView() {
+  const { colors } = useTheme();
+  const [rows, setRows] = useState<EmployeeGenericRecord[]>([]);
+  const total = rows.reduce((sum, row) => sum + Number(row.active || row.total || 0), 0);
+
+  useEffect(() => {
+    fetchEmployeeReports().then(res => setRows(res.rows));
+  }, []);
+
+  return (
+    <Surface style={{ minHeight: 'calc(100vh - 92px)', padding: '0 20px 16px', overflow: 'auto' }}>
+      <div style={{ display: 'flex', height: 46, borderBottom: `1px solid ${colors.tableBorder}`, gap: 28 }}>
+        {['实时统计', '实时员工分布', '员工档案概况'].map((label, index) => <button key={label} style={{ border: 'none', background: 'transparent', borderBottom: index === 0 ? '2px solid #1F6BFF' : '2px solid transparent', color: index === 0 ? '#1F6BFF' : colors.text, fontSize: 13 }}>{label}</button>)}
+      </div>
+      <div style={{ border: '1px solid #90B9FF', backgroundColor: '#EEF5FF', color: colors.text, fontSize: 13, padding: '10px 14px', borderRadius: 4, marginTop: 16 }}>
+        旧版报表即将下架，新报表全面升级！深度对接智数报表，支持自定义配置；多维分析人员结构，权限控制精准到部门及业务分组。
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, fontSize: 12, color: colors.text }}>
+        <SelectBox label="" placeholder="选择部门" width={220} />
+        <span>数据获取时间：2026-05-22 10:32:24</span>
+      </div>
+      <div style={{ marginTop: 16, border: `1px solid ${colors.tableBorder}`, borderRadius: 5, overflow: 'hidden' }}>
+        <div style={{ padding: 20, fontWeight: 700 }}>各部门在职人数</div>
+        <div style={{ padding: '0 20px 8px', fontSize: 12 }}>统计范围：全部在职员工<b>{total || 1035}</b>人，离职员工<b>15</b>人</div>
+        <SimpleBarChart rows={rows} />
+      </div>
+      <div style={{ marginTop: 20, border: `1px solid ${colors.tableBorder}`, borderRadius: 5, overflow: 'hidden' }}>
+        <div style={{ padding: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <b>当月部门入/离职人数</b>
+          <div style={{ display: 'flex', gap: 16 }}><TextAction>已入职明细</TextAction><TextAction>已离职明细</TextAction></div>
+        </div>
+        <SimpleBarChart rows={rows.filter(row => Number(row.total || 0) < 50)} />
+      </div>
+    </Surface>
+  );
+}
+
+function FirstEmployeeManagementView({ view }: { view: EmployeeViewKey }) {
+  if (view === 'roster') return <EmployeeRosterView />;
+  if (view === 'archive') return <EmployeeArchiveView />;
+  if (view === 'archiveApprovals') return <ArchiveApprovalView />;
+  if (view === 'care') return <EmployeeCareView />;
+  if (view === 'reports' || view === 'reportsNew') return <EmployeeReportsView />;
+  return null;
+}
+
+function EmployeeHomeDashboard({ summary }: { summary: EmployeeManagementSummary | null }) {
+  const { colors } = useTheme();
+  const employeeTotal = summary?.employeeTotal ?? 1027;
+  const active = summary?.active ?? 104;
+  const trial = summary?.trial ?? 5;
+  const contractExpiring = summary?.contractExpiring ?? 7;
+  const contractPendingSign = summary?.contractPendingSign ?? 12;
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 252px', gap: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <Surface style={{ padding: '14px 14px 16px' }}>
+          <SectionTitle title="入职助手" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
+            <MetricStripCard title="流程待办" metrics={[{ label: '审批中', value: '0 人' }]} tone="soft" />
+            <MetricStripCard title="待入职" metrics={[{ label: '入职审批中', value: `${summary?.pendingOnboard ?? 0} 人` }, { label: '今日待确认入职', value: '0 人' }]} tone="soft" />
+            <MetricStripCard title="合同签订" metrics={[{ label: '已确认入职，合同未签订', value: `${contractPendingSign} 人` }]} tone="primary" />
+            <MetricStripCard title="员工信息补齐" metrics={[{ label: '档案信息待补', value: `${summary?.identityUnverified ?? 1025} 人` }, { label: '材料待补', value: '1026 人' }]} tone="soft" />
+          </div>
+        </Surface>
+
+        <Surface style={{ padding: '14px 14px 16px' }}>
+          <SectionTitle title="离职助手" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+            <MetricStripCard title="流程待办" metrics={[{ label: '审批中', value: `${summary?.resigning ?? 4} 人` }]} tone="warning" />
+            <MetricStripCard title="待办提醒" metrics={[{ label: '今日待确认离职', value: '0 人' }]} tone="warning" />
+            <MetricStripCard title="合同解除" metrics={[{ label: '合同未解约', value: '90 人' }]} tone="warning" />
+          </div>
+        </Surface>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+          <StatOverviewCard
+            title="任职管理"
+            stats={[
+              { label: '总人数', value: `${employeeTotal} 人`, accent: true },
+              { label: '在职', value: `${active} 人` },
+              { label: '试用中', value: `${trial} 人` },
+              { label: '离职中', value: `${summary?.resigning ?? 4} 人` },
+              { label: '已离职', value: '0 人' },
+              { label: '调岗中', value: `${summary?.transferring ?? 0} 人` },
+            ]}
+          />
+          <StatOverviewCard
+            title="合同签署"
+            stats={[
+              { label: '待发起续签', value: `${contractExpiring} 单`, accent: true },
+              { label: '即将到期', value: '69 单', accent: true },
+              { label: '签署中', value: `${contractPendingSign} 单` },
+              { label: '近期未签', value: '6 单' },
+              { label: '补签待处理', value: '0 单' },
+              { label: '转签待处理', value: '0 单' },
+            ]}
+          />
+        </div>
+
+        <Surface style={{ padding: '14px 14px 12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: colors.text }}>人事提醒</div>
+            <div style={{ fontSize: '11px', color: colors.textMuted }}>更新时间：{todayISO()} 14:29　切换　刷新</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12, paddingTop: 4 }}>
+            {[
+              ['合同到期提醒', '0 条'],
+              ['转正提醒', '0 人'],
+              ['进群提醒', '48 人'],
+              ['身份证过期提醒', '0 人'],
+              ['账号停用提醒', '0 人'],
+              ['内推状态提醒', '0 人'],
+              ['花名册字段缺失', '0 项'],
+              ['档案信息缺失', '0 项'],
+              ['电子签章异常', '0 项'],
+              ['证照到期提醒', '0 项'],
+            ].map(item => (
+              <div key={item[0]} style={{ minHeight: 58, borderTop: `1px solid ${colors.tableBorder}`, paddingTop: 10 }}>
+                <div style={{ fontSize: '11px', color: colors.textMuted, marginBottom: 8 }}>{item[0]}</div>
+                <div style={{ fontSize: '18px', color: colors.text, fontWeight: 700 }}>{item[1]}</div>
+              </div>
+            ))}
+          </div>
+        </Surface>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <SidePanel title="异常处理" extra={<CircleHelp size={14} style={{ color: colors.textMuted }} />}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0 2px' }}>
+            <CircleAlert size={16} style={{ color: colors.primary, marginTop: 2, flexShrink: 0 }} />
+            <div>
+              <div style={{ fontSize: '12px', color: colors.text }}>权限范围内有 2 人的工号与手机号未补全</div>
+              <button style={{ marginTop: 8, border: 'none', background: 'transparent', color: colors.primary, fontSize: '12px', cursor: 'pointer', padding: 0 }}>去处理 &gt;</button>
+            </div>
+          </div>
+        </SidePanel>
+
+        <SidePanel title="产品动态" extra={<button style={{ border: 'none', background: 'transparent', color: colors.textMuted, fontSize: '12px', cursor: 'pointer' }}>更多 &gt;</button>}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {[
+              ['产品迭代更新说明（员工管理 2026 年 1 月）', '2026-03-19'],
+              ['产品迭代更新说明（员工管理 2025 年 12 月）', '2026-01-19'],
+              ['入职材料新增附件指引', '2025-11-25'],
+            ].map(item => (
+              <div key={item[0]} style={{ paddingBottom: 10, borderBottom: `1px solid ${colors.tableBorder}` }}>
+                <div style={{ fontSize: '12px', lineHeight: 1.6, color: colors.text }}>{item[0]}</div>
+                <div style={{ fontSize: '11px', color: colors.textMuted, marginTop: 6 }}>{item[1]}</div>
+              </div>
+            ))}
+          </div>
+        </SidePanel>
+
+        <Surface style={{ padding: '16px', background: `linear-gradient(135deg, ${withAlpha(colors.primary, 0.14)}, ${withAlpha('#6EC0D0', 0.18)})`, overflow: 'hidden', position: 'relative' }}>
+          <div style={{ maxWidth: 148, position: 'relative', zIndex: 1 }}>
+            <div style={{ fontSize: '18px', fontWeight: 800, color: colors.primary, marginBottom: 6 }}>电子合同全面升级啦！</div>
+            <div style={{ fontSize: '12px', lineHeight: 1.7, color: colors.textMuted, marginBottom: 10 }}>支持批量签署、签章提醒与材料归档，继续沿用当前系统的配色与后台表达。</div>
+            <button style={{ height: 28, padding: '0 12px', borderRadius: 999, border: 'none', backgroundColor: colors.primary, color: '#fff', fontSize: '12px', cursor: 'pointer' }}>了解更多</button>
+          </div>
+          <div style={{ position: 'absolute', right: 10, bottom: 6, width: 118, height: 70, borderRadius: 18, background: withAlpha('#6EC0D0', 0.2), transform: 'skewX(-18deg)' }} />
+          <div style={{ position: 'absolute', right: 30, bottom: 18, width: 86, height: 52, borderRadius: 14, backgroundColor: '#fff', border: `1px solid ${withAlpha(colors.primary, 0.18)}` }} />
+        </Surface>
+      </div>
+    </div>
+  );
+}
+
+export function EmployeeManagementPage() {
+  const [activeView, setActiveView] = useState<EmployeeViewKey>('roster');
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({ employee: true });
+  const [summary, setSummary] = useState<EmployeeManagementSummary | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchEmployeeManagementSummary()
+      .then((res) => {
+        if (!cancelled) setSummary(res);
+      })
+      .catch(() => {
+        if (!cancelled) setSummary(null);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const navGroups: Array<{
+    key: string;
+    label: string;
+    icon: React.ReactNode;
+    defaultView: EmployeeViewKey;
+    children: Array<{ label: string; view: EmployeeViewKey }>;
+  }> = [
+    {
+      key: 'employee',
+      label: '员工管理',
+      icon: <UserPlus size={14} />,
+      defaultView: 'roster',
+      children: [
+        { label: '员工花名册', view: 'roster' },
+        { label: '员工档案库', view: 'archive' },
+        { label: '档案变更审批', view: 'archiveApprovals' },
+        { label: '员工关怀', view: 'care' },
+        { label: '员工统计报表', view: 'reports' },
+        { label: '员工统计报表（新版）', view: 'reportsNew' },
+      ],
+    },
+    {
+      key: 'employment',
+      label: '任职管理',
+      icon: <Briefcase size={14} />,
+      defaultView: 'pendingOnboard',
+      children: [
+        { label: '入职管理', view: 'pendingOnboard' },
+        { label: '转正管理', view: 'regularized' },
+        { label: '调动管理', view: 'transferring' },
+        { label: '弃入管理', view: 'abandoned' },
+        { label: '借调管理', view: 'concurrent' },
+        { label: '临时调店管理', view: 'tempStore' },
+        { label: '离职管理', view: 'resigning' },
+        { label: '任职记录', view: 'mainJobRecords' },
+        { label: '临时调店记录', view: 'tempStore' },
+      ],
+    },
+    {
+      key: 'contract',
+      label: '员工合同',
+      icon: <FileText size={14} />,
+      defaultView: 'newSign',
+      children: [
+        { label: '合同发起', view: 'newSign' },
+        { label: '合同审批', view: 'contractApproval' },
+        { label: '电子合同签署', view: 'signing' },
+        { label: '合同解除', view: 'contractRelease' },
+        { label: '合同台账', view: 'contractLedger' },
+        { label: '电子签署设置', view: 'esignSettings' },
+      ],
+    },
+    {
+      key: 'settings',
+      label: '员工管理设置',
+      icon: <CircleHelp size={14} />,
+      defaultView: 'settings',
+      children: [
+        { label: '基础设置', view: 'settings' },
+        { label: '黑名单管理', view: 'blacklist' },
+      ],
+    },
+    {
+      key: 'services',
+      label: '员工服务',
+      icon: <Network size={14} />,
+      defaultView: 'certificates',
+      children: [
+        { label: '证明开具', view: 'certificates' },
+        { label: '自定义打印', view: 'customPrint' },
+        { label: '模板管理', view: 'templates' },
+      ],
+    },
+    {
+      key: 'thirdParty',
+      label: '第三方对接',
+      icon: <Folders size={14} />,
+      defaultView: 'thirdParty',
+      children: [
+        { label: '员工对接日志', view: 'thirdParty' },
+      ],
+    },
+  ];
+
+  const employeeSidebarItems: SidebarItem[] = navGroups.flatMap((group) => {
+    const groupActive = group.children.some(child => child.view === activeView);
+    const isExpanded = Boolean(expandedGroups[group.key]);
+    const groupItem: SidebarItem = {
+      label: group.label,
+      icon: group.icon,
+      group: true,
+      groupActive,
+      arrow: true,
+      expanded: isExpanded,
+      onClick: () => setExpandedGroups(prev => ({ ...prev, [group.key]: !prev[group.key] })),
+    };
+    const childItems: SidebarItem[] = isExpanded
+      ? group.children.map(child => ({
+        label: child.label,
+        depth: 1,
+        active: activeView === child.view,
+        onClick: () => setActiveView(child.view),
+      }))
+      : [];
+    return [groupItem, ...childItems];
+  });
+
+  const firstEmployeeView = ['roster', 'archive', 'archiveApprovals', 'care', 'reports', 'reportsNew'].includes(activeView)
+    ? activeView
+    : null;
+  const dataView = activeView === 'home' || firstEmployeeView ? null : employeeViewMap[activeView as Exclude<EmployeeViewKey, 'home'>];
+
+  return (
+    <ModuleWorkspace sidebarTitle="员工管理" sidebarItems={employeeSidebarItems}>
+      {firstEmployeeView ? <FirstEmployeeManagementView view={firstEmployeeView} /> : dataView ? <EmployeeDataTable view={dataView} /> : <EmployeeHomeDashboard summary={summary} />}
+    </ModuleWorkspace>
+  );
 
   return (
     <ModuleWorkspace

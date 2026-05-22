@@ -18,6 +18,8 @@ const WECOM_AUTH_MODE = process.env.WECOM_AUTH_MODE || 'test';
 const WECOM_CORP_ID = process.env.WECOM_CORP_ID || '';
 const WECOM_APP_SECRET = process.env.WECOM_APP_SECRET || process.env.WECOM_SECRET || '';
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(WORKSPACE_DIR, '资料'));
+const EMPLOYEE_REFERENCE_DIR = path.resolve(process.env.EMPLOYEE_REFERENCE_DIR || path.join(WORKSPACE_DIR, '参考图片', '功能', '员工管理'));
+const ORGANIZATION_REFERENCE_DIR = path.resolve(process.env.ORGANIZATION_REFERENCE_DIR || path.join(WORKSPACE_DIR, '参考图片', '功能', '组织管理'));
 const STORE_FILE = path.join(SERVER_DIR, 'data-store.json');
 const MOBILE_TEST_USERS_FILE = path.join(SERVER_DIR, 'mobile-test-users.json');
 const UPLOAD_DIR = path.join(SERVER_DIR, 'uploads');
@@ -166,6 +168,14 @@ function readSheetRows(filePath, sheetMatcher) {
   return { rows, sheetName };
 }
 
+function readSheetRowsByHeader(filePath, sheetMatcher, headerRowIndex = 0) {
+  const wb = xlsx.readFile(filePath, { cellDates: true });
+  const sheetName = sheetMatcher ? (wb.SheetNames.find(sheetMatcher) || wb.SheetNames[0]) : wb.SheetNames[0];
+  const sheet = wb.Sheets[sheetName];
+  const rows = xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false, range: headerRowIndex });
+  return { rows, sheetName };
+}
+
 function normalizeKey(input) {
   return String(input || '').trim().toLowerCase().replace(/[\s_\-()（）【】\[\]：:]/g, '');
 }
@@ -176,6 +186,26 @@ function getByAliases(row, aliases) {
     if (aliasSet.has(normalizeKey(k))) return v;
   }
   return '';
+}
+
+function getReferenceFile(...keywords) {
+  if (!fs.existsSync(EMPLOYEE_REFERENCE_DIR)) return null;
+  const files = [];
+  const walk = (dir) => {
+    for (const name of fs.readdirSync(dir)) {
+      const fullPath = path.join(dir, name);
+      const stat = fs.statSync(fullPath);
+      if (stat.isDirectory()) {
+        walk(fullPath);
+      } else if (/\.xlsx?$/i.test(name)) {
+        files.push({ name, fullPath, stat });
+      }
+    }
+  };
+  walk(EMPLOYEE_REFERENCE_DIR);
+  return files
+    .filter((file) => keywords.every((keyword) => file.name.includes(keyword)))
+    .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs)[0] || null;
 }
 
 function asText(value, fallback = '-') {
@@ -556,6 +586,92 @@ function getOnboardedEmployees() {
   return getStoredRows('onboardedEmployees') || [];
 }
 
+function splitManager(managerText) {
+  const text = asRawText(managerText);
+  if (!text) return { managerName: '', managerNo: '' };
+  const match = text.match(/^(.+?)[-/\s]+([A-Z]{1,4}\d{3,})$/i);
+  return {
+    managerName: asRawText(match?.[1] || text),
+    managerNo: asRawText(match?.[2] || ''),
+  };
+}
+
+function stableShortHash(value) {
+  let hash = 0;
+  for (const char of asRawText(value)) {
+    hash = ((hash * 31) + char.charCodeAt(0)) >>> 0;
+  }
+  return hash.toString(36).toUpperCase().padStart(6, '0').slice(-6);
+}
+
+function normalizeReferenceEmployee(row = {}) {
+  const rawEmployeeNo = asRawText(getByAliases(row, ['*员工号', '员工号', '员工工号', '工号']));
+  const name = asRawText(getByAliases(row, ['*姓名', '姓名']));
+  if (!name) return null;
+  const idCardNo = asRawText(getByAliases(row, ['*证件号码', '证件号码']));
+  const employeeNo = rawEmployeeNo || `TMP${stableShortHash(`${name}-${idCardNo}`)}`;
+  const dept = asText(getByAliases(row, ['部门', '入职末级部门', '离职部门']), '未分配部门');
+  const deptFullPath = asText(getByAliases(row, ['部门全路径', '部门全路径 ', '部门完整路径']), `上海拉迷家具有限公司/${dept}`);
+  const manager = splitManager(getByAliases(row, ['汇报上级', '直属上级']));
+  const hireDate = extractDate(getByAliases(row, ['入职日期', '实际入职日期', '到岗日期'])) || currentDateText();
+  const status = asText(getByAliases(row, ['员工状态', '任职状态']), '在职');
+  const employeeType = asText(getByAliases(row, ['员工类型']), '全职');
+  return {
+    id: `ref_${employeeNo}`,
+    userId: asRawText(getByAliases(row, ['企微账号'])) || `wecom_${employeeNo}`,
+    name,
+    employeeNo,
+    phone: asRawText(getByAliases(row, ['手机号', '手机号码'])),
+    department: dept,
+    deptFullPath,
+    position: asText(getByAliases(row, ['岗位', '职位']), '-'),
+    hireDate,
+    employeeType,
+    employeeStatus: status,
+    managerNo: manager.managerNo,
+    managerName: manager.managerName,
+    businessGroup: asText(getByAliases(row, ['业务分组', '所属']), '-'),
+    workPlace: asText(getByAliases(row, ['工作地点', '办公地点']), '-'),
+    attendanceGroupId: 'group_huatuo',
+    attendanceGroupName: asText(getByAliases(row, ['考勤组']), '华托大厦'),
+    shiftId: 'shift_0900_1800',
+    shiftName: asText(getByAliases(row, ['班次名称', '班次']), '早九晚六'),
+    statScheme: '默认方案',
+    faceStatus: asText(getByAliases(row, ['身份核验']), '未核验'),
+    reviewStatus: '已通过',
+    faceScore: '参考花名册',
+    dataSource: '员工花名册导入',
+    office: MOBILE_OFFICE,
+    createdAt: hireDate,
+    updatedAt: nowText(),
+    idCardType: asText(getByAliases(row, ['*证件类型', '证件类型']), ''),
+    idCardNo,
+    email: asRawText(getByAliases(row, ['邮箱'])),
+    rankCode: asText(getByAliases(row, ['职级代码']), ''),
+    rankName: asText(getByAliases(row, ['职级名称']), ''),
+    nickName: asText(getByAliases(row, ['花名']), ''),
+    identityVerify: asText(getByAliases(row, ['身份核验']), '未核验'),
+    rehired: asText(getByAliases(row, ['是否重入职']), '否'),
+    onboardDate: extractDate(getByAliases(row, ['到岗日期'])) || hireDate,
+    probationPlan: asText(getByAliases(row, ['计划试用期']), ''),
+    regularDatePlan: extractDate(getByAliases(row, ['计划转正日期'])),
+    regularDateActual: extractDate(getByAliases(row, ['实际转正日期'])),
+    seniority: asText(getByAliases(row, ['司龄']), ''),
+    medicalReport: asText(getByAliases(row, ['体检报告提供情况']), ''),
+  };
+}
+
+function getReferenceRosterEmployees() {
+  const file = getReferenceFile('员工花名册');
+  if (!file) return [];
+  try {
+    const { rows } = readSheetRowsByHeader(file.fullPath, (name) => name.includes('花名册'), 1);
+    return rows.map(normalizeReferenceEmployee).filter(Boolean);
+  } catch (_error) {
+    return [];
+  }
+}
+
 function normalizeOnboardedEmployee(input = {}) {
   const employeeNo = asRawText(input.employeeNo || input.empId);
   const name = asRawText(input.name);
@@ -650,7 +766,15 @@ function onboardedEmployeeToAttendanceStatsRow(employee) {
 }
 
 function linkedDemoEmployees() {
-  return getOnboardedEmployees().map(normalizeOnboardedEmployee);
+  const byEmployeeNo = new Map();
+  for (const employee of getReferenceRosterEmployees()) {
+    byEmployeeNo.set(asRawText(employee.employeeNo), employee);
+  }
+  for (const employee of getOnboardedEmployees().map(normalizeOnboardedEmployee)) {
+    const employeeNo = asRawText(employee.employeeNo);
+    byEmployeeNo.set(employeeNo, { ...(byEmployeeNo.get(employeeNo) || {}), ...employee });
+  }
+  return Array.from(byEmployeeNo.values()).filter((employee) => asRawText(employee.employeeNo));
 }
 
 function clockRowsForEmployee(employee) {
@@ -1473,7 +1597,7 @@ function sendLinkedRows(res, sheetName, rows, extra = {}) {
 }
 
 function getOnboardedEmployeeNoSet() {
-  return new Set(getOnboardedEmployees().map((employee) => asRawText(employee.employeeNo)).filter(Boolean));
+  return new Set(employeeMasterRows().map((employee) => asRawText(employee.employeeNo)).filter(Boolean));
 }
 
 function filterRowsToOnboardedEmployees(rows) {
@@ -1487,8 +1611,594 @@ function filterRowsToOnboardedEmployees(rows) {
   });
 }
 
+function employeeMasterRows() {
+  return linkedDemoEmployees();
+}
+
+function employeeRosterRows() {
+  return employeeMasterRows().map((employee, index) => ({
+    id: index + 1,
+    name: employee.name,
+    phone: asText(employee.phone, ''),
+    employeeNo: employee.employeeNo,
+    dept: employee.department,
+    deptFullPath: employee.deptFullPath,
+    position: employee.position,
+    hireDate: employee.hireDate,
+    employeeType: employee.employeeType,
+    employeeStatus: employee.employeeStatus,
+    identityVerify: asText(employee.identityVerify || employee.faceStatus, '未核验'),
+    managerName: employee.managerName,
+    managerNo: employee.managerNo,
+    source: employee.dataSource,
+  }));
+}
+
+function employeeSummary() {
+  const employees = employeeMasterRows();
+  const roster = employeeRosterRows();
+  const contracts = readEmployeeContractRows('all').rows;
+  const onboard = readEmploymentRows('onboarded').rows;
+  const resigning = readEmploymentRows('resigning').rows;
+  const transferring = readEmploymentRows('transferring').rows;
+  const regularized = readEmploymentRows('regularized').rows;
+  const inTrial = roster.filter((row) => /试用/.test(row.employeeStatus)).length;
+  const active = roster.filter((row) => !/离职/.test(row.employeeStatus)).length;
+  return {
+    employeeTotal: employees.length,
+    active,
+    trial: inTrial,
+    outsourced: roster.filter((row) => /外包|爱才|科讯/.test(row.employeeType)).length,
+    fullTime: roster.filter((row) => /全职/.test(row.employeeType)).length,
+    pendingOnboard: readEmploymentRows('pendingOnboard').rows.length,
+    onboarded: onboard.length,
+    resigning: resigning.length,
+    transferring: transferring.length,
+    regularized: regularized.length,
+    contracts: contracts.length,
+    contractPendingSign: contracts.filter((row) => /待|签署中|未签/.test(row.signProgress || row.contractStatus || '')).length,
+    contractExpiring: readEmployeeContractRows('renewal').rows.length,
+    identityUnverified: roster.filter((row) => /未/.test(row.identityVerify)).length,
+    sourceFile: '参考图片/功能/员工管理',
+  };
+}
+
+function normalizeGenericRow(row, index) {
+  return { id: index + 1, ...row };
+}
+
+function readReferenceRows(file, sheetMatcher, options = {}) {
+  if (!file) return { sourceFile: '', sheetName: '', rows: [] };
+  const reader = options.headerRowIndex === undefined ? readSheetRows : readSheetRowsByHeader;
+  const { rows, sheetName } = reader(file.fullPath, sheetMatcher, options.headerRowIndex || 0);
+  return {
+    sourceFile: file.name,
+    sheetName,
+    rows: rows.map(normalizeGenericRow),
+  };
+}
+
+function readEducationRows() {
+  const file = getReferenceFile('教育经历');
+  return readReferenceRows(file, (name) => name.includes('教育经历'));
+}
+
+const EMPLOYMENT_FILE_MAP = {
+  pendingOnboard: ['已入职'],
+  onboarded: ['已入职'],
+  abandoned: ['放弃入职'],
+  regularized: ['已转正'],
+  regularizing: ['全部转正'],
+  transferring: ['调动中'],
+  transferred: ['已调动'],
+  transferAll: ['全部调动'],
+  resigning: ['离职中'],
+  resigned: ['已离职'],
+  resignAll: ['全部离职'],
+  concurrent: ['兼任_20260522'],
+  concurrentRecords: ['兼任记录'],
+  mainJobRecords: ['主岗任职记录'],
+};
+
+function readEmploymentRows(type = 'mainJobRecords') {
+  const keywords = EMPLOYMENT_FILE_MAP[type] || EMPLOYMENT_FILE_MAP.mainJobRecords;
+  const file = getReferenceFile(...keywords);
+  return readReferenceRows(file);
+}
+
+const CONTRACT_FILE_MAP = {
+  all: ['员工合同'],
+  newSign: ['入职新签'],
+  renewal: ['到期续签'],
+  signing: ['签署中'],
+  signRecords: ['全部签署记录'],
+  releaseRecords: ['全部解除记录'],
+};
+
+function normalizeContractRow(row, index) {
+  return {
+    id: index + 1,
+    name: asText(getByAliases(row, ['*姓名', '姓名']), ''),
+    employeeNo: asText(getByAliases(row, ['*员工号', '员工号']), ''),
+    dept: asText(getByAliases(row, ['部门']), ''),
+    deptFullPath: asText(getByAliases(row, ['部门全路径']), ''),
+    position: asText(getByAliases(row, ['岗位']), ''),
+    company: asText(getByAliases(row, ['合同公司']), ''),
+    contractNo: asText(getByAliases(row, ['合同编号']), ''),
+    contractType: asText(getByAliases(row, ['合同类型']), ''),
+    contractTerm: asText(getByAliases(row, ['合同期限']), ''),
+    startDate: extractDate(getByAliases(row, ['合同起始日'])),
+    endDate: extractDate(getByAliases(row, ['合同到期日'])),
+    contractStatus: asText(getByAliases(row, ['合同状态', '员工状态']), ''),
+    signMethod: asText(getByAliases(row, ['签署方式']), ''),
+    signProgress: asText(getByAliases(row, ['签署进度', '电子签署进度']), ''),
+    employeeAuthStatus: asText(getByAliases(row, ['员工授权状态']), ''),
+    dataSource: asText(getByAliases(row, ['数据来源']), ''),
+    initiator: asText(getByAliases(row, ['发起人']), ''),
+    handler: asText(getByAliases(row, ['经办人']), ''),
+    initiateTime: asText(getByAliases(row, ['发起时间']), ''),
+  };
+}
+
+function readEmployeeContractRows(type = 'all') {
+  const keywords = CONTRACT_FILE_MAP[type] || CONTRACT_FILE_MAP.all;
+  const file = getReferenceFile(...keywords);
+  if (!file) return { sourceFile: '', sheetName: '', rows: [] };
+  const { rows, sheetName } = readSheetRows(file.fullPath);
+  return { sourceFile: file.name, sheetName, rows: rows.map(normalizeContractRow).filter((row) => row.name) };
+}
+
+function employeeArchiveApprovalRows() {
+  const employees = employeeRosterRows().filter((row) => /未/.test(row.identityVerify)).slice(0, 80);
+  return employees.map((employee, index) => ({
+    id: index + 1,
+    applicant: employee.name,
+    employeeNo: employee.employeeNo,
+    dept: employee.dept,
+    changeType: '档案信息补全',
+    field: '身份核验 / 联系方式 / 合同信息',
+    status: index % 3 === 0 ? '审批中' : '待提交',
+    initiator: employee.managerName || '系统',
+    createTime: nowText(),
+  }));
+}
+
+function employeeCareRows() {
+  return employeeRosterRows().slice(0, 120).map((employee, index) => ({
+    id: index + 1,
+    name: employee.name,
+    employeeNo: employee.employeeNo,
+    dept: employee.dept,
+    careType: index % 4 === 0 ? '转正提醒' : index % 4 === 1 ? '合同续签提醒' : index % 4 === 2 ? '入职关怀' : '档案补全提醒',
+    dueDate: addDays(currentDateText(), index % 21),
+    status: index % 5 === 0 ? '已处理' : '待跟进',
+    owner: employee.managerName || 'HR',
+  }));
+}
+
+function employeeReportRows() {
+  const deptMap = new Map();
+  for (const employee of employeeRosterRows()) {
+    const key = employee.dept || '未分配部门';
+    const current = deptMap.get(key) || { dept: key, total: 0, active: 0, trial: 0, outsourced: 0 };
+    current.total += 1;
+    if (!/离职/.test(employee.employeeStatus)) current.active += 1;
+    if (/试用/.test(employee.employeeStatus)) current.trial += 1;
+    if (/外包|爱才|科讯/.test(employee.employeeType)) current.outsourced += 1;
+    deptMap.set(key, current);
+  }
+  return Array.from(deptMap.values()).sort((a, b) => b.total - a.total).map((row, index) => ({ id: index + 1, ...row }));
+}
+
+function employeeServiceRows() {
+  return [
+    { id: 1, service: '员工自助档案', scope: '移动端', status: '已启用', linkedData: '花名册 / 合同 / 考勤人员' },
+    { id: 2, service: '入职材料提交', scope: '移动端', status: '已启用', linkedData: '入职管理 / 员工档案库' },
+    { id: 3, service: '合同签署提醒', scope: '移动端 + 管理端', status: '已启用', linkedData: '员工合同 / 人事提醒' },
+    { id: 4, service: '考勤人员同步', scope: '考勤管理', status: '已启用', linkedData: '员工主数据 / 考勤人员 / 排班' },
+  ];
+}
+
+function thirdPartyRows() {
+  return [
+    { id: 1, platform: '企业微信通讯录', data: '姓名、手机号、部门、工号', status: '已接入', syncMode: '按员工号去重' },
+    { id: 2, platform: '电子合同服务', data: '合同状态、签署进度、授权状态', status: '已接入', syncMode: '按合同记录同步' },
+    { id: 3, platform: '考勤小程序', data: '员工号、部门、班次、考勤组', status: '已接入', syncMode: '同源读取员工主数据' },
+  ];
+}
+
+function listOrgReferenceFiles() {
+  if (!fs.existsSync(ORGANIZATION_REFERENCE_DIR)) return [];
+  const files = [];
+  const walk = (dir) => {
+    for (const name of fs.readdirSync(dir)) {
+      const fullPath = path.join(dir, name);
+      const stat = fs.statSync(fullPath);
+      if (stat.isDirectory()) {
+        walk(fullPath);
+      } else if (/\.xlsx?$/i.test(name)) {
+        files.push({ name, fullPath, stat });
+      }
+    }
+  };
+  walk(ORGANIZATION_REFERENCE_DIR);
+  return files.sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
+}
+
+function getOrgReferenceFile(...keywords) {
+  return listOrgReferenceFiles()
+    .filter((file) => keywords.every((keyword) => file.name.includes(keyword)))
+    .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs)[0] || null;
+}
+
+function organizationEmployeesFrom(employees, fullPath, name) {
+  const pathText = asRawText(fullPath);
+  const nameText = asRawText(name);
+  return employees.filter((employee) => {
+    const employeePath = asRawText(employee.deptFullPath);
+    const dept = asRawText(employee.dept);
+    return Boolean(pathText && (employeePath === pathText || employeePath.startsWith(`${pathText}/`))) || Boolean(nameText && dept === nameText);
+  });
+}
+
+function directOrganizationEmployeesFrom(employees, fullPath, name) {
+  const pathText = asRawText(fullPath);
+  const nameText = asRawText(name);
+  return employees.filter((employee) => asRawText(employee.deptFullPath) === pathText || asRawText(employee.dept) === nameText);
+}
+
+function normalizeOrganizationRow(row = {}, index = 0, employees = []) {
+  const fullPath = asText(row.fullPath || getByAliases(row, ['组织全路径', '组织完整路径']), '');
+  const name = asText(row.name || getByAliases(row, ['组织名称']), fullPath.split('/').pop() || '');
+  if (!fullPath || !name) return null;
+  const code = asText(row.code || getByAliases(row, ['组织编码']), `ORG${String(index + 1).padStart(4, '0')}`);
+  const linkedEmployees = organizationEmployeesFrom(employees, fullPath, name);
+  const directEmployees = directOrganizationEmployeesFrom(employees, fullPath, name);
+  return {
+    id: index + 1,
+    code,
+    name,
+    fullPath,
+    parentCode: asText(row.parentCode || getByAliases(row, ['上级组织编码']), ''),
+    institutionNo: asText(row.institutionNo || getByAliases(row, ['机构号']), ''),
+    leader: asText(row.leader || getByAliases(row, ['组织负责人']), ''),
+    approvalManager: asText(row.approvalManager || getByAliases(row, ['审批主管']), ''),
+    employeeCount: asNum(getByAliases(row, ['员工人数'])),
+    linkedEmployeeCount: linkedEmployees.length,
+    directMemberCount: asNum(getByAliases(row, ['直属成员人数'])) || directEmployees.length,
+    linkedDirectMemberCount: directEmployees.length,
+    orgType: asText(row.orgType || getByAliases(row, ['组织类型名称', '组织类型']), '部门'),
+    effectiveDate: extractDate(row.effectiveDate || getByAliases(row, ['生效日期'])),
+    createdAt: asText(row.createdAt || getByAliases(row, ['创建时间']), ''),
+    status: asText(row.status || getByAliases(row, ['状态']), '生效中'),
+    remark: asText(row.remark || getByAliases(row, ['备注']), ''),
+    source: '组织架构信息导出.xlsx',
+  };
+}
+
+function organizationRows() {
+  const file = getOrgReferenceFile('组织架构信息导出');
+  const employees = employeeRosterRows();
+  let rows = [];
+  let sheetName = '';
+  if (file) {
+    const data = readSheetRows(file.fullPath, (name) => name.includes('组织架构'));
+    sheetName = data.sheetName;
+    rows = data.rows.map((row, index) => normalizeOrganizationRow(row, index, employees)).filter(Boolean);
+  }
+
+  const customRows = getStoredRows('organizationStructures') || [];
+  const byCode = new Map(rows.map((row) => [asRawText(row.code), row]));
+  for (const custom of customRows) {
+    const normalized = normalizeOrganizationRow(custom, byCode.size, employees);
+    if (normalized) {
+      byCode.set(asRawText(normalized.code), { ...normalized, ...custom, source: '本地组织管理保存' });
+    }
+  }
+
+  const merged = Array.from(byCode.values()).map((row, index) => ({ ...row, id: index + 1 }));
+  const byOrgCode = new Map(merged.map((row) => [asRawText(row.code), row]));
+  return {
+    sourceFile: file?.name || '本地组织管理保存',
+    sheetName,
+    rows: merged
+      .map((row) => ({
+        ...row,
+        parentName: asText(byOrgCode.get(asRawText(row.parentCode))?.name, ''),
+        depth: Math.max(0, asRawText(row.fullPath).split('/').length - 1),
+      })),
+  };
+}
+
+function rowCellsByHeader(headers, row, headerName) {
+  return headers
+    .map((header, index) => (String(header || '').includes(headerName) ? asRawText(row[index]) : ''))
+    .filter(Boolean);
+}
+
+function positionRows() {
+  const file = getOrgReferenceFile('已有岗位数据') || getOrgReferenceFile('岗位');
+  const employees = employeeRosterRows();
+  let rows = [];
+  let sheetName = '';
+  if (file) {
+    const wb = xlsx.readFile(file.fullPath, { cellDates: true });
+    sheetName = wb.SheetNames.find((name) => name.includes('岗位数据')) || wb.SheetNames[0];
+    const sheetRows = xlsx.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '', raw: false, header: 1 });
+    const headerIndex = sheetRows.findIndex((row) => normalizeKey(row[0]) === normalizeKey('岗位编码') && normalizeKey(row[1]).includes(normalizeKey('岗位名称')));
+    const headers = sheetRows[headerIndex] || [];
+    rows = sheetRows.slice(headerIndex + 1).map((row, index) => {
+      const code = asText(row[0], '');
+      const name = asText(row[1], '');
+      if (!name) return null;
+      const orgs = rowCellsByHeader(headers, row, '所属组织');
+      const companies = rowCellsByHeader(headers, row, '适用公司');
+      const statusIndex = headers.findIndex((header) => String(header || '').includes('岗位状态'));
+      const sequenceIndex = headers.findIndex((header) => String(header || '').includes('岗位序列名称'));
+      const childSequenceIndex = headers.findIndex((header) => String(header || '').includes('岗位子序列名称'));
+      const orderIndex = headers.findIndex((header) => String(header || '').includes('顺序号'));
+      const linkedEmployees = employees.filter((employee) => asRawText(employee.position) === name);
+      return {
+        id: index + 1,
+        code,
+        name,
+        parentCode: asText(row[52], ''),
+        parentName: asText(row[53], ''),
+        orgs,
+        orgText: orgs.slice(0, 3).join('；') || '-',
+        companies,
+        companyText: companies.slice(0, 3).join('；') || '-',
+        sequence: sequenceIndex >= 0 ? asText(row[sequenceIndex], '') : '',
+        subSequence: childSequenceIndex >= 0 ? asText(row[childSequenceIndex], '') : '',
+        sortNo: orderIndex >= 0 ? asText(row[orderIndex], '') : '',
+        status: statusIndex >= 0 ? asText(row[statusIndex], '已启用') : '已启用',
+        linkedEmployeeCount: linkedEmployees.length,
+        linkedEmployees: linkedEmployees.slice(0, 12),
+        source: file.name,
+      };
+    }).filter(Boolean);
+  }
+
+  const customRows = getStoredRows('organizationPositions') || [];
+  const byCode = new Map(rows.map((row) => [asRawText(row.code || row.name), row]));
+  for (const custom of customRows) {
+    const key = asRawText(custom.code || custom.name);
+    if (key) byCode.set(key, { ...custom, source: '本地岗位管理保存' });
+  }
+
+  return { sourceFile: file?.name || '本地岗位管理保存', sheetName, rows: Array.from(byCode.values()).map((row, index) => ({ ...row, id: index + 1 })) };
+}
+
+function rankRows() {
+  const file = getOrgReferenceFile('职级管理');
+  const employees = employeeMasterRows();
+  let rows = [];
+  let sheetName = '';
+  if (file) {
+    const { rows: sheetRows, sheetName: usedSheetName } = readSheetRows(file.fullPath, (name) => name.includes('职级已有数据'));
+    sheetName = usedSheetName;
+    rows = sheetRows.map((row, index) => {
+      const code = asText(getByAliases(row, ['职级代码']), '');
+      const name = asText(getByAliases(row, ['职级名称']), '');
+      if (!code && !name) return null;
+      const linkedCount = employees.filter((employee) => asRawText(employee.rankCode) === code || asRawText(employee.rankName) === name).length;
+      return {
+        id: index + 1,
+        sequence: asText(getByAliases(row, ['岗位序列名称']), ''),
+        subSequence: asText(getByAliases(row, ['岗位子序列名称']), ''),
+        company: asText(getByAliases(row, ['适用公司']), ''),
+        code,
+        name,
+        grade: asText(getByAliases(row, ['职等']), ''),
+        desc: asText(getByAliases(row, ['职级描述']), ''),
+        employeeCount: asNum(getByAliases(row, ['在职人数统计'])),
+        linkedEmployeeCount: linkedCount,
+        status: asText(getByAliases(row, ['职级状态']), '已启用'),
+        source: file.name,
+      };
+    }).filter(Boolean);
+  }
+
+  const customRows = getStoredRows('organizationRanks') || [];
+  const byCode = new Map(rows.map((row) => [asRawText(row.code || row.name), row]));
+  for (const custom of customRows) {
+    const key = asRawText(custom.code || custom.name);
+    if (key) byCode.set(key, { ...custom, source: '本地职级管理保存' });
+  }
+
+  return { sourceFile: file?.name || '本地职级管理保存', sheetName, rows: Array.from(byCode.values()).map((row, index) => ({ ...row, id: index + 1 })) };
+}
+
+function organizationSettingsRows() {
+  const stored = getStoredRows('organizationSettings');
+  if (stored) return stored;
+  return [
+    { id: 1, setting: '组织架构同步', value: '读取组织架构信息导出.xlsx，并与员工花名册部门全路径匹配', status: '已启用', linkedModule: '员工管理 / 考勤人员 / 排班管理' },
+    { id: 2, setting: '岗位联动', value: '岗位名称与员工花名册岗位字段同源', status: '已启用', linkedModule: '员工档案 / 职位管理 / 考勤统计' },
+    { id: 3, setting: '职级联动', value: '职级代码、职级名称用于员工档案和薪酬口径', status: '已启用', linkedModule: '员工管理 / 电子工资单' },
+    { id: 4, setting: '组织管理员', value: '按组织负责人和审批主管字段生成管理范围', status: '已启用', linkedModule: '审批 / 假勤 / 外勤' },
+  ];
+}
+
+function organizationSummary() {
+  const orgs = organizationRows().rows;
+  const positions = positionRows().rows;
+  const ranks = rankRows().rows;
+  const employees = employeeRosterRows();
+  return {
+    organizationTotal: orgs.length,
+    activeOrganizationTotal: orgs.filter((row) => !/停用|失效/.test(row.status)).length,
+    positionTotal: positions.length,
+    enabledPositionTotal: positions.filter((row) => /启用|生效/.test(row.status)).length,
+    rankTotal: ranks.length,
+    linkedEmployeeTotal: employees.length,
+    sourceFile: '参考图片/功能/组织管理 + 员工主数据',
+  };
+}
+
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, dataDir: DATA_DIR, files: listExcelFiles().map((f) => f.name) });
+  res.json({ ok: true, dataDir: DATA_DIR, employeeReferenceDir: EMPLOYEE_REFERENCE_DIR, organizationReferenceDir: ORGANIZATION_REFERENCE_DIR, files: listExcelFiles().map((f) => f.name) });
+});
+
+app.get('/api/organization-management/summary', (_req, res) => {
+  res.json({ ok: true, ...organizationSummary() });
+});
+
+app.get('/api/organization-management/organizations', (_req, res) => {
+  const data = organizationRows();
+  res.json({ sourceFile: data.sourceFile, sheetName: data.sheetName, total: data.rows.length, rows: data.rows });
+});
+
+app.post('/api/organization-management/organizations', (req, res) => {
+  const name = asRawText(req.body?.name);
+  const fullPath = asRawText(req.body?.fullPath);
+  if (!name || !fullPath) return res.status(400).json({ message: '组织名称和组织全路径必填' });
+  const code = asRawText(req.body?.code) || `LOCAL${Date.now()}`;
+  const row = {
+    code,
+    name,
+    fullPath,
+    parentCode: asRawText(req.body?.parentCode),
+    leader: asRawText(req.body?.leader),
+    approvalManager: asRawText(req.body?.approvalManager),
+    orgType: asText(req.body?.orgType, '部门'),
+    status: asText(req.body?.status, '生效中'),
+    effectiveDate: asText(req.body?.effectiveDate, currentDateText()),
+    createdAt: asText(req.body?.createdAt, nowText()),
+    remark: asText(req.body?.remark, ''),
+  };
+  const result = upsertStoredRow('organizationStructures', row, (item) => asRawText(item.code));
+  res.json({ ok: true, created: result.created, row });
+});
+
+app.delete('/api/organization-management/organizations/:code', (req, res) => {
+  const code = asRawText(req.params.code);
+  const rows = getStoredRows('organizationStructures') || [];
+  const nextRows = rows.filter((row) => asRawText(row.code) !== code);
+  setStoredRows('organizationStructures', nextRows);
+  res.json({ ok: true, removed: rows.length - nextRows.length, remaining: nextRows.length });
+});
+
+app.get('/api/organization-management/positions', (_req, res) => {
+  const data = positionRows();
+  res.json({ sourceFile: data.sourceFile, sheetName: data.sheetName, total: data.rows.length, rows: data.rows });
+});
+
+app.post('/api/organization-management/positions', (req, res) => {
+  const name = asRawText(req.body?.name);
+  if (!name) return res.status(400).json({ message: '岗位名称必填' });
+  const row = {
+    code: asRawText(req.body?.code) || `P${Date.now().toString().slice(-5)}`,
+    name,
+    parentName: asRawText(req.body?.parentName),
+    orgs: Array.isArray(req.body?.orgs) ? req.body.orgs.map(asRawText).filter(Boolean) : [asRawText(req.body?.orgText)].filter(Boolean),
+    orgText: asText(req.body?.orgText, ''),
+    companies: Array.isArray(req.body?.companies) ? req.body.companies.map(asRawText).filter(Boolean) : [],
+    companyText: asText(req.body?.companyText, ''),
+    sequence: asText(req.body?.sequence, '专业通道'),
+    subSequence: asText(req.body?.subSequence, ''),
+    status: asText(req.body?.status, '已启用'),
+  };
+  const result = upsertStoredRow('organizationPositions', row, (item) => asRawText(item.code || item.name));
+  res.json({ ok: true, created: result.created, row });
+});
+
+app.get('/api/organization-management/ranks', (_req, res) => {
+  const data = rankRows();
+  res.json({ sourceFile: data.sourceFile, sheetName: data.sheetName, total: data.rows.length, rows: data.rows });
+});
+
+app.post('/api/organization-management/ranks', (req, res) => {
+  const name = asRawText(req.body?.name);
+  const code = asRawText(req.body?.code);
+  if (!name || !code) return res.status(400).json({ message: '职级代码和职级名称必填' });
+  const row = {
+    code,
+    name,
+    sequence: asText(req.body?.sequence, '专业通道'),
+    subSequence: asText(req.body?.subSequence, ''),
+    company: asText(req.body?.company, ''),
+    grade: asText(req.body?.grade, ''),
+    desc: asText(req.body?.desc, ''),
+    status: asText(req.body?.status, '已启用'),
+  };
+  const result = upsertStoredRow('organizationRanks', row, (item) => asRawText(item.code || item.name));
+  res.json({ ok: true, created: result.created, row });
+});
+
+app.get('/api/organization-management/settings', (_req, res) => {
+  const rows = organizationSettingsRows();
+  res.json({ sourceFile: '系统配置 + 组织管理参考图', sheetName: '组织管理设置', total: rows.length, rows });
+});
+
+app.put('/api/organization-management/settings', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  setStoredRows('organizationSettings', rows);
+  res.json({ ok: true, sourceFile: '本地组织管理设置', sheetName: '组织管理设置', total: rows.length, rows });
+});
+
+app.get('/api/employee-management/summary', (_req, res) => {
+  res.json({ ok: true, ...employeeSummary() });
+});
+
+app.get('/api/employee-management/roster', (_req, res) => {
+  const rows = employeeRosterRows();
+  res.json({ sourceFile: '员工花名册 + 本地录入人员', sheetName: '员工花名册', total: rows.length, rows });
+});
+
+app.get('/api/employee-management/archive', (_req, res) => {
+  const rows = employeeRosterRows();
+  res.json({ sourceFile: '员工花名册 + 本地录入人员', sheetName: '员工档案库', total: rows.length, rows });
+});
+
+app.get('/api/employee-management/education', (_req, res) => {
+  const data = readEducationRows();
+  res.json({ sourceFile: data.sourceFile || '教育经历', sheetName: data.sheetName, total: data.rows.length, rows: data.rows });
+});
+
+app.get('/api/employee-management/archive-approvals', (_req, res) => {
+  const rows = employeeArchiveApprovalRows();
+  res.json({ sourceFile: '员工花名册衍生', sheetName: '档案变更审批', total: rows.length, rows });
+});
+
+app.get('/api/employee-management/care', (_req, res) => {
+  const rows = employeeCareRows();
+  res.json({ sourceFile: '员工主数据衍生', sheetName: '员工关怀', total: rows.length, rows });
+});
+
+app.get('/api/employee-management/reports', (_req, res) => {
+  const rows = employeeReportRows();
+  res.json({ sourceFile: '员工花名册汇总', sheetName: '员工统计报表', total: rows.length, rows });
+});
+
+app.get('/api/employee-management/employment/:type', (req, res) => {
+  const data = readEmploymentRows(req.params.type);
+  res.json({ sourceFile: data.sourceFile || '任职管理', sheetName: data.sheetName, total: data.rows.length, rows: data.rows });
+});
+
+app.get('/api/employee-management/contracts/:type', (req, res) => {
+  const data = readEmployeeContractRows(req.params.type);
+  res.json({ sourceFile: data.sourceFile || '员工合同', sheetName: data.sheetName, total: data.rows.length, rows: data.rows });
+});
+
+app.get('/api/employee-management/settings', (_req, res) => {
+  const rows = [
+    { id: 1, setting: '档案字段设置', value: '姓名、工号、手机号、部门、岗位、入职日期、员工状态', status: '已启用' },
+    { id: 2, setting: '花名册字段权限', value: '按员工管理权限范围读取', status: '已启用' },
+    { id: 3, setting: '入职二维码', value: '默认二维码 / 再次登记', status: '已启用' },
+    { id: 4, setting: '考勤人员同步', value: '按员工号与考勤模块自动互通', status: '已启用' },
+  ];
+  res.json({ sourceFile: '系统配置', sheetName: '员工管理设置', total: rows.length, rows });
+});
+
+app.get('/api/employee-management/services', (_req, res) => {
+  const rows = employeeServiceRows();
+  res.json({ sourceFile: '员工服务配置', sheetName: '员工服务', total: rows.length, rows });
+});
+
+app.get('/api/employee-management/third-party', (_req, res) => {
+  const rows = thirdPartyRows();
+  res.json({ sourceFile: '第三方对接配置', sheetName: '第三方对接', total: rows.length, rows });
 });
 
 app.get('/api/settings-linkage-report', (_req, res) => {
@@ -2125,12 +2835,12 @@ app.put('/api/settings-shifts', (req, res) => {
 });
 
 app.get('/api/settings-face', (_req, res) => {
-  return sendLinkedRows(res, 'onboardedEmployees', getSettingsFaceRows());
+  return sendLinkedRows(res, 'employeeMaster', getSettingsFaceRows());
 });
 
 app.get('/api/settings-people', (_req, res) => {
-  const onboardedRows = getOnboardedEmployees().map(onboardedEmployeeToPeopleRow);
-  return sendLinkedRows(res, 'onboardedEmployees', onboardedRows);
+  const rows = employeeMasterRows().map(onboardedEmployeeToPeopleRow);
+  return sendLinkedRows(res, 'employeeMaster', rows);
 });
 
 app.post('/api/employees/onboard', (req, res) => {
@@ -2493,7 +3203,7 @@ function getStatSchemeSettingRows() {
 }
 
 function getSettingsFaceRows() {
-  return getOnboardedEmployees().map(onboardedEmployeeToFaceRow);
+  return employeeMasterRows().map(onboardedEmployeeToFaceRow);
 }
 
 function parseShiftClockTimes(value) {

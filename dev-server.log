@@ -1,118 +1,248 @@
 
 > @figma/my-make-file@0.0.1 dev
-> vite --host 0.0.0.0 --port 5173
+> vite --host 127.0.0.1 --port 5179
 
 
-  [32m[1mVITE[22m v6.3.5[39m  [2mready in [0m[1m1322[22m[2m[0m ms[22m
+  [32m[1mVITE[22m v6.3.5[39m  [2mready in [0m[1m284[22m[2m[0m ms[22m
 
-  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
-  [32m➜[39m  [1mNetwork[22m: [36mhttp://198.18.0.1:[1m5173[22m/[39m
-  [32m➜[39m  [1mNetwork[22m: [36mhttp://192.168.8.203:[1m5173[22m/[39m
-  [32m➜[39m  [1mNetwork[22m: [36mhttp://192.168.83.1:[1m5173[22m/[39m
-  [32m➜[39m  [1mNetwork[22m: [36mhttp://192.168.189.1:[1m5173[22m/[39m
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5179[22m/[39m
 [2m[32m  ➜[39m[22m[2m  press [22m[1mh + enter[22m[2m to show help[22m
-[2m13:52:55[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/MonthlyAttendanceSummary.tsx, /src/styles/index.css[22m
-[2m13:56:47[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\components\Sidebar.tsx, /src/styles/index.css[22m
-[2m13:56:47[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/components/Layout.tsx, /src/styles/index.css[22m
-[2m13:56:47[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/App.tsx, /src/styles/index.css[22m
-[2m13:57:05[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/ClockInRecords.tsx, /src/styles/index.css[22m
-[2m13:58:59[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/ClockInRecords.tsx, /src/styles/index.css[22m
-[2m14:05:11[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OvertimeManagement.tsx, /src/styles/index.css[22m
-[2m14:05:20[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\components\Sidebar.tsx, /src/styles/index.css[22m
-[2m14:05:20[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/components/Layout.tsx, /src/styles/index.css[22m
-[2m14:05:20[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/App.tsx, /src/styles/index.css[22m
-[2m14:12:26[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/FieldWork.tsx, /src/styles/index.css[22m
-[2m14:15:28[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\components\Sidebar.tsx, /src/styles/index.css[22m
-[2m14:15:28[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/App.tsx, /src/styles/index.css[22m
-[2m14:15:28[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/components/Layout.tsx, /src/styles/index.css[22m
-[2m14:16:58[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/ScheduleManagement.tsx, /src/styles/index.css[22m
-[2m14:18:56[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\components\Sidebar.tsx, /src/styles/index.css[22m
-[2m14:18:56[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/App.tsx, /src/styles/index.css[22m
-[2m14:18:56[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/components/Layout.tsx, /src/styles/index.css[22m
-[2m14:21:35[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/LeaveManagement.tsx, /src/styles/index.css[22m
-[2m14:25:17[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\components\Sidebar.tsx, /src/styles/index.css[22m
-[2m14:25:32[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/components/Layout.tsx, /src/styles/index.css[22m
-[2m14:29:48[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceSettings.tsx, /src/styles/index.css[22m
-[2m14:33:07[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceSettings.tsx, /src/styles/index.css[22m
-[2m14:33:11[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceSettings.tsx, /src/styles/index.css[22m
-[2m14:33:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceSettings.tsx, /src/styles/index.css[22m
-[2m14:33:28[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceSettings.tsx, /src/styles/index.css[22m
-[2m14:33:35[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceSettings.tsx, /src/styles/index.css[22m
-[2m14:33:41[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceSettings.tsx, /src/styles/index.css[22m
-[2m14:33:51[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceSettings.tsx, /src/styles/index.css[22m
-[2m14:41:30[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/App.tsx, /src/styles/index.css[22m
-[2m14:41:30[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/App.tsx, /src/styles/index.css[22m
-[2m14:41:40[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\components\TopNav.tsx, /src/styles/index.css[22m
-[2m14:41:40[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/UnderDevelopment.tsx, /src/styles/index.css[22m
-[2m14:42:55[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/App.tsx, /src/styles/index.css[22m
-[2m14:59:50[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/FieldWork.tsx, /src/styles/index.css[22m
-[2m15:00:03[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/FieldWork.tsx, /src/styles/index.css[22m
-[2m15:00:11[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/FieldWork.tsx, /src/styles/index.css[22m
-[2m15:00:25[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/FieldWork.tsx, /src/styles/index.css[22m
-[2m15:00:40[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/FieldWork.tsx, /src/styles/index.css[22m
-[2m15:01:08[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/FieldWork.tsx, /src/styles/index.css[22m
-[2m15:01:43[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OvertimeManagement.tsx, /src/styles/index.css[22m
-[2m15:01:59[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OvertimeManagement.tsx, /src/styles/index.css[22m
-[2m15:02:08[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OvertimeManagement.tsx, /src/styles/index.css[22m
-[2m15:02:26[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OvertimeManagement.tsx, /src/styles/index.css[22m
-[2m15:03:00[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OvertimeManagement.tsx, /src/styles/index.css[22m
-[2m15:03:17[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/WorkData.tsx, /src/styles/index.css[22m
-[2m15:03:30[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/WorkData.tsx, /src/styles/index.css[22m
-[2m15:03:40[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/WorkData.tsx, /src/styles/index.css[22m
-[2m15:03:54[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/WorkData.tsx, /src/styles/index.css[22m
-[2m15:04:15[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AnomalyManagement.tsx, /src/styles/index.css[22m
-[2m15:05:16[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AnomalyManagement.tsx, /src/styles/index.css[22m
-[2m15:05:32[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AnomalyManagement.tsx, /src/styles/index.css[22m
-[2m15:05:47[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AnomalyManagement.tsx, /src/styles/index.css[22m
-[2m15:05:57[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AnomalyManagement.tsx, /src/styles/index.css[22m
-[2m15:06:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AnomalyManagement.tsx, /src/styles/index.css[22m
-[2m15:06:33[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/LeaveManagement.tsx, /src/styles/index.css[22m
-[2m15:06:47[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/LeaveManagement.tsx, /src/styles/index.css[22m
-[2m15:07:04[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/LeaveManagement.tsx, /src/styles/index.css[22m
-[2m15:07:25[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/LeaveManagement.tsx, /src/styles/index.css[22m
-[2m15:07:49[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/LeaveManagement.tsx, /src/styles/index.css[22m
-[2m15:08:20[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/LeaveManagement.tsx, /src/styles/index.css[22m
-[2m15:08:35[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/LeaveManagement.tsx, /src/styles/index.css[22m
-[2m15:08:52[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/LeaveManagement.tsx, /src/styles/index.css[22m
-[2m15:09:06[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/LeaveManagement.tsx, /src/styles/index.css[22m
-[2m15:09:25[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceSettings.tsx, /src/styles/index.css[22m
-[2m15:09:38[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceSettings.tsx, /src/styles/index.css[22m
-[2m15:27:00[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:27:00[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:27:40[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:28:29[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:28:29[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:28:29[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:37:53[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:37:53[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:37:53[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:37:54[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:41:56[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:41:56[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:42:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:42:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:42:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:43:00[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:43:00[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:43:34[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:44:00[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/AttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:52:38[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/DailyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:52:39[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/DailyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:53:13[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/DailyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:53:38[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/DailyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:53:38[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/DailyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:53:38[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/DailyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:53:56[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/DailyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:53:56[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/DailyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:54:59[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/MonthlyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:54:59[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/MonthlyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:55:37[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/MonthlyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:55:37[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/MonthlyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:55:54[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/MonthlyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:56:38[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/DailyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:57:07[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/MonthlyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:57:42[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/MonthlyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:57:53[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/MonthlyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:58:33[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/MonthlyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m15:58:56[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/DailyAttendanceStats.tsx, /src/styles/index.css[22m
-[2m16:00:48[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/MonthlyAttendanceStats.tsx, /src/styles/index.css[22m
+[2m11:05:51[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/index.css, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\OvertimeManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\FieldWork.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\MonthlyAttendanceSummary.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\StatItemsManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\WorkData.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\MonthlyAttendanceStats.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\ExternalDataManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\AttendanceStats.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\AnomalyManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\ScheduleManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\DailyAttendanceStats.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\AttendanceSettings.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\LeaveManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\ClockInRecords.tsx[22m
+[2m11:37:44[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m11:38:14[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m11:40:49[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m11:40:49[22m [31m[1m[vite][22m[39m [31mInternal server error: D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx: Unexpected token, expected "," (550:79)
+
+[0m [90m 548 |[31m     title[33m:[31m [32m'员工合同'[31m[33m,[31m
+ [90m 549 |[31m     desc[33m:[31m [32m'员工合同主表。'[31m[33m,[31m
+[31m[1m>[22m[31m[90m 550 |[31m     fetcher[33m:[31m () [33m=>[31m fetchEmployeeContracts([32m'all'[31m) [36mas[31m [33mEmployeeDataView[31m[[32m'fetcher'[31m]()[33m,[31m
+ [90m     |[31m                                                                                [31m[1m^[22m[31m
+ [90m 551 |[31m     columns[33m:[31m [
+ [90m 552 |[31m       { key[33m:[31m [32m'name'[31m[33m,[31m label[33m:[31m [32m'姓名'[31m[33m,[31m width[33m:[31m [35m110[31m }[33m,[31m
+ [90m 553 |[31m       { key[33m:[31m [32m'employeeNo'[31m[33m,[31m label[33m:[31m [32m'员工号'[31m[33m,[31m width[33m:[31m [35m110[31m }[33m,[31m[0m[39m
+  Plugin: [35mvite:react-babel[39m
+  File: [36mD:/我的应用/打卡前+后/后端/src/app/pages/BusinessModules.tsx[39m:550:79
+[33m  555|        { key: 'position', label: '岗位', width: 150 },
+  556|        { key: 'company', label: '合同公司', width: 220 },
+  557|        { key: 'contractType', label: '合同类型', width: 160 },
+     |                               ^
+  558|        { key: 'startDate', label: '起始日', width: 120 },
+  559|        { key: 'endDate', label: '到期日', width: 120 },[39m
+      at constructor (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:365:19)
+      at TypeScriptParserMixin.raise (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:6616:19)
+      at TypeScriptParserMixin.unexpected (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:6636:16)
+      at TypeScriptParserMixin.expect (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:6916:12)
+      at TypeScriptParserMixin.parseObjectLike (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11839:14)
+      at TypeScriptParserMixin.parseExprAtom (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11356:23)
+      at TypeScriptParserMixin.parseExprAtom (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:4776:20)
+      at TypeScriptParserMixin.parseExprSubscripts (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11098:23)
+      at TypeScriptParserMixin.parseUpdate (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11083:21)
+      at TypeScriptParserMixin.parseMaybeUnary (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11063:23)
+      at TypeScriptParserMixin.parseMaybeUnary (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9854:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10916:61)
+      at TypeScriptParserMixin.parseExprOps (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10921:23)
+      at TypeScriptParserMixin.parseMaybeConditional (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10898:23)
+      at TypeScriptParserMixin.parseMaybeAssign (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10848:21)
+      at TypeScriptParserMixin.parseMaybeAssign (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9803:20)
+      at D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10817:39
+      at TypeScriptParserMixin.allowInAnd (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12443:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10817:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12510:17)
+      at TypeScriptParserMixin.parseObjectProperty (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11967:83)
+      at TypeScriptParserMixin.parseObjPropValue (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11995:100)
+      at TypeScriptParserMixin.parseObjPropValue (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9761:18)
+      at TypeScriptParserMixin.parsePropertyDefinition (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11932:17)
+      at TypeScriptParserMixin.parseObjectLike (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11849:21)
+      at TypeScriptParserMixin.parseExprAtom (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11356:23)
+      at TypeScriptParserMixin.parseExprAtom (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:4776:20)
+      at TypeScriptParserMixin.parseExprSubscripts (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11098:23)
+      at TypeScriptParserMixin.parseUpdate (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11083:21)
+      at TypeScriptParserMixin.parseMaybeUnary (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11063:23)
+      at TypeScriptParserMixin.parseMaybeUnary (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9854:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10916:61)
+      at TypeScriptParserMixin.parseExprOps (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10921:23)
+      at TypeScriptParserMixin.parseMaybeConditional (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10898:23)
+      at TypeScriptParserMixin.parseMaybeAssign (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10848:21)
+      at TypeScriptParserMixin.parseMaybeAssign (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9803:20)
+      at D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10817:39
+      at TypeScriptParserMixin.allowInAnd (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12438:16)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10817:17)
+      at TypeScriptParserMixin.parseVar (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:13401:91)
+      at TypeScriptParserMixin.parseVarStatement (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:13247:10)
+      at TypeScriptParserMixin.parseVarStatement (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9425:31)
+      at TypeScriptParserMixin.parseStatementContent (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12868:23)
+      at TypeScriptParserMixin.parseStatementContent (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9525:18)
+      at TypeScriptParserMixin.parseStatementLike (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12784:17)
+      at TypeScriptParserMixin.parseModuleItem (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12761:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:13333:36)
+      at TypeScriptParserMixin.parseBlockBody (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:13326:10)
+      at TypeScriptParserMixin.parseProgram (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12639:10)
+      at TypeScriptParserMixin.parseTopLevel (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12629:25)
+[2m11:41:42[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m11:41:42[22m [31m[1m[vite][22m[39m [31mInternal server error: D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx: Unexpected token, expected "," (550:79)
+
+[0m [90m 548 |[31m     title[33m:[31m [32m'员工合同'[31m[33m,[31m
+ [90m 549 |[31m     desc[33m:[31m [32m'员工合同主表。'[31m[33m,[31m
+[31m[1m>[22m[31m[90m 550 |[31m     fetcher[33m:[31m () [33m=>[31m fetchEmployeeContracts([32m'all'[31m) [36mas[31m [33mEmployeeDataView[31m[[32m'fetcher'[31m]()[33m,[31m
+ [90m     |[31m                                                                                [31m[1m^[22m[31m
+ [90m 551 |[31m     columns[33m:[31m [
+ [90m 552 |[31m       { key[33m:[31m [32m'name'[31m[33m,[31m label[33m:[31m [32m'姓名'[31m[33m,[31m width[33m:[31m [35m110[31m }[33m,[31m
+ [90m 553 |[31m       { key[33m:[31m [32m'employeeNo'[31m[33m,[31m label[33m:[31m [32m'员工号'[31m[33m,[31m width[33m:[31m [35m110[31m }[33m,[31m[0m[39m
+  Plugin: [35mvite:react-babel[39m
+  File: [36mD:/我的应用/打卡前+后/后端/src/app/pages/BusinessModules.tsx[39m:550:79
+[33m  555|        { key: 'position', label: '岗位', width: 150 },
+  556|        { key: 'company', label: '合同公司', width: 220 },
+  557|        { key: 'contractType', label: '合同类型', width: 160 },
+     |                               ^
+  558|        { key: 'startDate', label: '起始日', width: 120 },
+  559|        { key: 'endDate', label: '到期日', width: 120 },[39m
+      at constructor (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:365:19)
+      at TypeScriptParserMixin.raise (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:6616:19)
+      at TypeScriptParserMixin.unexpected (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:6636:16)
+      at TypeScriptParserMixin.expect (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:6916:12)
+      at TypeScriptParserMixin.parseObjectLike (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11839:14)
+      at TypeScriptParserMixin.parseExprAtom (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11356:23)
+      at TypeScriptParserMixin.parseExprAtom (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:4776:20)
+      at TypeScriptParserMixin.parseExprSubscripts (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11098:23)
+      at TypeScriptParserMixin.parseUpdate (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11083:21)
+      at TypeScriptParserMixin.parseMaybeUnary (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11063:23)
+      at TypeScriptParserMixin.parseMaybeUnary (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9854:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10916:61)
+      at TypeScriptParserMixin.parseExprOps (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10921:23)
+      at TypeScriptParserMixin.parseMaybeConditional (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10898:23)
+      at TypeScriptParserMixin.parseMaybeAssign (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10848:21)
+      at TypeScriptParserMixin.parseMaybeAssign (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9803:20)
+      at D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10817:39
+      at TypeScriptParserMixin.allowInAnd (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12443:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10817:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12510:17)
+      at TypeScriptParserMixin.parseObjectProperty (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11967:83)
+      at TypeScriptParserMixin.parseObjPropValue (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11995:100)
+      at TypeScriptParserMixin.parseObjPropValue (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9761:18)
+      at TypeScriptParserMixin.parsePropertyDefinition (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11932:17)
+      at TypeScriptParserMixin.parseObjectLike (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11849:21)
+      at TypeScriptParserMixin.parseExprAtom (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11356:23)
+      at TypeScriptParserMixin.parseExprAtom (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:4776:20)
+      at TypeScriptParserMixin.parseExprSubscripts (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11098:23)
+      at TypeScriptParserMixin.parseUpdate (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11083:21)
+      at TypeScriptParserMixin.parseMaybeUnary (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11063:23)
+      at TypeScriptParserMixin.parseMaybeUnary (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9854:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10916:61)
+      at TypeScriptParserMixin.parseExprOps (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10921:23)
+      at TypeScriptParserMixin.parseMaybeConditional (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10898:23)
+      at TypeScriptParserMixin.parseMaybeAssign (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10848:21)
+      at TypeScriptParserMixin.parseMaybeAssign (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9803:20)
+      at D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10817:39
+      at TypeScriptParserMixin.allowInAnd (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12438:16)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10817:17)
+      at TypeScriptParserMixin.parseVar (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:13401:91)
+      at TypeScriptParserMixin.parseVarStatement (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:13247:10)
+      at TypeScriptParserMixin.parseVarStatement (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9425:31)
+      at TypeScriptParserMixin.parseStatementContent (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12868:23)
+      at TypeScriptParserMixin.parseStatementContent (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9525:18)
+      at TypeScriptParserMixin.parseStatementLike (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12784:17)
+      at TypeScriptParserMixin.parseModuleItem (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12761:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:13333:36)
+      at TypeScriptParserMixin.parseBlockBody (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:13326:10)
+      at TypeScriptParserMixin.parseProgram (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12639:10)
+      at TypeScriptParserMixin.parseTopLevel (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12629:25)
+[2m11:43:34[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m11:43:35[22m [31m[1m[vite][22m[39m [31mInternal server error: D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx: Unexpected token, expected "," (550:79)
+
+[0m [90m 548 |[31m     title[33m:[31m [32m'员工合同'[31m[33m,[31m
+ [90m 549 |[31m     desc[33m:[31m [32m'员工合同主表。'[31m[33m,[31m
+[31m[1m>[22m[31m[90m 550 |[31m     fetcher[33m:[31m () [33m=>[31m fetchEmployeeContracts([32m'all'[31m) [36mas[31m [33mEmployeeDataView[31m[[32m'fetcher'[31m]()[33m,[31m
+ [90m     |[31m                                                                                [31m[1m^[22m[31m
+ [90m 551 |[31m     columns[33m:[31m [
+ [90m 552 |[31m       { key[33m:[31m [32m'name'[31m[33m,[31m label[33m:[31m [32m'姓名'[31m[33m,[31m width[33m:[31m [35m110[31m }[33m,[31m
+ [90m 553 |[31m       { key[33m:[31m [32m'employeeNo'[31m[33m,[31m label[33m:[31m [32m'员工号'[31m[33m,[31m width[33m:[31m [35m110[31m }[33m,[31m[0m[39m
+  Plugin: [35mvite:react-babel[39m
+  File: [36mD:/我的应用/打卡前+后/后端/src/app/pages/BusinessModules.tsx[39m:550:79
+[33m  555|        { key: 'position', label: '岗位', width: 150 },
+  556|        { key: 'company', label: '合同公司', width: 220 },
+  557|        { key: 'contractType', label: '合同类型', width: 160 },
+     |                               ^
+  558|        { key: 'startDate', label: '起始日', width: 120 },
+  559|        { key: 'endDate', label: '到期日', width: 120 },[39m
+      at constructor (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:365:19)
+      at TypeScriptParserMixin.raise (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:6616:19)
+      at TypeScriptParserMixin.unexpected (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:6636:16)
+      at TypeScriptParserMixin.expect (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:6916:12)
+      at TypeScriptParserMixin.parseObjectLike (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11839:14)
+      at TypeScriptParserMixin.parseExprAtom (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11356:23)
+      at TypeScriptParserMixin.parseExprAtom (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:4776:20)
+      at TypeScriptParserMixin.parseExprSubscripts (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11098:23)
+      at TypeScriptParserMixin.parseUpdate (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11083:21)
+      at TypeScriptParserMixin.parseMaybeUnary (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11063:23)
+      at TypeScriptParserMixin.parseMaybeUnary (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9854:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10916:61)
+      at TypeScriptParserMixin.parseExprOps (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10921:23)
+      at TypeScriptParserMixin.parseMaybeConditional (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10898:23)
+      at TypeScriptParserMixin.parseMaybeAssign (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10848:21)
+      at TypeScriptParserMixin.parseMaybeAssign (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9803:20)
+      at D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10817:39
+      at TypeScriptParserMixin.allowInAnd (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12443:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10817:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12510:17)
+      at TypeScriptParserMixin.parseObjectProperty (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11967:83)
+      at TypeScriptParserMixin.parseObjPropValue (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11995:100)
+      at TypeScriptParserMixin.parseObjPropValue (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9761:18)
+      at TypeScriptParserMixin.parsePropertyDefinition (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11932:17)
+      at TypeScriptParserMixin.parseObjectLike (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11849:21)
+      at TypeScriptParserMixin.parseExprAtom (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11356:23)
+      at TypeScriptParserMixin.parseExprAtom (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:4776:20)
+      at TypeScriptParserMixin.parseExprSubscripts (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11098:23)
+      at TypeScriptParserMixin.parseUpdate (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11083:21)
+      at TypeScriptParserMixin.parseMaybeUnary (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:11063:23)
+      at TypeScriptParserMixin.parseMaybeUnary (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9854:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10916:61)
+      at TypeScriptParserMixin.parseExprOps (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10921:23)
+      at TypeScriptParserMixin.parseMaybeConditional (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10898:23)
+      at TypeScriptParserMixin.parseMaybeAssign (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10848:21)
+      at TypeScriptParserMixin.parseMaybeAssign (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9803:20)
+      at D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10817:39
+      at TypeScriptParserMixin.allowInAnd (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12438:16)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:10817:17)
+      at TypeScriptParserMixin.parseVar (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:13401:91)
+      at TypeScriptParserMixin.parseVarStatement (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:13247:10)
+      at TypeScriptParserMixin.parseVarStatement (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9425:31)
+      at TypeScriptParserMixin.parseStatementContent (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12868:23)
+      at TypeScriptParserMixin.parseStatementContent (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:9525:18)
+      at TypeScriptParserMixin.parseStatementLike (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12784:17)
+      at TypeScriptParserMixin.parseModuleItem (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12761:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:13333:36)
+      at TypeScriptParserMixin.parseBlockBody (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:13326:10)
+      at TypeScriptParserMixin.parseProgram (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12639:10)
+      at TypeScriptParserMixin.parseTopLevel (D:\我的应用\打卡前+后\后端\node_modules\@babel\parser\lib\index.js:12629:25)
+[2m11:44:51[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m12:02:02[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m12:03:02[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m12:05:57[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m13:09:45[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m13:10:15[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m13:11:38[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m13:22:27[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m13:23:56[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m13:24:33[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m13:25:37[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m13:31:04[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\components\TopNav.tsx, /src/styles/index.css[22m
+[2m13:46:21[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m13:51:32[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m13:51:47[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m13:52:04[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m14:00:14[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m14:00:33[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m14:00:56[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m14:01:20[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m14:01:57[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m14:02:27[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m14:08:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m14:10:09[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m14:10:26[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m14:10:38[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m14:19:11[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /src/styles/index.css[22m
+[2m14:26:58[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/index.css, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\OvertimeManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\FieldWork.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\MonthlyAttendanceSummary.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\StatItemsManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\WorkData.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\MonthlyAttendanceStats.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\ExternalDataManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\AttendanceStats.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\AnomalyManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\ScheduleManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\DailyAttendanceStats.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\AttendanceSettings.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\LeaveManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\ClockInRecords.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx[22m
+[2m14:28:57[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/App.tsx, /src/styles/index.css[22m
+[2m14:41:41[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m14:43:39[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/@fs/D:\我的应用\打卡前+后\后端\src\app\pages\OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m14:43:51[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/index.css, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\OvertimeManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\FieldWork.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\MonthlyAttendanceSummary.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\StatItemsManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\WorkData.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\MonthlyAttendanceStats.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\ExternalDataManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\AttendanceStats.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\AnomalyManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\ScheduleManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\DailyAttendanceStats.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\AttendanceSettings.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\LeaveManagement.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\ClockInRecords.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\BusinessModules.tsx, /@fs/D:\我的应用\打卡前+后\后端\src\app\pages\OrganizationManagement.tsx[22m

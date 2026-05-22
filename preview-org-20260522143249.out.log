@@ -1,0 +1,57 @@
+
+  [32m[1mVITE[22m v6.3.5[39m  [2mready in [0m[1m258[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m4180[22m/[39m
+[2m[32m  ➜[39m[22m[2m  press [22m[1mh + enter[22m[2m to show help[22m
+[2m14:41:41[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m14:43:39[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m14:43:51[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/index.css, /src/app/pages/AttendanceStats.tsx, /src/app/pages/ScheduleManagement.tsx, /src/app/pages/MonthlyAttendanceStats.tsx, /src/app/pages/StatItemsManagement.tsx, /src/app/pages/AnomalyManagement.tsx, /src/app/pages/MonthlyAttendanceSummary.tsx, /src/app/pages/OvertimeManagement.tsx, /src/app/pages/FieldWork.tsx, /src/app/pages/WorkData.tsx, /src/app/pages/ExternalDataManagement.tsx, /src/app/pages/ClockInRecords.tsx, /src/app/pages/DailyAttendanceStats.tsx, /src/app/pages/LeaveManagement.tsx, /src/app/pages/BusinessModules.tsx, /src/app/pages/AttendanceSettings.tsx[22m
+[2m14:47:02[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m14:52:31[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m14:56:28[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m14:57:15[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m14:57:47[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:02:20[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:02:29[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:06:25[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:07:14[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:07:37[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:08:44[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:19:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:19:36[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:19:50[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:20:02[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:20:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:20:39[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:21:28[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:22:41[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:23:01[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:32:16[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:32:36[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:32:56[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:33:19[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:33:32[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:33:53[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:34:28[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:34:59[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:36:03[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:36:22[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m15:36:39[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m16:14:52[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m16:32:08[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m16:32:22[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m16:32:48[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m16:33:07[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m16:33:35[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m16:34:32[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m16:34:55[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m16:35:54[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m16:36:20[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m16:47:35[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m16:47:49[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m17:00:52[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m17:01:05[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m17:01:14[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m17:03:06[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m17:03:55[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m
+[2m17:04:05[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/app/pages/OrganizationManagement.tsx, /src/styles/index.css[22m

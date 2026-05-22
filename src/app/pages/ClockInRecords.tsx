@@ -3,9 +3,15 @@ import { useTheme } from '../context/ThemeContext';
 import { todayISO } from '../utils/date';
 import {
   fetchClockRecords,
+  fetchFieldClockRecords,
   fetchMakeupClockRecords,
   fetchPhotoClockRecords,
+  fetchSettingsPeople,
+  saveClockRecords,
+  saveFieldClockRecords,
+  saveMakeupClockRecords,
   type ClockRecord as RealClockRecord,
+  type FieldClockRecord as RealFieldClockRecord,
   type MakeupClockRecord as RealMakeupClockRecord,
   type PhotoClockRecord as RealPhotoClockRecord,
 } from '../api/realData';
@@ -37,11 +43,15 @@ type FieldRecord = {
   initiateTime: string; completeTime: string; location: string;
   note: string; hasPhoto: boolean; reviewStatus: string;
 };
+type FieldDraft = Omit<FieldRecord, 'id'> & { employeeKey: string; initiatorKey: string; startTime: string; endTime: string };
 type PhotoRecord = {
   id: number; name: string; empId: string; dept: string;
   date: string; clockTime: string; locateTime: string; completeTime: string;
   location: string; note: string; hasPhoto: boolean; photoUrl?: string; photoTakenAt?: string; reviewStatus: string;
 };
+type ClockEmployeeOption = { name: string; employeeNo: string; department: string };
+type ClockDraft = Omit<ClockRecord, 'id' | 'photoUrl' | 'photoTakenAt'> & { employeeKey: string };
+type MakeupDraft = Omit<MakeupRecord, 'id'> & { applicantKey: string; initiatorKey: string };
 
 // ─── Mock Data ────────────────────────────────
 const CLOCK_RECORDS: ClockRecord[] = [];
@@ -101,6 +111,102 @@ function showFieldClockDetail(row: FieldRecord) {
 
 function showPhotoClockDetail(row: PhotoRecord) {
   window.alert(`拍照打卡记录详情\n姓名：${row.name} ${row.empId}\n部门：${row.dept}\n打卡时间：${row.date} ${row.clockTime}\n定位完成：${row.completeTime}\n地点：${row.location}\n审核状态：${row.reviewStatus}`);
+}
+
+function clockEmployeeKey(employee: ClockEmployeeOption) {
+  return `${employee.employeeNo}|${employee.name}`;
+}
+
+function peopleRowsToClockOptions(rows: Array<Array<unknown>>): ClockEmployeeOption[] {
+  return rows
+    .map(row => ({
+      name: String(row[0] ?? '').trim(),
+      employeeNo: String(row[1] ?? '').trim(),
+      department: String(row[2] ?? '').trim() || '-',
+    }))
+    .filter(employee => employee.name && employee.employeeNo);
+}
+
+function currentClockDateTime() {
+  const now = new Date();
+  const date = now.toISOString().slice(0, 10);
+  const time = now.toTimeString().slice(0, 8);
+  return { date, time, dateTime: `${date} ${time.slice(0, 5)}` };
+}
+
+function defaultClockDraft(employees: ClockEmployeeOption[], base?: Partial<ClockRecord>): ClockDraft {
+  const current = currentClockDateTime();
+  const employee = employees.find(item => item.employeeNo === base?.empId) || employees[0];
+  return {
+    employeeKey: employee ? clockEmployeeKey(employee) : '',
+    name: base?.name || employee?.name || '',
+    empId: base?.empId || employee?.employeeNo || '',
+    dept: base?.dept || employee?.department || '',
+    date: base?.date || current.date,
+    time: base?.time || current.time,
+    source: base?.source || 'HR手动添加',
+    device: base?.device || '后台录入',
+    location: base?.location || '总部',
+    workLocation: base?.workLocation || '总部',
+    freeWork: base?.freeWork === '下班' ? '下班' : '上班',
+    note: base?.note || '预制打卡记录',
+    hasPhoto: Boolean(base?.hasPhoto),
+    creator: base?.creator || 'HR',
+    createTime: base?.createTime || current.dateTime,
+    modifier: base?.modifier || '',
+    modifyTime: base?.modifyTime || '',
+  };
+}
+
+function defaultMakeupDraft(employees: ClockEmployeeOption[], base?: Partial<MakeupRecord>): MakeupDraft {
+  const current = currentClockDateTime();
+  const applicant = employees.find(item => item.employeeNo === base?.applicantId) || employees[0];
+  const initiator = employees.find(item => item.employeeNo === base?.initiatorId) || applicant || employees[0];
+  return {
+    applicantKey: applicant ? clockEmployeeKey(applicant) : '',
+    initiatorKey: initiator ? clockEmployeeKey(initiator) : '',
+    status: base?.status || '审批中',
+    applicant: base?.applicant || applicant?.name || '',
+    applicantId: base?.applicantId || applicant?.employeeNo || '',
+    applicantDept: base?.applicantDept || applicant?.department || '',
+    makeupDate: base?.makeupDate || current.date,
+    makeupTime: base?.makeupTime || current.time.slice(0, 5),
+    reason: base?.reason || '手动发起补卡记录',
+    initiator: base?.initiator || initiator?.name || '当前用户',
+    initiatorId: base?.initiatorId || initiator?.employeeNo || 'CURRENT',
+    initiateTime: base?.initiateTime || current.dateTime,
+    completeTime: base?.completeTime || '',
+    hasPhoto: Boolean(base?.hasPhoto),
+    archiveStatus: base?.archiveStatus || '未归档',
+  };
+}
+
+function defaultFieldDraft(employees: ClockEmployeeOption[], base?: Partial<FieldRecord>): FieldDraft {
+  const current = currentClockDateTime();
+  const employee = employees.find(item => item.employeeNo === base?.empId) || employees[0];
+  const initiator = employees.find(item => item.employeeNo === base?.initiatorId) || employee || employees[0];
+  const timeText = base?.time || '09:00 - 18:00';
+  const [startTime = '09:00', endTime = '18:00'] = timeText.split('-').map(item => item.trim());
+  return {
+    employeeKey: employee ? clockEmployeeKey(employee) : '',
+    initiatorKey: initiator ? clockEmployeeKey(initiator) : '',
+    name: base?.name || employee?.name || '',
+    empId: base?.empId || employee?.employeeNo || '',
+    initiator: base?.initiator || initiator?.name || '当前用户',
+    initiatorId: base?.initiatorId || initiator?.employeeNo || 'CURRENT',
+    source: base?.source || 'PC端申请',
+    dept: base?.dept || employee?.department || '',
+    date: base?.date || current.date,
+    time: timeText,
+    startTime,
+    endTime,
+    initiateTime: base?.initiateTime || current.dateTime,
+    completeTime: base?.completeTime || '',
+    location: base?.location || '待补充',
+    note: base?.note || '手动发起外勤记录',
+    hasPhoto: Boolean(base?.hasPhoto),
+    reviewStatus: base?.reviewStatus || '审批中',
+  };
 }
 
 function parseCsv(text: string) {
@@ -193,6 +299,310 @@ function PhotoModal({ title, target, onClose, colors }: { title: string; target?
           <span style={{ fontSize: '12px', color: colors.text }}>{preview.name || ''}</span>
           <span style={{ fontSize: '11px', color: colors.textMuted }}>拍摄时间：{preview.photoTakenAt || todayISO()}</span>
           {preview.note && <span style={{ fontSize: '11px', color: colors.textMuted }}>{preview.note}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ClockEmployeeSearchSelect({
+  value,
+  employees,
+  colors,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  employees: ClockEmployeeOption[];
+  colors: any;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  const selected = employees.find(employee => clockEmployeeKey(employee) === value);
+  const [query, setQuery] = useState(selected ? `${selected.name} / ${selected.employeeNo}` : '');
+  const [open, setOpen] = useState(false);
+  const normalizeEmployeeSearch = (text: string) => text.toLowerCase().replace(/[\/|,，、]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const filtered = employees.filter(employee => {
+    const terms = normalizeEmployeeSearch(query).split(' ').filter(Boolean);
+    if (terms.length === 0) return true;
+    const target = normalizeEmployeeSearch(`${employee.name} ${employee.employeeNo} ${employee.department} ${employee.name} / ${employee.employeeNo}`);
+    return terms.every(term => target.includes(term));
+  }).slice(0, 8);
+
+  useEffect(() => {
+    const nextSelected = employees.find(employee => clockEmployeeKey(employee) === value);
+    setQuery(nextSelected ? `${nextSelected.name} / ${nextSelected.employeeNo}` : '');
+  }, [employees, value]);
+
+  const selectEmployee = (employee: ClockEmployeeOption) => {
+    onChange(clockEmployeeKey(employee));
+    setQuery(`${employee.name} / ${employee.employeeNo}`);
+    setOpen(false);
+  };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <div style={{ width: '100%', minHeight: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, backgroundColor: colors.inputBg, color: colors.text, fontSize: 12, outline: 'none', padding: '0 8px', boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <input
+          value={query}
+          onFocus={() => setOpen(true)}
+          onChange={event => {
+            const nextQuery = event.target.value;
+            setQuery(nextQuery);
+            setOpen(true);
+            const nextNormalized = normalizeEmployeeSearch(nextQuery);
+            const exact = employees.find(employee =>
+              employee.name === nextQuery
+              || employee.employeeNo === nextQuery
+              || normalizeEmployeeSearch(`${employee.name} / ${employee.employeeNo}`) === nextNormalized,
+            );
+            onChange(exact ? clockEmployeeKey(exact) : '');
+          }}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && filtered[0]) selectEmployee(filtered[0]);
+            if (event.key === 'Escape') setOpen(false);
+          }}
+          placeholder={placeholder}
+          style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', color: colors.text, fontSize: 12 }}
+        />
+        <Search size={13} style={{ color: colors.textMuted, flexShrink: 0 }} />
+      </div>
+      {open && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 960, backgroundColor: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 6, boxShadow: '0 12px 28px rgba(34, 48, 78, 0.16)', overflow: 'hidden', maxHeight: 230, overflowY: 'auto' }}>
+          {filtered.length ? filtered.map(employee => (
+            <button
+              key={clockEmployeeKey(employee)}
+              type="button"
+              onMouseDown={event => event.preventDefault()}
+              onClick={() => selectEmployee(employee)}
+              style={{ width: '100%', border: 'none', background: clockEmployeeKey(employee) === value ? colors.badgeBlueBg : 'transparent', color: colors.text, cursor: 'pointer', padding: '8px 10px', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2 }}
+            >
+              <span style={{ fontSize: 13 }}>{employee.name} / {employee.employeeNo}</span>
+              <span style={{ fontSize: 11, color: colors.textMuted }}>{employee.department}</span>
+            </button>
+          )) : (
+            <div style={{ padding: '10px 12px', fontSize: 12, color: colors.textMuted }}>未找到匹配人员</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ClockPresetModal({
+  colors,
+  draft,
+  employees,
+  saving,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  colors: any;
+  draft: ClockDraft;
+  employees: ClockEmployeeOption[];
+  saving: boolean;
+  onChange: (next: ClockDraft) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const update = (patch: Partial<ClockDraft>) => onChange({ ...draft, ...patch });
+  const selectEmployee = (key: string) => {
+    const employee = employees.find(item => clockEmployeeKey(item) === key);
+    update({
+      employeeKey: key,
+      name: employee?.name || draft.name,
+      empId: employee?.employeeNo || draft.empId,
+      dept: employee?.department || draft.dept,
+    });
+  };
+  const inputStyle: React.CSSProperties = { width: '100%', minHeight: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, backgroundColor: colors.inputBg, color: colors.text, fontSize: 12, outline: 'none', padding: '0 9px', boxSizing: 'border-box' };
+  const labelStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6 };
+  const titleStyle: React.CSSProperties = { fontSize: 12, color: colors.textMuted };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 650, backgroundColor: 'rgba(0,0,0,0.48)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ width: 760, maxWidth: 'calc(100vw - 48px)', backgroundColor: colors.cardBg, borderRadius: 8, boxShadow: '0 14px 42px rgba(0,0,0,0.22)', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 18px', borderBottom: `1px solid ${colors.divider}` }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>预制打卡记录</div>
+            <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 4 }}>按原始打卡记录表头填写，保存后写入真实打卡记录接口。</div>
+          </div>
+          <button onClick={onCancel} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: colors.textMuted }}><X size={16}/></button>
+        </div>
+        <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+          <label style={labelStyle}><span style={titleStyle}>* 选择员工</span><ClockEmployeeSearchSelect value={draft.employeeKey} employees={employees} colors={colors} placeholder="输入姓名或工号搜索" onChange={selectEmployee} /></label>
+          <label style={labelStyle}><span style={titleStyle}>部门</span><input value={draft.dept} onChange={event => update({ dept: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>* 姓名</span><input value={draft.name} onChange={event => update({ name: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>* 员工号</span><input value={draft.empId} onChange={event => update({ empId: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>* 打卡日期</span><input type="date" value={draft.date} onChange={event => update({ date: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>* 打卡时间</span><input type="time" step="1" value={draft.time} onChange={event => update({ time: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>打卡来源</span><select value={draft.source} onChange={event => update({ source: event.target.value })} style={inputStyle}>{CLOCK_SOURCE_OPTS.map(option => <option key={option} value={option}>{option}</option>)}</select></label>
+          <label style={labelStyle}><span style={titleStyle}>打卡设备</span><input value={draft.device} onChange={event => update({ device: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>打卡地点</span><input value={draft.location} onChange={event => update({ location: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>上班地点</span><input value={draft.workLocation} onChange={event => update({ workLocation: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>自由工时上下班</span><select value={draft.freeWork} onChange={event => update({ freeWork: event.target.value })} style={inputStyle}><option value="上班">上班</option><option value="下班">下班</option></select></label>
+          <label style={labelStyle}><span style={titleStyle}>打卡照片</span><select value={draft.hasPhoto ? '有' : '无'} onChange={event => update({ hasPhoto: event.target.value === '有' })} style={inputStyle}><option value="无">无</option><option value="有">有</option></select></label>
+          <label style={{ ...labelStyle, gridColumn: '1 / -1' }}><span style={titleStyle}>备注</span><textarea value={draft.note} onChange={event => update({ note: event.target.value })} style={{ ...inputStyle, minHeight: 72, paddingTop: 8, resize: 'vertical' }}/></label>
+          <label style={labelStyle}><span style={titleStyle}>创建人</span><input value={draft.creator} onChange={event => update({ creator: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>创建时间</span><input value={draft.createTime} onChange={event => update({ createTime: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>修改人</span><input value={draft.modifier} onChange={event => update({ modifier: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>修改时间</span><input value={draft.modifyTime} onChange={event => update({ modifyTime: event.target.value })} style={inputStyle}/></label>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '12px 18px 16px', borderTop: `1px solid ${colors.divider}` }}>
+          <button onClick={onCancel} style={oBtn(colors)}>取消</button>
+          <button onClick={onSave} disabled={saving || !draft.name || !draft.empId || !draft.date || !draft.time} style={saving || !draft.name || !draft.empId || !draft.date || !draft.time ? { ...oBtn(colors), color: colors.textMuted, cursor: 'not-allowed', opacity: 0.6 } : pBtn(colors)}>{saving ? '保存中...' : '保存记录'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MakeupRecordModal({
+  colors,
+  draft,
+  employees,
+  saving,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  colors: any;
+  draft: MakeupDraft;
+  employees: ClockEmployeeOption[];
+  saving: boolean;
+  onChange: (next: MakeupDraft) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const update = (patch: Partial<MakeupDraft>) => onChange({ ...draft, ...patch });
+  const selectApplicant = (key: string) => {
+    const employee = employees.find(item => clockEmployeeKey(item) === key);
+    update({
+      applicantKey: key,
+      applicant: employee?.name || draft.applicant,
+      applicantId: employee?.employeeNo || draft.applicantId,
+      applicantDept: employee?.department || draft.applicantDept,
+    });
+  };
+  const selectInitiator = (key: string) => {
+    const employee = employees.find(item => clockEmployeeKey(item) === key);
+    update({
+      initiatorKey: key,
+      initiator: employee?.name || draft.initiator,
+      initiatorId: employee?.employeeNo || draft.initiatorId,
+    });
+  };
+  const inputStyle: React.CSSProperties = { width: '100%', minHeight: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, backgroundColor: colors.inputBg, color: colors.text, fontSize: 12, outline: 'none', padding: '0 9px', boxSizing: 'border-box' };
+  const labelStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6 };
+  const titleStyle: React.CSSProperties = { fontSize: 12, color: colors.textMuted };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 650, backgroundColor: 'rgba(0,0,0,0.48)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ width: 760, maxWidth: 'calc(100vw - 48px)', backgroundColor: colors.cardBg, borderRadius: 8, boxShadow: '0 14px 42px rgba(0,0,0,0.22)', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 18px', borderBottom: `1px solid ${colors.divider}` }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>发起补卡记录</div>
+            <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 4 }}>按补卡记录表头填写，保存后写入真实补卡记录接口。</div>
+          </div>
+          <button onClick={onCancel} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: colors.textMuted }}><X size={16}/></button>
+        </div>
+        <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+          <label style={labelStyle}><span style={titleStyle}>记录状态</span><select value={draft.status} onChange={event => update({ status: event.target.value })} style={inputStyle}>{STATUS_OPTS_MAKEUP.map(option => <option key={option} value={option}>{option}</option>)}</select></label>
+          <label style={labelStyle}><span style={titleStyle}>当前归档状态</span><select value={draft.archiveStatus} onChange={event => update({ archiveStatus: event.target.value })} style={inputStyle}><option value="未归档">未归档</option><option value="已归档">已归档</option></select></label>
+          <label style={labelStyle}><span style={titleStyle}>* 申请人</span><ClockEmployeeSearchSelect value={draft.applicantKey} employees={employees} colors={colors} placeholder="输入姓名或工号搜索申请人" onChange={selectApplicant} /></label>
+          <label style={labelStyle}><span style={titleStyle}>申请人部门</span><input value={draft.applicantDept} onChange={event => update({ applicantDept: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>* 申请人姓名</span><input value={draft.applicant} onChange={event => update({ applicant: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>* 申请人员工号</span><input value={draft.applicantId} onChange={event => update({ applicantId: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>* 补卡日期</span><input type="date" value={draft.makeupDate} onChange={event => update({ makeupDate: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>* 补卡时间</span><input type="time" value={draft.makeupTime} onChange={event => update({ makeupTime: event.target.value })} style={inputStyle}/></label>
+          <label style={{ ...labelStyle, gridColumn: '1 / -1' }}><span style={titleStyle}>* 补卡原因</span><textarea value={draft.reason} onChange={event => update({ reason: event.target.value })} style={{ ...inputStyle, minHeight: 72, paddingTop: 8, resize: 'vertical' }}/></label>
+          <label style={labelStyle}><span style={titleStyle}>发起人</span><ClockEmployeeSearchSelect value={draft.initiatorKey} employees={employees} colors={colors} placeholder="输入姓名或工号搜索发起人" onChange={selectInitiator} /></label>
+          <label style={labelStyle}><span style={titleStyle}>发起人员工号</span><input value={draft.initiatorId} onChange={event => update({ initiatorId: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>发起人姓名</span><input value={draft.initiator} onChange={event => update({ initiator: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>发起时间</span><input value={draft.initiateTime} onChange={event => update({ initiateTime: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>完成时间</span><input value={draft.completeTime} onChange={event => update({ completeTime: event.target.value })} placeholder="审批未完成可为空" style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>查看图片</span><select value={draft.hasPhoto ? '有' : '无'} onChange={event => update({ hasPhoto: event.target.value === '有' })} style={inputStyle}><option value="无">无</option><option value="有">有</option></select></label>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '12px 18px 16px', borderTop: `1px solid ${colors.divider}` }}>
+          <button onClick={onCancel} style={oBtn(colors)}>取消</button>
+          <button onClick={onSave} disabled={saving || !draft.applicant || !draft.applicantId || !draft.makeupDate || !draft.makeupTime || !draft.reason} style={saving || !draft.applicant || !draft.applicantId || !draft.makeupDate || !draft.makeupTime || !draft.reason ? { ...oBtn(colors), color: colors.textMuted, cursor: 'not-allowed', opacity: 0.6 } : pBtn(colors)}>{saving ? '保存中...' : '保存记录'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FieldClockRecordModal({
+  colors,
+  draft,
+  employees,
+  saving,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  colors: any;
+  draft: FieldDraft;
+  employees: ClockEmployeeOption[];
+  saving: boolean;
+  onChange: (next: FieldDraft) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const update = (patch: Partial<FieldDraft>) => onChange({ ...draft, ...patch });
+  const selectEmployee = (key: string) => {
+    const employee = employees.find(item => clockEmployeeKey(item) === key);
+    update({
+      employeeKey: key,
+      name: employee?.name || draft.name,
+      empId: employee?.employeeNo || draft.empId,
+      dept: employee?.department || draft.dept,
+    });
+  };
+  const selectInitiator = (key: string) => {
+    const employee = employees.find(item => clockEmployeeKey(item) === key);
+    update({
+      initiatorKey: key,
+      initiator: employee?.name || draft.initiator,
+      initiatorId: employee?.employeeNo || draft.initiatorId,
+    });
+  };
+  const inputStyle: React.CSSProperties = { width: '100%', minHeight: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, backgroundColor: colors.inputBg, color: colors.text, fontSize: 12, outline: 'none', padding: '0 9px', boxSizing: 'border-box' };
+  const labelStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6 };
+  const titleStyle: React.CSSProperties = { fontSize: 12, color: colors.textMuted };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 650, backgroundColor: 'rgba(0,0,0,0.48)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ width: 760, maxWidth: 'calc(100vw - 48px)', backgroundColor: colors.cardBg, borderRadius: 8, boxShadow: '0 14px 42px rgba(0,0,0,0.22)', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 18px', borderBottom: `1px solid ${colors.divider}` }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>发起外勤记录</div>
+            <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 4 }}>按外勤记录表头填写，保存后写入真实外勤记录接口。</div>
+          </div>
+          <button onClick={onCancel} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: colors.textMuted }}><X size={16}/></button>
+        </div>
+        <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+          <label style={labelStyle}><span style={titleStyle}>* 申请人</span><ClockEmployeeSearchSelect value={draft.employeeKey} employees={employees} colors={colors} placeholder="输入姓名或工号搜索申请人" onChange={selectEmployee} /></label>
+          <label style={labelStyle}><span style={titleStyle}>部门</span><input value={draft.dept} onChange={event => update({ dept: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>* 姓名</span><input value={draft.name} onChange={event => update({ name: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>* 员工号</span><input value={draft.empId} onChange={event => update({ empId: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>发起人</span><ClockEmployeeSearchSelect value={draft.initiatorKey} employees={employees} colors={colors} placeholder="输入姓名或工号搜索发起人" onChange={selectInitiator} /></label>
+          <label style={labelStyle}><span style={titleStyle}>发起人员工号</span><input value={draft.initiatorId} onChange={event => update({ initiatorId: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>数据来源</span><select value={draft.source} onChange={event => update({ source: event.target.value })} style={inputStyle}>{['PC端申请', '移动端申请', 'HR手动添加', '导入'].map(option => <option key={option} value={option}>{option}</option>)}</select></label>
+          <label style={labelStyle}><span style={titleStyle}>审核状态</span><select value={draft.reviewStatus} onChange={event => update({ reviewStatus: event.target.value })} style={inputStyle}>{REVIEW_OPTS.map(option => <option key={option} value={option}>{option}</option>)}</select></label>
+          <label style={labelStyle}><span style={titleStyle}>* 外勤日期</span><input type="date" value={draft.date} onChange={event => update({ date: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>外勤开始时间</span><input type="time" value={draft.startTime} onChange={event => update({ startTime: event.target.value, time: `${event.target.value} - ${draft.endTime}` })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>外勤结束时间</span><input type="time" value={draft.endTime} onChange={event => update({ endTime: event.target.value, time: `${draft.startTime} - ${event.target.value}` })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>发起时间</span><input value={draft.initiateTime} onChange={event => update({ initiateTime: event.target.value })} style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>完成时间</span><input value={draft.completeTime} onChange={event => update({ completeTime: event.target.value })} placeholder="审批未完成可为空" style={inputStyle}/></label>
+          <label style={labelStyle}><span style={titleStyle}>查看图片</span><select value={draft.hasPhoto ? '有' : '无'} onChange={event => update({ hasPhoto: event.target.value === '有' })} style={inputStyle}><option value="无">无</option><option value="有">有</option></select></label>
+          <label style={{ ...labelStyle, gridColumn: '1 / -1' }}><span style={titleStyle}>外勤地点</span><input value={draft.location} onChange={event => update({ location: event.target.value })} style={inputStyle}/></label>
+          <label style={{ ...labelStyle, gridColumn: '1 / -1' }}><span style={titleStyle}>备注</span><textarea value={draft.note} onChange={event => update({ note: event.target.value })} style={{ ...inputStyle, minHeight: 72, paddingTop: 8, resize: 'vertical' }}/></label>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '12px 18px 16px', borderTop: `1px solid ${colors.divider}` }}>
+          <button onClick={onCancel} style={oBtn(colors)}>取消</button>
+          <button onClick={onSave} disabled={saving || !draft.name || !draft.empId || !draft.date} style={saving || !draft.name || !draft.empId || !draft.date ? { ...oBtn(colors), color: colors.textMuted, cursor: 'not-allowed', opacity: 0.6 } : pBtn(colors)}>{saving ? '保存中...' : '保存记录'}</button>
         </div>
       </div>
     </div>
@@ -296,6 +706,10 @@ function OriginalClockTab({ colors }: { colors: any }) {
   const [sourceFilter, setSourceFilter] = useState('');
   const [sortKey, setSortKey] = useState<keyof ClockRecord>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  const [employeeOptions, setEmployeeOptions] = useState<ClockEmployeeOption[]>([]);
+  const [showPresetModal, setShowPresetModal] = useState(false);
+  const [presetDraft, setPresetDraft] = useState<ClockDraft>(() => defaultClockDraft([]));
+  const [savingPreset, setSavingPreset] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
 
 
@@ -313,6 +727,19 @@ function OriginalClockTab({ colors }: { colors: any }) {
   useEffect(() => {
     loadClockRows();
   }, [loadClockRows]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSettingsPeople()
+      .then(res => {
+        if (cancelled) return;
+        const options = peopleRowsToClockOptions(res.rows || []);
+        setEmployeeOptions(options);
+        setPresetDraft(current => current.employeeKey ? current : defaultClockDraft(options));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   const filteredRows = rows.filter(row => {
     const keyword = empFilter.trim().toLowerCase();
@@ -429,20 +856,48 @@ function OriginalClockTab({ colors }: { colors: any }) {
   };
 
   const handleAddPresetRecord = () => {
-    const nextId = Math.max(0, ...rows.map(row => row.id)) + 1;
     const keyword = empFilter.trim().toLowerCase();
     const base = rows.find(row => keyword && (row.name.toLowerCase().includes(keyword) || row.empId.toLowerCase().includes(keyword)));
-
-    const preset = toClockRecord({
+    setPresetDraft(defaultClockDraft(employeeOptions, {
       ...base,
-      id: nextId,
       note: '预制打卡记录',
       source: 'HR手动添加',
       creator: 'HR',
-    }, nextId);
+    }));
+    setShowPresetModal(true);
+  };
 
-    setRows(current => [preset, ...current]);
-    setSelected(new Set([nextId]));
+  const savePresetRecord = async () => {
+    if (savingPreset || !presetDraft.name || !presetDraft.empId || !presetDraft.date || !presetDraft.time) return;
+    const nextId = Math.max(0, ...rows.map(row => row.id)) + 1;
+    const preset = toClockRecord(presetDraft, nextId);
+    const nextRows = [preset, ...rows];
+    setSavingPreset(true);
+    try {
+      const res = await saveClockRecords(nextRows);
+      const savedRows = res.rows || nextRows;
+      setRows(savedRows);
+      setSelected(new Set([savedRows[0]?.id ?? nextId]));
+      setPage(1);
+      setShowPresetModal(false);
+    } catch (_error) {
+      window.alert('保存失败：打卡记录接口未连接成功，请稍后重试。');
+    } finally {
+      setSavingPreset(false);
+    }
+  };
+
+  const persistImportedRows = async (importedRows: ClockRecord[]) => {
+    const nextRows = [...importedRows, ...rows];
+    try {
+      const res = await saveClockRecords(nextRows);
+      setRows(res.rows || nextRows);
+      setSelected(new Set((res.rows || importedRows).slice(0, importedRows.length).map(row => row.id)));
+    } catch (_error) {
+      setRows(nextRows);
+      setSelected(new Set(importedRows.map(row => row.id)));
+      window.alert('导入已显示在页面，但保存到真实打卡接口失败。');
+    }
     setPage(1);
   };
 
@@ -494,9 +949,7 @@ function OriginalClockTab({ colors }: { colors: any }) {
       return;
     }
 
-    setRows(current => [...importedRows, ...current]);
-    setSelected(new Set(importedRows.map(row => row.id)));
-    setPage(1);
+    await persistImportedRows(importedRows);
     window.alert(`导入成功：${importedRows.length} 条记录`);
   };
 
@@ -619,6 +1072,17 @@ function OriginalClockTab({ colors }: { colors: any }) {
       </div>
       <PaginationBar total={filteredRows.length} page={page} pageSize={pageSize} totalPages={totalPages} onPage={setPage} onPageSize={n => { setPageSize(n); setPage(1); }} colors={colors}/>
       {photoTarget && <PhotoModal title="打卡照片" target={photoTarget} onClose={() => setPhotoTarget(null)} colors={colors}/>}
+      {showPresetModal && (
+        <ClockPresetModal
+          colors={colors}
+          draft={presetDraft}
+          employees={employeeOptions}
+          saving={savingPreset}
+          onChange={setPresetDraft}
+          onCancel={() => setShowPresetModal(false)}
+          onSave={savePresetRecord}
+        />
+      )}
     </div>
   );
 }
@@ -640,6 +1104,10 @@ function MakeupClockTab({ colors }: { colors: any }) {
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [rows, setRows] = useState<MakeupRecord[]>([]);
   const [loadError, setLoadError] = useState('');
+  const [employeeOptions, setEmployeeOptions] = useState<ClockEmployeeOption[]>([]);
+  const [showMakeupModal, setShowMakeupModal] = useState(false);
+  const [makeupDraft, setMakeupDraft] = useState<MakeupDraft>(() => defaultMakeupDraft([]));
+  const [savingMakeup, setSavingMakeup] = useState(false);
 
   const loadMakeupRows = useCallback(async () => {
     try {
@@ -654,6 +1122,19 @@ function MakeupClockTab({ colors }: { colors: any }) {
   useEffect(() => {
     loadMakeupRows();
   }, [loadMakeupRows]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSettingsPeople()
+      .then(res => {
+        if (cancelled) return;
+        const options = peopleRowsToClockOptions(res.rows || []);
+        setEmployeeOptions(options);
+        setMakeupDraft(current => current.applicantKey ? current : defaultMakeupDraft(options));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   const filteredRows = rows.filter(row => {
     const applicantKeyword = applicantFilter.trim().toLowerCase();
@@ -754,26 +1235,50 @@ function MakeupClockTab({ colors }: { colors: any }) {
     );
   };
   const startMakeupRecord = () => {
-    const nextId = Math.max(0, ...rows.map(row => row.id)) + 1;
-    const today = new Date().toISOString().slice(0, 10);
-    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    setRows(current => [{
-      id: nextId,
+    const applicantKeyword = applicantFilter.trim().toLowerCase();
+    const base = rows.find(row => applicantKeyword && (row.applicant.toLowerCase().includes(applicantKeyword) || row.applicantId.toLowerCase().includes(applicantKeyword)));
+    setMakeupDraft(defaultMakeupDraft(employeeOptions, {
+      ...base,
       status: '审批中',
-      applicant: '新增补卡人员',
-      applicantId: `MK${String(nextId).padStart(4, '0')}`,
-      applicantDept: '产品运营部',
-      makeupDate: today,
-      makeupTime: '09:00',
       reason: '手动发起补卡记录',
-      initiator: '当前用户',
-      initiatorId: 'CURRENT',
-      initiateTime: now,
-      completeTime: '',
-      hasPhoto: false,
       archiveStatus: '未归档',
-    }, ...current]);
-    setPage(1);
+    }));
+    setShowMakeupModal(true);
+  };
+
+  const saveMakeupRecord = async () => {
+    if (savingMakeup || !makeupDraft.applicant || !makeupDraft.applicantId || !makeupDraft.makeupDate || !makeupDraft.makeupTime || !makeupDraft.reason) return;
+    const nextId = Math.max(0, ...rows.map(row => row.id)) + 1;
+    const nextRow: MakeupRecord = {
+      id: nextId,
+      status: makeupDraft.status,
+      applicant: makeupDraft.applicant,
+      applicantId: makeupDraft.applicantId,
+      applicantDept: makeupDraft.applicantDept,
+      makeupDate: makeupDraft.makeupDate,
+      makeupTime: makeupDraft.makeupTime,
+      reason: makeupDraft.reason,
+      initiator: makeupDraft.initiator,
+      initiatorId: makeupDraft.initiatorId,
+      initiateTime: makeupDraft.initiateTime,
+      completeTime: makeupDraft.completeTime,
+      hasPhoto: makeupDraft.hasPhoto,
+      archiveStatus: makeupDraft.archiveStatus,
+    };
+    const nextRows = [nextRow, ...rows];
+    setSavingMakeup(true);
+    try {
+      const res = await saveMakeupClockRecords(nextRows);
+      const savedRows = res.rows || nextRows;
+      setRows(savedRows as MakeupRecord[]);
+      setSelected(new Set([savedRows[0]?.id ?? nextId]));
+      setPage(1);
+      setShowMakeupModal(false);
+    } catch (_error) {
+      window.alert('保存失败：补卡记录接口未连接成功，请稍后重试。');
+    } finally {
+      setSavingMakeup(false);
+    }
   };
 
   return (
@@ -803,7 +1308,7 @@ function MakeupClockTab({ colors }: { colors: any }) {
         <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: '100%' }}>
           <thead>
             <tr>
-              <th style={{ ...thS(colors), width: 36, textAlign: 'center', padding: '8px 0', position: 'sticky', left: 0, zIndex: 25, borderLeft: 'none' }}>
+              <th style={{ ...thS(colors), width: 52, minWidth: 52, textAlign: 'center', padding: '8px 0', position: 'sticky', left: 0, zIndex: 25, borderLeft: 'none' }}>
                 <input type="checkbox" checked={allSel} ref={el => { if (el) el.indeterminate = someSel; }} onChange={toggleAll} style={{ accentColor: colors.primary, width: 14, height: 14 }}/>
               </th>
               {COLS.map(c => (
@@ -825,7 +1330,7 @@ function MakeupClockTab({ colors }: { colors: any }) {
                 <tr key={row.id} style={{ backgroundColor: bg, borderBottom: `1px solid ${colors.tableBorder}` }}
                   onMouseEnter={e => !isSel && (e.currentTarget.style.backgroundColor = colors.tableRowHover)}
                   onMouseLeave={e => !isSel && (e.currentTarget.style.backgroundColor = bg)}>
-                  <td style={{ ...tdS(colors), width: 36, textAlign: 'center', padding: '7px 0', position: 'sticky', left: 0, backgroundColor: bg, borderLeft: 'none' }}>
+                  <td style={{ ...tdS(colors), width: 52, minWidth: 52, textAlign: 'center', padding: '7px 0', position: 'sticky', left: 0, backgroundColor: bg, borderLeft: 'none' }}>
                     <input type="checkbox" checked={isSel} onChange={() => toggleRow(row.id)} style={{ accentColor: colors.primary, width: 14, height: 14 }}/>
                   </td>
                   <td style={{ ...tdS(colors), width: 95 }}><StatusBadge status={row.status} colors={colors}/></td>
@@ -855,6 +1360,17 @@ function MakeupClockTab({ colors }: { colors: any }) {
       </div>
       <PaginationBar total={filteredRows.length} page={page} pageSize={pageSize} totalPages={totalPages} onPage={setPage} onPageSize={n => { setPageSize(n); setPage(1); }} colors={colors}/>
       {photoTarget && <PhotoModal title="补卡照片" onClose={() => setPhotoTarget(null)} colors={colors}/>}
+      {showMakeupModal && (
+        <MakeupRecordModal
+          colors={colors}
+          draft={makeupDraft}
+          employees={employeeOptions}
+          saving={savingMakeup}
+          onChange={setMakeupDraft}
+          onCancel={() => setShowMakeupModal(false)}
+          onSave={saveMakeupRecord}
+        />
+      )}
     </div>
   );
 }
@@ -875,7 +1391,40 @@ function FieldWorkTab({ colors }: { colors: any }) {
   const [sortKey, setSortKey] = useState<keyof FieldRecord>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [rows, setRows] = useState<FieldRecord[]>([]);
+  const [employeeOptions, setEmployeeOptions] = useState<ClockEmployeeOption[]>([]);
+  const [showFieldModal, setShowFieldModal] = useState(false);
+  const [fieldDraft, setFieldDraft] = useState<FieldDraft>(() => defaultFieldDraft([]));
+  const [savingField, setSavingField] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const fieldImportInputRef = useRef<HTMLInputElement>(null);
+
+  const loadFieldRows = useCallback(async () => {
+    try {
+      const res = await fetchFieldClockRecords();
+      setRows((res.rows || []) as RealFieldClockRecord[]);
+      setLoadError('');
+    } catch (_error) {
+      setLoadError('外勤记录接口连接失败，当前不展示本地静态人员');
+    }
+  }, []);
+
+  useEffect(() => {
+    loadFieldRows();
+  }, [loadFieldRows]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSettingsPeople()
+      .then(res => {
+        if (cancelled) return;
+        const options = peopleRowsToClockOptions(res.rows || []);
+        setEmployeeOptions(options);
+        setFieldDraft(current => current.employeeKey ? current : defaultFieldDraft(options));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
   const filteredRows = rows.filter(row => {
     const applicantKeyword = applicantFilter.trim().toLowerCase();
     const initiatorKeyword = initiatorFilter.trim().toLowerCase();
@@ -958,38 +1507,54 @@ function FieldWorkTab({ colors }: { colors: any }) {
   };
 
   const handleAddFieldRecord = () => {
-    const nextId = Math.max(0, ...rows.map(row => row.id)) + 1;
     const applicantKeyword = applicantFilter.trim().toLowerCase();
-    const initiatorKeyword = initiatorFilter.trim().toLowerCase();
     const base = rows.find(row =>
       applicantKeyword && (row.name.toLowerCase().includes(applicantKeyword) || row.empId.toLowerCase().includes(applicantKeyword)),
     );
-    const now = new Date();
-    const nowDate = now.toISOString().slice(0, 10);
-    const nowTime = now.toTimeString().slice(0, 5);
+    setFieldDraft(defaultFieldDraft(employeeOptions, {
+      ...base,
+      source: 'PC端申请',
+      reviewStatus: '审批中',
+      note: '手动发起外勤记录',
+    }));
+    setShowFieldModal(true);
+  };
 
+  const saveFieldRecord = async () => {
+    if (savingField || !fieldDraft.name || !fieldDraft.empId || !fieldDraft.date) return;
+    const nextId = Math.max(0, ...rows.map(row => row.id)) + 1;
     const newRow: FieldRecord = {
       id: nextId,
-      name: base?.name || applicantFilter.trim() || '新员工',
-      empId: base?.empId || `CP${String(25000 + nextId)}`,
-      initiator: base?.initiator || initiatorFilter.trim() || 'HR管理员',
-      initiatorId: base?.initiatorId || (initiatorKeyword ? 'CP99999' : 'HR001'),
-      source: 'PC端申请',
-      dept: deptFilter || base?.dept || '产品运营部',
-      date: dateRange.start || nowDate,
-      time: '09:00 - 18:00',
-      initiateTime: `${nowDate} ${nowTime}`,
-      completeTime: '',
-      location: '待补充',
-      note: '新发起外勤记录',
-      hasPhoto: false,
-      reviewStatus: '审批中',
+      name: fieldDraft.name,
+      empId: fieldDraft.empId,
+      initiator: fieldDraft.initiator,
+      initiatorId: fieldDraft.initiatorId,
+      source: fieldDraft.source,
+      dept: fieldDraft.dept,
+      date: fieldDraft.date,
+      time: `${fieldDraft.startTime} - ${fieldDraft.endTime}`,
+      initiateTime: fieldDraft.initiateTime,
+      completeTime: fieldDraft.completeTime,
+      location: fieldDraft.location,
+      note: fieldDraft.note,
+      hasPhoto: fieldDraft.hasPhoto,
+      reviewStatus: fieldDraft.reviewStatus,
     };
-
-    setRows(current => [newRow, ...current]);
-    setSelected(new Set([newRow.id]));
-    setStatusFilter('all');
-    setPage(1);
+    const nextRows = [newRow, ...rows];
+    setSavingField(true);
+    try {
+      const res = await saveFieldClockRecords(nextRows);
+      const savedRows = res.rows || nextRows;
+      setRows(savedRows as FieldRecord[]);
+      setSelected(new Set([savedRows[0]?.id ?? nextId]));
+      setStatusFilter('all');
+      setPage(1);
+      setShowFieldModal(false);
+    } catch (_error) {
+      window.alert('保存失败：外勤记录接口未连接成功，请稍后重试。');
+    } finally {
+      setSavingField(false);
+    }
   };
 
   const handleImportFieldRecords = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1056,11 +1621,17 @@ function FieldWorkTab({ colors }: { colors: any }) {
       return;
     }
 
-    setRows(current => [...importedRows, ...current]);
-    setSelected(new Set(importedRows.map(row => row.id)));
-    setStatusFilter('all');
-    setPage(1);
-    window.alert(`导入成功：${importedRows.length} 条记录`);
+    const nextRows = [...importedRows, ...rows];
+    try {
+      const res = await saveFieldClockRecords(nextRows);
+      setRows((res.rows || nextRows) as FieldRecord[]);
+      setSelected(new Set(importedRows.map(row => row.id)));
+      setStatusFilter('all');
+      setPage(1);
+      window.alert(`导入成功：${importedRows.length} 条记录`);
+    } catch (_error) {
+      window.alert('导入失败：外勤记录接口未连接成功，请稍后重试。');
+    }
   };
 
   const exportCurrentRows = () => {
@@ -1094,6 +1665,7 @@ function FieldWorkTab({ colors }: { colors: any }) {
         <input ref={fieldImportInputRef} type="file" accept=".csv,.json" onChange={handleImportFieldRecords} style={{ display: 'none' }}/>
         {selected.size > 0 && <span style={{ fontSize: '12px', color: colors.textMuted }}>已选 {selected.size} 条</span>}
       </div>
+      {loadError && <div style={{ padding: '8px 16px', fontSize: '12px', color: colors.danger || '#AA2B3A', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}` }}>{loadError}</div>}
       {/* Table */}
       <div style={{ flex: 1, overflow: 'auto', backgroundColor: colors.cardBg, padding: '0 16px', boxSizing: 'border-box' }}>
         <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: '100%' }}>
@@ -1152,6 +1724,17 @@ function FieldWorkTab({ colors }: { colors: any }) {
       </div>
       <PaginationBar total={filteredRows.length} page={page} pageSize={pageSize} totalPages={totalPages} onPage={setPage} onPageSize={n => { setPageSize(n); setPage(1); }} colors={colors}/>
       {photoTarget && <PhotoModal title="外勤照片" onClose={() => setPhotoTarget(null)} colors={colors}/>}
+      {showFieldModal && (
+        <FieldClockRecordModal
+          colors={colors}
+          draft={fieldDraft}
+          employees={employeeOptions}
+          saving={savingField}
+          onChange={setFieldDraft}
+          onCancel={() => setShowFieldModal(false)}
+          onSave={saveFieldRecord}
+        />
+      )}
     </div>
   );
 }

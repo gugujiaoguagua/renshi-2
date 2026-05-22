@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
-import { fetchDailyAttendanceEmployees, saveDailyAttendanceEmployees, type DailyAttendanceEmployee as RealDailyEmployee } from '../api/realData';
+import { fetchDailyAttendanceEmployees, fetchFieldOutRecords, fetchFieldTripRecords, fetchLeaveRecords, fetchSettingsPeople, saveDailyAttendanceEmployees, saveFieldOutRecords, saveFieldTripRecords, saveLeaveRecords, type DailyAttendanceEmployee as RealDailyEmployee, type FieldWorkRecord } from '../api/realData';
 import { addDaysISO, monthEndISO, monthStartISO, todayISO } from '../utils/date';
 import {
   Calendar, Search, ChevronDown, ChevronLeft, ChevronRight,
@@ -17,6 +17,7 @@ type ModalType = 'clock-patch' | 'field-trip' | 'leave' | 'overtime' | 'field-ou
 type DailyEmployee = RealDailyEmployee;
 
 type Trip = { id: number; fromCity: string; toCity: string; startDate: string; startTime: string; endDate: string; endTime: string; tripType: '往返' | '单程' };
+type LeaveEmployeeOption = { name: string; employeeNo: string; department: string; deptFullPath: string };
 
 type DailyFilters = {
   dept: string;
@@ -109,6 +110,124 @@ function addMonths(year: number, month: number, n: number) {
   while (m > 11) { m -= 12; y++; }
   while (m < 0) { m += 12; y--; }
   return { y, m };
+}
+
+function leaveEmployeeKey(employee: LeaveEmployeeOption) {
+  return `${employee.employeeNo}|${employee.name}`;
+}
+
+function settingsPeopleToLeaveOptions(rows: Array<Array<unknown>>): LeaveEmployeeOption[] {
+  return rows
+    .map(row => ({
+      name: String(row[0] ?? '').trim(),
+      employeeNo: String(row[1] ?? '').trim(),
+      department: String(row[2] ?? '').trim() || '-',
+      deptFullPath: String(row[2] ?? '').trim() || '-',
+    }))
+    .filter(employee => employee.name && employee.employeeNo);
+}
+
+function currentDateTimeText() {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function calculateLeaveDays(startDate: string, endDate: string) {
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end < start) return '1';
+  return String(Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1));
+}
+
+function frontendLeaveRow({
+  applicant,
+  leaveType,
+  startDate,
+  endDate,
+  duration,
+  reason,
+}: {
+  applicant: LeaveEmployeeOption;
+  leaveType: string;
+  startDate: string;
+  endDate: string;
+  duration: string;
+  reason: string;
+}) {
+  const now = currentDateTimeText();
+  return [
+    '审批中',
+    applicant.name,
+    applicant.employeeNo,
+    applicant.department,
+    applicant.deptFullPath,
+    applicant.name,
+    applicant.employeeNo,
+    '员工发起',
+    leaveType,
+    `${startDate} 09:00`,
+    `${endDate} 18:00`,
+    `${duration || calculateLeaveDays(startDate, endDate)}天`,
+    reason || '前端发起请假流程',
+    now,
+    '',
+    '审批中',
+    '查看',
+  ];
+}
+
+function frontendFieldWorkRow({
+  applicant,
+  type,
+  reason,
+  startTime,
+  endTime,
+  duration,
+  status = '审批中',
+  effect = '待生效',
+  source = '移动端申请',
+}: {
+  applicant: LeaveEmployeeOption;
+  type: 'out' | 'trip';
+  reason: string;
+  startTime?: string;
+  endTime?: string;
+  duration?: string;
+  status?: string;
+  effect?: string;
+  source?: string;
+}): FieldWorkRecord {
+  const now = currentDateTimeText();
+  const date = todayISO();
+  const idBase = Date.now();
+  const outStart = startTime || `${date} 09:00`;
+  const outEnd = endTime || `${date} 18:00`;
+  if (type === 'trip') {
+    return {
+      id: idBase,
+      status,
+      name: applicant.name,
+      empId: applicant.employeeNo,
+      dept: applicant.department,
+      deptPath: applicant.deptFullPath,
+      effect,
+      source,
+      values: [source, '往返', '上海-杭州', `${date} ~ ${date}`, '无', duration || '1天', reason || '前端发起出差流程', now, status === '已通过' ? now : ''],
+      flowStatus: status,
+    };
+  }
+  return {
+    id: idBase,
+    status,
+    name: applicant.name,
+    empId: applicant.employeeNo,
+    dept: applicant.department,
+    deptPath: applicant.deptFullPath,
+    effect,
+    source,
+    values: [applicant.name, applicant.employeeNo, source, outStart, outEnd, duration || '8小时', '无', reason || '前端发起外出流程', now],
+    flowStatus: status,
+  };
 }
 
 // ─── Date Range Picker ───────────────────────
@@ -458,18 +577,69 @@ function NestedDropdown({ label, items, colors, tooltip }: { label: string; item
 
 // ─── Modals ──────────────────────────────────
 function LeaveModal({ colors, onClose }: { colors: any; onClose: () => void }) {
+  const [employees, setEmployees] = useState<LeaveEmployeeOption[]>([]);
   const [applicant, setApplicant] = useState(''); const [leaveType, setLeaveType] = useState('');
-  const [startDate, setStartDate] = useState(''); const [endDate, setEndDate] = useState('');
+  const [startDate, setStartDate] = useState(todayISO()); const [endDate, setEndDate] = useState(todayISO());
   const [duration, setDuration] = useState(''); const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
   const [typeOpen, setTypeOpen] = useState(false); const typeRef = useRef<HTMLDivElement>(null);
   useClickOutside(typeRef, () => setTypeOpen(false));
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSettingsPeople()
+      .then(res => {
+        if (cancelled) return;
+        const options = settingsPeopleToLeaveOptions(res.rows || []);
+        setEmployees(options);
+        setApplicant(current => current || (options[0] ? leaveEmployeeKey(options[0]) : ''));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selectedApplicant = employees.find(employee => leaveEmployeeKey(employee) === applicant);
+  const selectedDepartment = selectedApplicant?.department || '';
+  const computedDuration = duration || calculateLeaveDays(startDate, endDate);
+
+  const handleSubmit = async () => {
+    if (!selectedApplicant || !leaveType || !startDate || !endDate || saving) return;
+    setSaving(true);
+    try {
+      const existing = await fetchLeaveRecords();
+      const nextRows = [
+        frontendLeaveRow({
+          applicant: selectedApplicant,
+          leaveType,
+          startDate,
+          endDate,
+          duration: computedDuration,
+          reason,
+        }),
+        ...(existing.rows || []),
+      ];
+      await saveLeaveRecords(nextRows);
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div style={overlay}>
       <div style={{ ...mbox(colors), width: 520 }}>
         <div style={mhead(colors)}><span style={{ fontWeight: 600, fontSize: '14px', color: colors.text }}>添加请假记录</span><button onClick={onClose} style={iconBtn(colors)}><X size={15} /></button></div>
         <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={frow}><label style={flabel(colors)}><span style={star}>*</span>申请人</label><div style={{ ...srchBox(colors), flex: 1 }}><input value={applicant} onChange={e => setApplicant(e.target.value)} placeholder="姓名/员工工号模糊搜索" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }} /><Search size={12} style={{ color: colors.textMuted }} /></div></div>
-          <div style={frow}><label style={flabel(colors)}>部门</label><div style={{ flex: 1 }}><FilterSelect label="" options={DEPT_OPTIONS} colors={colors} /></div></div>
+          <div style={frow}>
+            <label style={flabel(colors)}><span style={star}>*</span>申请人</label>
+            <LeaveEmployeeSearchSelect value={applicant} employees={employees} colors={colors} placeholder="输入姓名或工号搜索申请人" onChange={setApplicant} />
+          </div>
+          <div style={frow}>
+            <label style={flabel(colors)}>部门</label>
+            <div style={{ ...srchBox(colors), flex: 1, color: selectedDepartment ? colors.text : colors.textMuted }}>{selectedDepartment || '选择人员后自动带出'}</div>
+          </div>
           <div style={frow}>
             <label style={flabel(colors)}><span style={star}>*</span>假期类型</label>
             <div ref={typeRef} style={{ position: 'relative', flex: 1 }}>
@@ -483,7 +653,7 @@ function LeaveModal({ colors, onClose }: { colors: any; onClose: () => void }) {
             <div style={{ ...frow, flex: 1 }}><label style={flabel(colors)}><span style={star}>*</span>开始时间</label><div style={{ ...srchBox(colors), flex: 1 }}><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }} /></div></div>
             <div style={{ ...frow, flex: 1 }}><label style={flabel(colors)}><span style={star}>*</span>结束时间</label><div style={{ ...srchBox(colors), flex: 1 }}><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }} /></div></div>
           </div>
-          <div style={frow}><label style={flabel(colors)}>请假时长</label><div style={{ ...srchBox(colors), flex: 1 }}><input value={duration} onChange={e => setDuration(e.target.value)} placeholder="自动计算" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }} /><span style={{ fontSize: '12px', color: colors.textMuted }}>天</span></div></div>
+          <div style={frow}><label style={flabel(colors)}>请假时长</label><div style={{ ...srchBox(colors), flex: 1 }}><input value={computedDuration} onChange={e => setDuration(e.target.value.replace(/[^\d.]/g, ''))} placeholder="自动计算" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }} /><span style={{ fontSize: '12px', color: colors.textMuted }}>天</span></div></div>
           <div style={frow}><label style={flabel(colors)}>考勤时次</label><span style={{ fontSize: '12px', color: colors.textMuted }}>-</span></div>
           <div style={frow}>
             <label style={{ ...flabel(colors), alignSelf: 'flex-start', paddingTop: 4 }}>请假事由</label>
@@ -494,7 +664,10 @@ function LeaveModal({ colors, onClose }: { colors: any; onClose: () => void }) {
           </div>
           <div style={frow}><label style={flabel(colors)}>附件</label><button style={{ ...outlineBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}><Upload size={12} />上传</button></div>
         </div>
-        <div style={mfoot(colors)}><button onClick={onClose} style={outlineBtn(colors)}>取消</button><button style={primaryBtn(colors)}>提交</button></div>
+        <div style={mfoot(colors)}>
+          <button onClick={onClose} style={outlineBtn(colors)}>取消</button>
+          <button onClick={handleSubmit} disabled={!selectedApplicant || !leaveType || !startDate || !endDate || saving} style={!selectedApplicant || !leaveType || !startDate || !endDate || saving ? disabledBtn(colors) : primaryBtn(colors)}>{saving ? '提交中...' : '提交'}</button>
+        </div>
       </div>
     </div>
   );
@@ -541,18 +714,193 @@ function CitySelect({ value, onChange, colors }: { value: string; onChange: (v: 
   );
 }
 
+function LeaveEmployeeSearchSelect({
+  value,
+  employees,
+  colors,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  employees: LeaveEmployeeOption[];
+  colors: any;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  const selected = employees.find(employee => leaveEmployeeKey(employee) === value);
+  const [query, setQuery] = useState(selected ? `${selected.name} / ${selected.employeeNo}` : '');
+  const [open, setOpen] = useState(false);
+  const filtered = employees.filter(employee => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return true;
+    return `${employee.name} ${employee.employeeNo} ${employee.department} ${employee.deptFullPath}`.toLowerCase().includes(keyword);
+  }).slice(0, 8);
+
+  useEffect(() => {
+    const nextSelected = employees.find(employee => leaveEmployeeKey(employee) === value);
+    setQuery(nextSelected ? `${nextSelected.name} / ${nextSelected.employeeNo}` : '');
+  }, [employees, value]);
+
+  const selectEmployee = (employee: LeaveEmployeeOption) => {
+    onChange(leaveEmployeeKey(employee));
+    setQuery(`${employee.name} / ${employee.employeeNo}`);
+    setOpen(false);
+  };
+
+  return (
+    <div style={{ position: 'relative', flex: 1 }}>
+      <div style={{ ...srchBox(colors), width: '100%', boxSizing: 'border-box' }}>
+        <input
+          value={query}
+          onFocus={() => setOpen(true)}
+          onChange={event => {
+            const nextQuery = event.target.value;
+            setQuery(nextQuery);
+            setOpen(true);
+            const exact = employees.find(employee => employee.name === nextQuery || employee.employeeNo === nextQuery || `${employee.name} / ${employee.employeeNo}` === nextQuery);
+            onChange(exact ? leaveEmployeeKey(exact) : '');
+          }}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && filtered[0]) selectEmployee(filtered[0]);
+            if (event.key === 'Escape') setOpen(false);
+          }}
+          placeholder={placeholder}
+          style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1, minWidth: 0 }}
+        />
+        <Search size={12} style={{ color: colors.textMuted, flexShrink: 0 }} />
+      </div>
+      {open && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 700, backgroundColor: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 6, boxShadow: '0 12px 28px rgba(34, 48, 78, 0.16)', overflow: 'hidden', maxHeight: 230, overflowY: 'auto' }}>
+          {filtered.length ? filtered.map(employee => (
+            <button
+              key={leaveEmployeeKey(employee)}
+              type="button"
+              onMouseDown={event => event.preventDefault()}
+              onClick={() => selectEmployee(employee)}
+              style={{ width: '100%', border: 'none', background: leaveEmployeeKey(employee) === value ? colors.badgeBlueBg : 'transparent', color: colors.text, cursor: 'pointer', padding: '8px 10px', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2 }}
+            >
+              <span style={{ fontSize: 13 }}>{employee.name} / {employee.employeeNo}</span>
+              <span style={{ fontSize: 11, color: colors.textMuted }}>{employee.department}</span>
+            </button>
+          )) : (
+            <div style={{ padding: '10px 12px', fontSize: 12, color: colors.textMuted }}>未找到匹配人员</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FieldOutModal({ colors, onClose }: { colors: any; onClose: () => void }) {
+  const [employees, setEmployees] = useState<LeaveEmployeeOption[]>([]);
+  const [applicant, setApplicant] = useState('');
+  const [status, setStatus] = useState('审批中');
+  const [effect, setEffect] = useState('待生效');
+  const [source, setSource] = useState('移动端申请');
+  const [startDate, setStartDate] = useState(todayISO());
+  const [startTime, setStartTime] = useState('09:00');
+  const [endDate, setEndDate] = useState(todayISO());
+  const [endTime, setEndTime] = useState('18:00');
+  const [duration, setDuration] = useState('8小时');
+  const [reason, setReason] = useState('前端发起外出流程');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSettingsPeople().then(res => {
+      if (cancelled) return;
+      const options = settingsPeopleToLeaveOptions(res.rows || []);
+      setEmployees(options);
+      setApplicant(current => current || (options[0] ? leaveEmployeeKey(options[0]) : ''));
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
+  const selectedApplicant = employees.find(employee => leaveEmployeeKey(employee) === applicant);
+  const submitOut = async () => {
+    if (!selectedApplicant || saving) return;
+    setSaving(true);
+    try {
+      const existing = await fetchFieldOutRecords();
+      await saveFieldOutRecords([
+        frontendFieldWorkRow({
+          applicant: selectedApplicant,
+          type: 'out',
+          reason,
+          startTime: `${startDate} ${startTime}`,
+          endTime: `${endDate} ${endTime}`,
+          duration,
+          status,
+          effect,
+          source,
+        }),
+        ...(existing.rows || []),
+      ]);
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={overlay}>
+      <div style={{ ...mbox(colors), width: 620 }}>
+        <div style={mhead(colors)}><span style={{ fontWeight: 600, fontSize: '14px', color: colors.text }}>添加外出记录</span><button onClick={onClose} style={iconBtn(colors)}><X size={15} /></button></div>
+        <div style={{ padding: '20px 24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 18px' }}>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <div style={frow}><label style={flabel(colors)}><span style={star}>*</span>申请人</label><LeaveEmployeeSearchSelect value={applicant} employees={employees} colors={colors} placeholder="输入姓名或工号搜索申请人" onChange={setApplicant} /></div>
+          </div>
+          <div><label style={{ display: 'block', ...flabel(colors), marginBottom: 6 }}>申请人部门</label><input value={selectedApplicant?.department || ''} readOnly style={{ ...miniInput(colors), width: '100%', color: colors.textMuted }} /></div>
+          <div><label style={{ display: 'block', ...flabel(colors), marginBottom: 6 }}>数据来源</label><select value={source} onChange={e => setSource(e.target.value)} style={{ ...miniInput(colors), width: '100%' }}>{['移动端申请', 'PC端申请', 'HR手动添加'].map(option => <option key={option} value={option}>{option}</option>)}</select></div>
+          <div><label style={{ display: 'block', ...flabel(colors), marginBottom: 6 }}>记录状态</label><select value={status} onChange={e => setStatus(e.target.value)} style={{ ...miniInput(colors), width: '100%' }}>{['审批中', '已通过', '已拒绝'].map(option => <option key={option} value={option}>{option}</option>)}</select></div>
+          <div><label style={{ display: 'block', ...flabel(colors), marginBottom: 6 }}>生效状态</label><select value={effect} onChange={e => setEffect(e.target.value)} style={{ ...miniInput(colors), width: '100%' }}>{['待生效', '已生效'].map(option => <option key={option} value={option}>{option}</option>)}</select></div>
+          <div><label style={{ display: 'block', ...flabel(colors), marginBottom: 6 }}><span style={star}>*</span>外出开始时间</label><div style={{ display: 'flex', gap: 6 }}><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ ...miniInput(colors), flex: 1 }} /><input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} style={{ ...miniInput(colors), width: 92 }} /></div></div>
+          <div><label style={{ display: 'block', ...flabel(colors), marginBottom: 6 }}><span style={star}>*</span>外出结束时间</label><div style={{ display: 'flex', gap: 6 }}><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{ ...miniInput(colors), flex: 1 }} /><input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} style={{ ...miniInput(colors), width: 92 }} /></div></div>
+          <div><label style={{ display: 'block', ...flabel(colors), marginBottom: 6 }}>外出时长</label><input value={duration} onChange={e => setDuration(e.target.value)} placeholder="例如：8小时" style={{ ...miniInput(colors), width: '100%' }} /></div>
+          <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', ...flabel(colors), marginBottom: 6 }}>外出原因</label><textarea value={reason} onChange={e => setReason(e.target.value.slice(0, 256))} rows={3} style={{ width: '100%', resize: 'vertical', border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '7px 8px', fontSize: '12px', backgroundColor: colors.inputBg, color: colors.text, outline: 'none', boxSizing: 'border-box' }} /></div>
+        </div>
+        <div style={mfoot(colors)}><button onClick={onClose} style={outlineBtn(colors)}>取消</button><button onClick={submitOut} disabled={!selectedApplicant || saving} style={!selectedApplicant || saving ? disabledBtn(colors) : primaryBtn(colors)}>{saving ? '保存中...' : '保存记录'}</button></div>
+      </div>
+    </div>
+  );
+}
+
 function FieldTripModal({ colors, onClose }: { colors: any; onClose: () => void }) {
+  const [employees, setEmployees] = useState<LeaveEmployeeOption[]>([]);
   const [applicant, setApplicant] = useState(''); const [reason, setReason] = useState(''); const [note, setNote] = useState('');
   const [trips, setTrips] = useState<Trip[]>([{ id: 1, fromCity: '', toCity: '', startDate: '', startTime: '', endDate: '', endTime: '', tripType: '往返' }]);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetchSettingsPeople().then(res => {
+      if (cancelled) return;
+      const options = settingsPeopleToLeaveOptions(res.rows || []);
+      setEmployees(options);
+      setApplicant(current => current || (options[0] ? leaveEmployeeKey(options[0]) : ''));
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+  const selectedApplicant = employees.find(employee => leaveEmployeeKey(employee) === applicant);
   const addTrip = () => setTrips(p => [...p, { id: Date.now(), fromCity: '', toCity: '', startDate: '', startTime: '', endDate: '', endTime: '', tripType: '往返' }]);
   const removeTrip = (id: number) => setTrips(p => p.filter(t => t.id !== id));
   const updateTrip = (id: number, f: keyof Trip, v: string) => setTrips(p => p.map(t => t.id === id ? { ...t, [f]: v } : t));
+  const submitTrip = async () => {
+    if (!selectedApplicant || saving) return;
+    setSaving(true);
+    try {
+      const existing = await fetchFieldTripRecords();
+      await saveFieldTripRecords([frontendFieldWorkRow({ applicant: selectedApplicant, type: 'trip', reason }), ...(existing.rows || [])]);
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <div style={overlay}>
       <div style={{ ...mbox(colors), width: 700, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
         <div style={mhead(colors)}><span style={{ fontWeight: 600, fontSize: '14px', color: colors.text }}>添加出差记录</span><button onClick={onClose} style={iconBtn(colors)}><X size={15} /></button></div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={frow}><label style={flabel(colors)}><span style={star}>*</span>申请人</label><div style={{ ...srchBox(colors), flex: 1 }}><input value={applicant} onChange={e => setApplicant(e.target.value)} placeholder="姓名/员工工号模糊搜索" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }} /><Search size={12} style={{ color: colors.textMuted }} /></div></div>
+          <div style={frow}><label style={flabel(colors)}><span style={star}>*</span>申请人</label><LeaveEmployeeSearchSelect value={applicant} employees={employees} colors={colors} placeholder="输入姓名或工号搜索申请人" onChange={setApplicant} /></div>
           <div style={{ display: 'flex', gap: 14 }}>
             <div style={{ flex: 1 }}><label style={{ display: 'block', ...flabel(colors), marginBottom: 6 }}><span style={star}>*</span>出差事由</label><div style={{ position: 'relative' }}><textarea value={reason} onChange={e => setReason(e.target.value.slice(0, 256))} rows={3} style={{ width: '100%', resize: 'none', border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '6px 8px', fontSize: '12px', backgroundColor: colors.inputBg, color: colors.text, outline: 'none', boxSizing: 'border-box' }} /><span style={{ position: 'absolute', bottom: 4, right: 8, fontSize: '11px', color: colors.textMuted }}>{reason.length}/256</span></div></div>
             <div style={{ flex: 1 }}><label style={{ display: 'block', ...flabel(colors), marginBottom: 6 }}>备注</label><div style={{ position: 'relative' }}><textarea value={note} onChange={e => setNote(e.target.value.slice(0, 256))} placeholder="请输入" rows={3} style={{ width: '100%', resize: 'none', border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '6px 8px', fontSize: '12px', backgroundColor: colors.inputBg, color: colors.text, outline: 'none', boxSizing: 'border-box' }} /><span style={{ position: 'absolute', bottom: 4, right: 8, fontSize: '11px', color: colors.textMuted }}>{note.length}/256</span></div></div>
@@ -581,7 +929,7 @@ function FieldTripModal({ colors, onClose }: { colors: any; onClose: () => void 
             </div>
           </div>
         </div>
-        <div style={mfoot(colors)}><button onClick={onClose} style={outlineBtn(colors)}>取消</button><button style={primaryBtn(colors)}>提交</button></div>
+        <div style={mfoot(colors)}><button onClick={onClose} style={outlineBtn(colors)}>取消</button><button onClick={submitTrip} disabled={!selectedApplicant || saving} style={!selectedApplicant || saving ? disabledBtn(colors) : primaryBtn(colors)}>{saving ? '提交中...' : '提交'}</button></div>
       </div>
     </div>
   );
@@ -1156,12 +1504,13 @@ export default function DailyAttendanceStats() {
 
       {/* ── Modals ───────────────────────── */}
       {modal === 'clock-patch' && <ClockPatchModal colors={colors} onClose={() => setModal(null)} />}
+      {modal === 'field-out' && <FieldOutModal colors={colors} onClose={() => setModal(null)} />}
       {modal === 'field-trip' && <FieldTripModal colors={colors} onClose={() => setModal(null)} />}
       {modal === 'leave' && <LeaveModal colors={colors} onClose={() => setModal(null)} />}
       {modal === 'calc-range' && <CalcRangeModal colors={colors} onClose={() => setModal(null)} />}
-      {(modal === 'overtime' || modal === 'field-out') && (
+      {modal === 'overtime' && (
         <div style={overlay}><div style={{ ...mbox(colors), width: 380, padding: 32, textAlign: 'center' }}>
-          <div style={{ fontSize: '14px', color: colors.text, marginBottom: 8 }}>{modal === 'overtime' ? '加班申请' : '外出申请'}</div>
+          <div style={{ fontSize: '14px', color: colors.text, marginBottom: 8 }}>加班申请</div>
           <p style={{ fontSize: '12px', color: colors.textMuted, marginBottom: 20 }}>该功能模块开发中，敬请期待</p>
           <button onClick={() => setModal(null)} style={primaryBtn(colors)}>关闭</button>
         </div></div>
@@ -1174,6 +1523,7 @@ export default function DailyAttendanceStats() {
 function inputBox(colors: any, focused: boolean): React.CSSProperties { return { display: 'flex', alignItems: 'center', gap: 4, border: `1px solid ${focused ? colors.primary : colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', fontSize: '12px', backgroundColor: colors.inputBg }; }
 function primaryBtn(colors: any): React.CSSProperties { return { padding: '5px 14px', fontSize: '12px', border: 'none', borderRadius: 4, cursor: 'pointer', backgroundColor: colors.primary, color: '#fff', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4 }; }
 function outlineBtn(colors: any): React.CSSProperties { return { padding: '5px 12px', fontSize: '12px', border: `1px solid ${colors.inputBorder}`, borderRadius: 4, cursor: 'pointer', backgroundColor: 'transparent', color: colors.text, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4 }; }
+function disabledBtn(colors: any): React.CSSProperties { return { ...outlineBtn(colors), color: colors.textMuted, cursor: 'not-allowed', opacity: 0.55 }; }
 function iconBtn(colors: any): React.CSSProperties { return { display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer', color: colors.textMuted }; }
 function iconBtnSq(colors: any): React.CSSProperties { return { width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${colors.inputBorder}`, borderRadius: 4, backgroundColor: 'transparent', cursor: 'pointer', color: colors.textMuted }; }
 function ddBox(colors: any): React.CSSProperties { return { position: 'absolute', top: '100%', left: 0, zIndex: 250, marginTop: 4, backgroundColor: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 6, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', overflow: 'hidden' }; }

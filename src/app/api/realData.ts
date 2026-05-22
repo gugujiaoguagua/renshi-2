@@ -136,6 +136,24 @@ export type MakeupClockRecord = {
   archiveStatus: string;
 };
 
+export type FieldClockRecord = {
+  id: number;
+  name: string;
+  empId: string;
+  initiator: string;
+  initiatorId: string;
+  source: string;
+  dept: string;
+  date: string;
+  time: string;
+  initiateTime: string;
+  completeTime: string;
+  location: string;
+  note: string;
+  hasPhoto: boolean;
+  reviewStatus: string;
+};
+
 export type PhotoClockRecord = {
   id: number;
   name: string;
@@ -197,6 +215,14 @@ export type StatItemRecord = {
   hasFormula: boolean;
   dataType: string;
   isCustom: boolean;
+  scope?: string;
+  externalEnabled?: boolean;
+  defaultValue?: string;
+  resultType?: string;
+  unit?: string;
+  decimal?: number;
+  roundMode?: string;
+  formulas?: Array<{ name: string; expr: string }>;
 };
 
 export type WorkDataRecord = {
@@ -248,6 +274,20 @@ export type FieldWorkRecord = {
   flowStatus: string;
 };
 
+export type ScheduleShiftOption = {
+  id: string;
+  name: string;
+  time?: string;
+};
+
+export type ScheduleMonthEmployee = {
+  name: string;
+  employeeNo: string;
+  dept: string;
+  position: string;
+  dayResults: Record<string, string>;
+};
+
 export type LeaveRecordRow = Array<string | number | boolean>;
 
 export type ExternalRecord = {
@@ -257,6 +297,10 @@ export type ExternalRecord = {
   period: string;
   statItem: string;
   statValue: string | number;
+  employeeName?: string;
+  employeeNo?: string;
+  empId?: string;
+  dept?: string;
   creator: string;
   createTime: string;
   modifier: string;
@@ -300,8 +344,36 @@ export async function fetchClockRecords() {
   return limitDataResponse(await requestJson<DataResponse<ClockRecord>>('/api/clock-records'));
 }
 
+export async function saveClockRecords(rows: ClockRecord[]) {
+  return requestJson<DataResponse<ClockRecord> & { ok: boolean }>('/api/clock-records', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
 export async function fetchMakeupClockRecords() {
   return limitDataResponse(await requestJson<DataResponse<MakeupClockRecord>>('/api/clock-makeup-records'));
+}
+
+export async function saveMakeupClockRecords(rows: MakeupClockRecord[]) {
+  return requestJson<DataResponse<MakeupClockRecord> & { ok: boolean }>('/api/clock-makeup-records', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
+export async function fetchFieldClockRecords() {
+  return limitDataResponse(await requestJson<DataResponse<FieldClockRecord>>('/api/clock-field-records'));
+}
+
+export async function saveFieldClockRecords(rows: FieldClockRecord[]) {
+  return requestJson<DataResponse<FieldClockRecord> & { ok: boolean }>('/api/clock-field-records', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
 }
 
 export async function fetchPhotoClockRecords() {
@@ -333,8 +405,36 @@ export async function fetchFieldOutRecords() {
   return limitDataResponse(await requestJson<DataResponse<FieldWorkRecord>>('/api/field-out-records'));
 }
 
+export async function saveFieldOutRecords(rows: FieldWorkRecord[]) {
+  return requestJson<DataResponse<FieldWorkRecord>>('/api/field-out-records', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
 export async function fetchFieldTripRecords() {
   return limitDataResponse(await requestJson<DataResponse<FieldWorkRecord>>('/api/field-trip-records'));
+}
+
+export async function saveFieldTripRecords(rows: FieldWorkRecord[]) {
+  return requestJson<DataResponse<FieldWorkRecord>>('/api/field-trip-records', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
+export async function fetchScheduleMonth(month: string) {
+  return requestJson<DataResponse<ScheduleMonthEmployee> & { shifts: ScheduleShiftOption[]; month: string }>(`/api/schedules/month?month=${encodeURIComponent(month)}`);
+}
+
+export async function saveScheduleAssignments(rows: Array<{ date: string; employeeNo: string; employeeName: string; dept: string; shiftId?: string; shiftName: string }>) {
+  return requestJson<DataResponse<ScheduleMonthEmployee> & { ok: boolean }>('/api/schedules', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
 }
 
 export async function fetchLeaveRecords() {
@@ -393,6 +493,114 @@ export async function fetchSettingsShifts() {
   return requestJson<DataResponse<SettingTableRow>>('/api/settings-shifts');
 }
 
+export async function fetchSettingsGroups() {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-groups');
+}
+
+export async function saveSettingsGroups(rows: SettingTableRow[]) {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-groups', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
+export async function fetchSettingsCardRules() {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-card-rules');
+}
+
+export async function saveSettingsCardRules(rows: SettingTableRow[]) {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-card-rules', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
+export async function fetchSettingsMobileClock() {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-mobile-clock');
+}
+
+export async function saveSettingsMobileClock(rows: SettingTableRow[]) {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-mobile-clock', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
+export async function fetchSettingsLocation() {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-location');
+}
+
+export async function saveSettingsLocation(rows: SettingTableRow[]) {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-location', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
+export async function fetchSettingsHoliday() {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-holiday');
+}
+
+export async function saveSettingsHoliday(rows: SettingTableRow[]) {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-holiday', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
+export async function fetchSettingsCalendar() {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-calendar');
+}
+
+export async function saveSettingsCalendar(rows: SettingTableRow[]) {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-calendar', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
+export async function fetchSettingsOvertimeRules() {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-overtime-rules');
+}
+
+export async function saveSettingsOvertimeRules(rows: SettingTableRow[]) {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-overtime-rules', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
+export async function fetchSettingsFieldRules() {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-field-rules');
+}
+
+export async function saveSettingsFieldRules(rows: SettingTableRow[]) {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-field-rules', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
+export async function fetchSettingsStatSchemes() {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-stat-schemes');
+}
+
+export async function saveSettingsStatSchemes(rows: SettingTableRow[]) {
+  return requestJson<DataResponse<SettingTableRow>>('/api/settings-stat-schemes', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+}
+
 export async function saveSettingsShifts(rows: SettingTableRow[]) {
   return requestJson<DataResponse<SettingTableRow>>('/api/settings-shifts', {
     method: 'PUT',
@@ -447,6 +655,14 @@ export async function saveStatItems(rows: StatItemRecord[]) {
 
 export async function fetchExternalRecords() {
   return requestJson<DataResponse<ExternalRecord>>('/api/external-records');
+}
+
+export async function saveExternalRecords(rows: ExternalRecord[]) {
+  return requestJson<DataResponse<ExternalRecord> & { ok: boolean }>('/api/external-records', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
 }
 
 export async function fetchDataSources() {

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
-import { fetchFieldOutRecords, fetchFieldTripRecords } from '../api/realData';
+import { fetchFieldOutRecords, fetchFieldTripRecords, fetchSettingsPeople, saveFieldOutRecords, saveFieldTripRecords } from '../api/realData';
 import {
   Calendar,
   ChevronDown,
@@ -61,6 +61,21 @@ const TRIP_COLUMNS = [
 ];
 
 type FieldRow = { id: number; status: string; name: string; empId: string; dept: string; deptPath: string; effect: string; source: string; values: string[]; flowStatus: string };
+type EmployeeOption = { name: string; employeeNo: string; department: string; deptFullPath: string };
+type FieldDraft = {
+  employeeKey: string;
+  initiatorKey: string;
+  status: string;
+  effect: string;
+  source: string;
+  startTime: string;
+  endTime: string;
+  duration: string;
+  reason: string;
+  tripType: string;
+  route: string;
+  flowStatus: string;
+};
 
 const OUT_ROWS: FieldRow[] = [];
 
@@ -98,6 +113,94 @@ function useClickOutside(ref: React.RefObject<HTMLElement | null>, handler: () =
     document.addEventListener('mousedown', listener);
     return () => document.removeEventListener('mousedown', listener);
   }, [ref, handler]);
+}
+
+function currentDateText() {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function currentDateTimeText() {
+  const date = new Date();
+  return `${currentDateText()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function employeeKey(employee: EmployeeOption) {
+  return `${employee.employeeNo}|${employee.name}`;
+}
+
+function peopleRowsToOptions(rows: Array<Array<unknown>>): EmployeeOption[] {
+  return rows
+    .map(row => ({
+      name: String(row[0] ?? '').trim(),
+      employeeNo: String(row[1] ?? '').trim(),
+      department: String(row[2] ?? '').trim() || '-',
+      deptFullPath: String(row[2] ?? '').trim() || '-',
+    }))
+    .filter(employee => employee.name && employee.employeeNo);
+}
+
+function employeeFromKey(employees: EmployeeOption[], key: string) {
+  return employees.find(employee => employeeKey(employee) === key) || employees[0] || {
+    name: '新增员工',
+    employeeNo: 'FW0001',
+    department: '产品运营部',
+    deptFullPath: '产品研发中心/产品运营部',
+  };
+}
+
+function defaultFieldDraft(employees: EmployeeOption[], isTrip: boolean, label = '添加单条'): FieldDraft {
+  const employee = employees[0];
+  const today = currentDateText();
+  const startedByFlow = label.includes('发起');
+  return {
+    employeeKey: employee ? employeeKey(employee) : '',
+    initiatorKey: employee ? employeeKey(employee) : '',
+    status: startedByFlow ? '审批中' : '已通过',
+    effect: startedByFlow ? '待生效' : '已生效',
+    source: label.includes('移动') ? '移动端申请' : label.includes('导入') ? '导入' : 'PC端申请',
+    startTime: `${today}T09:00`,
+    endTime: `${today}T18:00`,
+    duration: isTrip ? '1天' : '8小时',
+    reason: label,
+    tripType: '往返',
+    route: '上海-杭州',
+    flowStatus: startedByFlow ? '审批中' : '已通过',
+  };
+}
+
+function fieldRowFromDraft(draft: FieldDraft, employees: EmployeeOption[], isTrip: boolean, id: number): FieldRow {
+  const employee = employeeFromKey(employees, draft.employeeKey);
+  const initiator = employeeFromKey(employees, draft.initiatorKey || draft.employeeKey);
+  const start = draft.startTime.replace('T', ' ');
+  const end = draft.endTime.replace('T', ' ');
+  const created = currentDateTimeText();
+  if (isTrip) {
+    return {
+      id,
+      status: draft.status,
+      name: employee.name,
+      empId: employee.employeeNo,
+      dept: employee.department,
+      deptPath: employee.deptFullPath,
+      effect: draft.effect,
+      source: draft.source,
+      values: [draft.source, draft.tripType, draft.route, `${start.slice(0, 10)} ~ ${end.slice(0, 10)}`, '无', draft.duration || '1天', draft.reason || '-', created, draft.flowStatus === '已通过' ? created : ''],
+      flowStatus: draft.flowStatus,
+    };
+  }
+  return {
+    id,
+    status: draft.status,
+    name: employee.name,
+    empId: employee.employeeNo,
+    dept: employee.department,
+    deptPath: employee.deptFullPath,
+    effect: draft.effect,
+    source: draft.source,
+    values: [initiator.name, initiator.employeeNo, draft.source, start, end, draft.duration || '8小时', '无', draft.reason || '-', created],
+    flowStatus: draft.flowStatus,
+  };
 }
 
 function EmptyState({ colors }: { colors: any }) {
@@ -300,10 +403,12 @@ function DropdownAction({
           {items.map((item, index) => (
             <button
               key={item.label}
-              onClick={() => {
+              onMouseDown={(event) => {
+                event.preventDefault();
                 onSelect(item);
                 onClose();
               }}
+              onClick={(event) => event.preventDefault()}
               style={{
                 width: '100%',
                 border: 'none',
@@ -350,6 +455,9 @@ export default function FieldWork() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [outRows, setOutRows] = useState<FieldRow[]>([]);
   const [tripRows, setTripRows] = useState<FieldRow[]>([]);
+  const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
+  const [showFieldModal, setShowFieldModal] = useState(false);
+  const [fieldDraft, setFieldDraft] = useState<FieldDraft>(() => defaultFieldDraft([], false));
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [startTimeRange, setStartTimeRange] = useState({ start: '', end: '' });
   const [finishTimeRange, setFinishTimeRange] = useState({ start: '', end: '' });
@@ -365,11 +473,12 @@ export default function FieldWork() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchFieldOutRecords(), fetchFieldTripRecords()])
-      .then(([out, trip]) => {
+    Promise.all([fetchFieldOutRecords(), fetchFieldTripRecords(), fetchSettingsPeople()])
+      .then(([out, trip, people]) => {
         if (cancelled) return;
         setOutRows(out.rows as FieldRow[]);
         setTripRows(trip.rows as FieldRow[]);
+        setEmployeeOptions(peopleRowsToOptions(people.rows as Array<Array<unknown>>));
       })
       .catch(() => {
         if (cancelled) return;
@@ -472,47 +581,41 @@ export default function FieldWork() {
     link.click();
     window.URL.revokeObjectURL(url);
   };
+  const persistOutRows = (rows: FieldRow[]) => void saveFieldOutRecords(rows).catch(() => window.alert('外出记录已在页面更新，但保存到后端失败'));
+  const persistTripRows = (rows: FieldRow[]) => void saveFieldTripRecords(rows).catch(() => window.alert('出差记录已在页面更新，但保存到后端失败'));
   const deleteRows = () => {
     if (!selected.size) return;
-    if (activeView === 'trip') setTripRows(current => current.filter(row => !selected.has(row.id)));
-    else setOutRows(current => current.filter(row => !selected.has(row.id)));
+    if (activeView === 'trip') setTripRows(current => {
+      const next = current.filter(row => !selected.has(row.id));
+      persistTripRows(next);
+      return next;
+    });
+    else setOutRows(current => {
+      const next = current.filter(row => !selected.has(row.id));
+      persistOutRows(next);
+      return next;
+    });
     setSelected(new Set());
   };
   const addFieldAction = (label: string) => {
-    const baseId = Math.max(0, ...outRows.map(row => row.id), ...tripRows.map(row => row.id)) + 1;
-    const count = label.includes('批量') ? 3 : 1;
-    const nextRows = Array.from({ length: count }, (_, index): FieldRow => {
-      const id = baseId + index;
-      if (activeView === 'trip') {
-        return {
-          id,
-          status: label.includes('发起') ? '审批中' : '已通过',
-          name: '新增出差人员',
-          empId: `TR${String(id).padStart(4, '0')}`,
-          dept: '产品运营部',
-          deptPath: '产品研发中心/产品运营部',
-          effect: label.includes('发起') ? '待生效' : '已生效',
-          source: label.includes('导入') ? '导入' : 'PC端申请',
-          values: ['PC端申请', '往返', '上海-杭州', `${new Date().toISOString().slice(0, 10)} ~ ${new Date().toISOString().slice(0, 10)}`, '无', '1', label, new Date().toISOString().slice(0, 16).replace('T', ' '), ''],
-          flowStatus: label.includes('发起') ? '审批中' : '已通过',
-        };
-      }
-      return {
-        id,
-        status: label.includes('发起') ? '审批中' : '已通过',
-        name: '新增外出人员',
-        empId: `FW${String(id).padStart(4, '0')}`,
-        dept: '产品运营部',
-        deptPath: '产品研发中心/产品运营部',
-        effect: label.includes('发起') ? '待生效' : '已生效',
-        source: label.includes('导入') ? '导入' : 'PC端申请',
-        values: ['新增外出人员', `FW${String(id).padStart(4, '0')}`, 'PC端申请', `${new Date().toISOString().slice(0, 10)} 09:00`, `${new Date().toISOString().slice(0, 10)} 18:00`, '8小时', '无', label, new Date().toISOString().slice(0, 16).replace('T', ' ')],
-        flowStatus: label.includes('发起') ? '审批中' : '已通过',
-      };
-    });
-    if (activeView === 'trip') setTripRows(current => [...nextRows, ...current]);
-    else setOutRows(current => [...nextRows, ...current]);
+    setFieldDraft(defaultFieldDraft(employeeOptions, activeView === 'trip', label));
+    setShowFieldModal(true);
     closeMenus();
+  };
+  const saveFieldDraft = () => {
+    const baseId = Math.max(0, ...outRows.map(row => row.id), ...tripRows.map(row => row.id)) + 1;
+    const nextRow = fieldRowFromDraft(fieldDraft, employeeOptions, activeView === 'trip', baseId);
+    if (activeView === 'trip') setTripRows(current => {
+      const next = [nextRow, ...current];
+      persistTripRows(next);
+      return next;
+    });
+    else setOutRows(current => {
+      const next = [nextRow, ...current];
+      persistOutRows(next);
+      return next;
+    });
+    setShowFieldModal(false);
   };
   const showFieldDetail = (row: FieldRow) => {
     window.alert(`${pageConfig.title}详情\n申请人：${row.name} ${row.empId}\n部门：${row.dept}\n生效状态：${row.effect}\n数据来源：${row.source}\n流程状态：${row.flowStatus}`);
@@ -785,7 +888,197 @@ export default function FieldWork() {
           </tbody>
         </table>
       </div>
+      {showFieldModal ? (
+        <FieldRecordModal
+          colors={colors}
+          isTrip={activeView === 'trip'}
+          draft={fieldDraft}
+          employees={employeeOptions}
+          onChange={(key, value) => setFieldDraft(current => ({ ...current, [key]: value }))}
+          onCancel={() => setShowFieldModal(false)}
+          onSave={saveFieldDraft}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function FieldRecordModal({
+  colors,
+  isTrip,
+  draft,
+  employees,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  colors: any;
+  isTrip: boolean;
+  draft: FieldDraft;
+  employees: EmployeeOption[];
+  onChange: (key: keyof FieldDraft, value: string) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const selectedEmployee = employeeFromKey(employees, draft.employeeKey);
+  return (
+    <div style={modalOverlay}>
+      <div style={modalPanel(colors, 720)}>
+        <div style={modalHeader(colors)}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{isTrip ? '新增出差记录' : '新增外出记录'}</div>
+            <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>选择真实人员，保存后同步到外勤管理接口，前端发起记录也写入同一表</div>
+          </div>
+          <button onClick={onCancel} style={iconBtn(colors)}>×</button>
+        </div>
+        <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+          <ModalField label="申请人" required colors={colors}>
+            <EmployeeSearchSelect value={draft.employeeKey} employees={employees} colors={colors} placeholder="输入姓名或工号搜索申请人" onChange={value => onChange('employeeKey', value)} />
+          </ModalField>
+          <ModalField label="申请人部门" colors={colors}>
+            <input value={selectedEmployee.department} readOnly style={{ ...modalInput(colors), color: colors.textMuted }} />
+          </ModalField>
+          <ModalField label="记录状态" required colors={colors}>
+            <select value={draft.status} onChange={event => onChange('status', event.target.value)} style={modalInput(colors)}>
+              {['已通过', '审批中', '已拒绝'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="生效状态" required colors={colors}>
+            <select value={draft.effect} onChange={event => onChange('effect', event.target.value)} style={modalInput(colors)}>
+              {['已生效', '待生效'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="数据来源" colors={colors}>
+            <select value={draft.source} onChange={event => onChange('source', event.target.value)} style={modalInput(colors)}>
+              {['PC端申请', '移动端申请', 'HR手动添加', '导入'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="当前流程状态" colors={colors}>
+            <select value={draft.flowStatus} onChange={event => onChange('flowStatus', event.target.value)} style={modalInput(colors)}>
+              {['已通过', '审批中', '已拒绝'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          {isTrip ? (
+            <>
+              <ModalField label="单程/往返" colors={colors}>
+                <select value={draft.tripType} onChange={event => onChange('tripType', event.target.value)} style={modalInput(colors)}>
+                  {['往返', '单程'].map(option => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </ModalField>
+              <ModalField label="出差行程" required colors={colors}>
+                <input value={draft.route} onChange={event => onChange('route', event.target.value)} placeholder="例如：上海-杭州" style={modalInput(colors)} />
+              </ModalField>
+            </>
+          ) : (
+            <ModalField label="发起人" required colors={colors}>
+              <EmployeeSearchSelect value={draft.initiatorKey || draft.employeeKey} employees={employees} colors={colors} placeholder="输入姓名或工号搜索发起人" onChange={value => onChange('initiatorKey', value)} />
+            </ModalField>
+          )}
+          <ModalField label={isTrip ? '出差开始时间' : '外出开始时间'} required colors={colors}>
+            <input type="datetime-local" value={draft.startTime} onChange={event => onChange('startTime', event.target.value)} style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label={isTrip ? '出差结束时间' : '外出结束时间'} required colors={colors}>
+            <input type="datetime-local" value={draft.endTime} onChange={event => onChange('endTime', event.target.value)} style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label={isTrip ? '出差天数' : '外出时长'} required colors={colors}>
+            <input value={draft.duration} onChange={event => onChange('duration', event.target.value)} placeholder={isTrip ? '1天' : '8小时'} style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label={isTrip ? '出差理由' : '外出原因'} colors={colors} full>
+            <textarea value={draft.reason} onChange={event => onChange('reason', event.target.value)} placeholder="请输入原因" style={{ ...modalInput(colors), height: 78, resize: 'vertical', paddingTop: 8 }} />
+          </ModalField>
+        </div>
+        <div style={modalFooter(colors)}>
+          <button onClick={onCancel} style={outlineBtn(colors)}>取消</button>
+          <button onClick={onSave} disabled={!draft.employeeKey || !draft.startTime || !draft.endTime} style={!draft.employeeKey || !draft.startTime || !draft.endTime ? disabledBtn(colors) : primaryBtn(colors)}>保存记录</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmployeeSearchSelect({
+  value,
+  employees,
+  colors,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  employees: EmployeeOption[];
+  colors: any;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  const selected = employees.find(employee => employeeKey(employee) === value);
+  const [query, setQuery] = useState(selected ? `${selected.name} / ${selected.employeeNo}` : '');
+  const [open, setOpen] = useState(false);
+  const filtered = employees.filter(employee => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return true;
+    return `${employee.name} ${employee.employeeNo} ${employee.department} ${employee.deptFullPath}`.toLowerCase().includes(keyword);
+  }).slice(0, 8);
+
+  useEffect(() => {
+    const nextSelected = employees.find(employee => employeeKey(employee) === value);
+    setQuery(nextSelected ? `${nextSelected.name} / ${nextSelected.employeeNo}` : '');
+  }, [employees, value]);
+
+  const selectEmployee = (employee: EmployeeOption) => {
+    onChange(employeeKey(employee));
+    setQuery(`${employee.name} / ${employee.employeeNo}`);
+    setOpen(false);
+  };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <div style={{ ...modalInput(colors), display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px' }}>
+        <input
+          value={query}
+          onFocus={() => setOpen(true)}
+          onChange={event => {
+            const nextQuery = event.target.value;
+            setQuery(nextQuery);
+            setOpen(true);
+            const exact = employees.find(employee => employee.name === nextQuery || employee.employeeNo === nextQuery || `${employee.name} / ${employee.employeeNo}` === nextQuery);
+            onChange(exact ? employeeKey(exact) : '');
+          }}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && filtered[0]) selectEmployee(filtered[0]);
+            if (event.key === 'Escape') setOpen(false);
+          }}
+          placeholder={placeholder}
+          style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', color: colors.text, fontSize: 13 }}
+        />
+        <Search size={13} style={{ color: colors.textMuted, flexShrink: 0 }} />
+      </div>
+      {open && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 940, backgroundColor: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 6, boxShadow: '0 12px 28px rgba(34, 48, 78, 0.16)', overflow: 'hidden', maxHeight: 230, overflowY: 'auto' }}>
+          {filtered.length ? filtered.map(employee => (
+            <button
+              key={employeeKey(employee)}
+              type="button"
+              onMouseDown={event => event.preventDefault()}
+              onClick={() => selectEmployee(employee)}
+              style={{ width: '100%', border: 'none', background: employeeKey(employee) === value ? colors.badgeBlueBg : 'transparent', color: colors.text, cursor: 'pointer', padding: '8px 10px', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2 }}
+            >
+              <span style={{ fontSize: 13 }}>{employee.name} / {employee.employeeNo}</span>
+              <span style={{ fontSize: 11, color: colors.textMuted }}>{employee.department}</span>
+            </button>
+          )) : (
+            <div style={{ padding: '10px 12px', fontSize: 12, color: colors.textMuted }}>未找到匹配人员</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ModalField({ label, required, colors, children, full = false }: { label: string; required?: boolean; colors: any; children: React.ReactNode; full?: boolean }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6, gridColumn: full ? '1 / -1' : undefined }}>
+      <span style={{ fontSize: 12, color: colors.textMuted }}>{required ? <span style={{ color: colors.primary, marginRight: 2 }}>*</span> : null}{label}</span>
+      {children}
+    </label>
   );
 }
 
@@ -861,6 +1154,33 @@ function disabledBtn(c: any): React.CSSProperties {
     cursor: 'not-allowed',
     backgroundColor: c.statCardBg,
   };
+}
+
+const modalOverlay: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 900,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 24,
+  backgroundColor: 'rgba(15, 23, 42, 0.38)',
+};
+
+function modalPanel(colors: any, width = 720): React.CSSProperties {
+  return { width, maxWidth: 'calc(100vw - 48px)', backgroundColor: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 8, boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)', overflow: 'hidden' };
+}
+
+function modalHeader(colors: any): React.CSSProperties {
+  return { minHeight: 52, padding: '10px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `1px solid ${colors.cardBorder}`, boxSizing: 'border-box' };
+}
+
+function modalFooter(colors: any): React.CSSProperties {
+  return { padding: '12px 18px 16px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${colors.cardBorder}` };
+}
+
+function modalInput(colors: any): React.CSSProperties {
+  return { width: '100%', minHeight: 34, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, backgroundColor: colors.inputBg, color: colors.text, fontSize: 13, outline: 'none', padding: '0 10px', boxSizing: 'border-box' };
 }
 
 function linkBtn(c: any): React.CSSProperties {

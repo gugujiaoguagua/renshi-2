@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
-import { deleteOnboardedEmployees, fetchSettingsFace, fetchSettingsPeople, fetchSettingsShifts, onboardEmployee, saveSettingsShifts } from '../api/realData';
+import { deleteOnboardedEmployees, fetchSettingsCalendar, fetchSettingsCardRules, fetchSettingsFace, fetchSettingsFieldRules, fetchSettingsGroups, fetchSettingsHoliday, fetchSettingsLocation, fetchSettingsMobileClock, fetchSettingsOvertimeRules, fetchSettingsPeople, fetchSettingsShifts, fetchSettingsStatSchemes, onboardEmployee, saveSettingsCalendar, saveSettingsCardRules, saveSettingsFieldRules, saveSettingsGroups, saveSettingsHoliday, saveSettingsLocation, saveSettingsMobileClock, saveSettingsOvertimeRules, saveSettingsShifts, saveSettingsStatSchemes } from '../api/realData';
 import { monthEndISO, monthStartISO, todayISO } from '../utils/date';
 import {
   AlertCircle,
@@ -41,6 +41,99 @@ type ShiftOption = {
   id: string;
   name: string;
   time: string;
+};
+
+type ShiftDraft = {
+  name: string;
+  shortName: string;
+  color: string;
+  tag: string;
+  season: string;
+  clockInTime: string;
+  clockOutTime: string;
+  duration: string;
+  attendGroup: string;
+  creator: string;
+  createdAt: string;
+};
+
+type GroupDraft = {
+  name: string;
+  type: string;
+  scope: string;
+  shiftName: string;
+  creator: string;
+  createdAt: string;
+};
+
+type CardRuleDraft = {
+  name: string;
+  content: string;
+  attendGroup: string;
+  creator: string;
+  createdAt: string;
+};
+
+type MobileClockDraft = {
+  name: string;
+  content: string;
+  attendGroup: string;
+  creator: string;
+  createdAt: string;
+};
+
+type LocationDraft = {
+  name: string;
+  attendGroup: string;
+  gpsAddress: string;
+  bluetooth: string;
+  wifi: string;
+  mobileScheme: string;
+  creator: string;
+  createdAt: string;
+};
+
+type HolidayDraft = {
+  name: string;
+  years: string;
+  calendarName: string;
+  creator: string;
+  createdAt: string;
+};
+
+type CalendarDraft = {
+  name: string;
+  period: string;
+  workdays: string;
+  maxRule: string;
+  attendGroup: string;
+  creator: string;
+  createdAt: string;
+};
+
+type OvertimeRuleDraft = {
+  name: string;
+  content: string;
+  attendGroup: string;
+  creator: string;
+  createdAt: string;
+};
+
+type FieldRuleDraft = {
+  name: string;
+  content: string;
+  attendGroup: string;
+  creator: string;
+  createdAt: string;
+};
+
+type StatSchemeDraft = {
+  name: string;
+  period: string;
+  stopRule: string;
+  scope: string;
+  creator: string;
+  createdAt: string;
 };
 
 type TableProps = {
@@ -156,6 +249,401 @@ function shiftOptionsFromRows(rows: string[][]): ShiftOption[] {
     });
 }
 
+function groupOptionsFromRows(rows: string[][]) {
+  return uniqueOptions(rows, 0);
+}
+
+function emptyGroupDraft(sequence = 1, defaultShift = '早九晚六'): GroupDraft {
+  return {
+    name: `新建考勤组${sequence}`,
+    type: '排班制',
+    scope: '部门：待配置',
+    shiftName: defaultShift,
+    creator: '后台维护',
+    createdAt: nowText(),
+  };
+}
+
+function groupDraftFromRow(row: string[]): GroupDraft {
+  return {
+    name: String(row[0] ?? ''),
+    type: String(row[1] ?? '排班制') || '排班制',
+    scope: String(row[2] ?? '部门：待配置') || '部门：待配置',
+    shiftName: String(row[3] ?? '早九晚六') || '早九晚六',
+    creator: String(row[4] ?? '后台维护') || '后台维护',
+    createdAt: String(row[5] ?? nowText()) || nowText(),
+  };
+}
+
+function groupRowFromDraft(draft: GroupDraft, previousRow?: string[]) {
+  const name = draft.name.trim();
+  return [
+    name,
+    draft.type.trim() || '排班制',
+    draft.scope.trim() || '部门：待配置',
+    draft.shiftName.trim() || '早九晚六',
+    draft.creator.trim() || '后台维护',
+    draft.createdAt.trim() || previousRow?.[5] || nowText(),
+    '后台维护',
+    nowText(),
+  ];
+}
+
+function emptyCardRuleDraft(sequence = 1, defaultGroup = '默认考勤组'): CardRuleDraft {
+  return {
+    name: `新增打卡规则${sequence}`,
+    content: '允许移动端与考勤机打卡',
+    attendGroup: defaultGroup,
+    creator: '后台维护',
+    createdAt: nowText(),
+  };
+}
+
+function cardRuleDraftFromRow(row: string[]): CardRuleDraft {
+  return {
+    name: String(row[0] ?? ''),
+    content: String(row[1] ?? ''),
+    attendGroup: String(row[2] ?? '默认考勤组') || '默认考勤组',
+    creator: String(row[3] ?? '后台维护') || '后台维护',
+    createdAt: String(row[4] ?? nowText()) || nowText(),
+  };
+}
+
+function cardRuleRowFromDraft(draft: CardRuleDraft, previousRow?: string[]) {
+  return [
+    draft.name.trim(),
+    draft.content.trim() || '-',
+    draft.attendGroup.trim() || '默认考勤组',
+    draft.creator.trim() || '后台维护',
+    draft.createdAt.trim() || previousRow?.[4] || nowText(),
+    '后台维护',
+    nowText(),
+  ];
+}
+
+function mobileSchemeOptionsFromRows(rows: string[][]) {
+  return uniqueOptions(rows, 0);
+}
+
+function emptyMobileClockDraft(sequence = 1, defaultGroup = '默认考勤组'): MobileClockDraft {
+  return {
+    name: `移动打卡方案${sequence}`,
+    content: 'GPS/Wi-Fi/蓝牙均可打卡',
+    attendGroup: defaultGroup,
+    creator: '后台维护',
+    createdAt: nowText(),
+  };
+}
+
+function mobileClockDraftFromRow(row: string[]): MobileClockDraft {
+  return {
+    name: String(row[0] ?? ''),
+    content: String(row[1] ?? ''),
+    attendGroup: String(row[2] ?? '默认考勤组') || '默认考勤组',
+    creator: String(row[3] ?? '后台维护') || '后台维护',
+    createdAt: String(row[4] ?? nowText()) || nowText(),
+  };
+}
+
+function mobileClockRowFromDraft(draft: MobileClockDraft, previousRow?: string[]) {
+  return [
+    draft.name.trim(),
+    draft.content.trim() || '-',
+    draft.attendGroup.trim() || '默认考勤组',
+    draft.creator.trim() || '后台维护',
+    draft.createdAt.trim() || previousRow?.[4] || nowText(),
+    '后台维护',
+    nowText(),
+  ];
+}
+
+function emptyLocationDraft(sequence = 1, defaultGroup = '默认考勤组', defaultMobileScheme = '未关联移动打卡方案'): LocationDraft {
+  return {
+    name: `上班地点${sequence}`,
+    attendGroup: defaultGroup,
+    gpsAddress: '上海市静安区南京西路',
+    bluetooth: '蓝牙-A1',
+    wifi: 'Office-WiFi',
+    mobileScheme: defaultMobileScheme,
+    creator: '后台维护',
+    createdAt: nowText(),
+  };
+}
+
+function locationDraftFromRow(row: string[]): LocationDraft {
+  return {
+    name: String(row[0] ?? ''),
+    attendGroup: String(row[1] ?? '默认考勤组') || '默认考勤组',
+    gpsAddress: String(row[2] ?? ''),
+    bluetooth: String(row[3] ?? ''),
+    wifi: String(row[4] ?? ''),
+    mobileScheme: String(row[5] ?? '未关联移动打卡方案') || '未关联移动打卡方案',
+    creator: String(row[6] ?? '后台维护') || '后台维护',
+    createdAt: String(row[7] ?? nowText()) || nowText(),
+  };
+}
+
+function locationRowFromDraft(draft: LocationDraft, previousRow?: string[]) {
+  return [
+    draft.name.trim(),
+    draft.attendGroup.trim() || '默认考勤组',
+    draft.gpsAddress.trim() || '-',
+    draft.bluetooth.trim() || '-',
+    draft.wifi.trim() || '-',
+    draft.mobileScheme.trim() || '未关联移动打卡方案',
+    draft.creator.trim() || '后台维护',
+    draft.createdAt.trim() || previousRow?.[7] || nowText(),
+    '后台维护',
+    nowText(),
+  ];
+}
+
+function calendarOptionsFromRows(rows: string[][]) {
+  return uniqueOptions(rows, 0);
+}
+
+function emptyHolidayDraft(sequence = 1, defaultCalendar = '双休'): HolidayDraft {
+  return {
+    name: `节假日方案${sequence}`,
+    years: String(new Date().getFullYear()),
+    calendarName: defaultCalendar,
+    creator: '后台维护',
+    createdAt: nowText(),
+  };
+}
+
+function holidayDraftFromRow(row: string[]): HolidayDraft {
+  return {
+    name: String(row[0] ?? ''),
+    years: String(row[1] ?? String(new Date().getFullYear())) || String(new Date().getFullYear()),
+    calendarName: String(row[2] ?? '双休') || '双休',
+    creator: String(row[3] ?? '后台维护') || '后台维护',
+    createdAt: String(row[4] ?? nowText()) || nowText(),
+  };
+}
+
+function holidayRowFromDraft(draft: HolidayDraft, previousRow?: string[]) {
+  return [
+    draft.name.trim(),
+    draft.years.trim() || String(new Date().getFullYear()),
+    draft.calendarName.trim() || '双休',
+    draft.creator.trim() || '后台维护',
+    draft.createdAt.trim() || previousRow?.[4] || nowText(),
+    '后台维护',
+    nowText(),
+  ];
+}
+
+function emptyCalendarDraft(sequence = 1, defaultGroup = '默认考勤组'): CalendarDraft {
+  return {
+    name: `司历方案${sequence}`,
+    period: '当月1日至当月最后一天为【当月】的考勤周期',
+    workdays: '周一、周二、周三、周四、周五',
+    maxRule: '工作日之和为应出勤天数',
+    attendGroup: defaultGroup,
+    creator: '后台维护',
+    createdAt: nowText(),
+  };
+}
+
+function calendarDraftFromRow(row: string[]): CalendarDraft {
+  return {
+    name: String(row[0] ?? ''),
+    period: String(row[1] ?? '当月1日至当月最后一天为【当月】的考勤周期') || '当月1日至当月最后一天为【当月】的考勤周期',
+    workdays: String(row[2] ?? '周一、周二、周三、周四、周五') || '周一、周二、周三、周四、周五',
+    maxRule: String(row[3] ?? '工作日之和为应出勤天数') || '工作日之和为应出勤天数',
+    attendGroup: String(row[4] ?? '默认考勤组') || '默认考勤组',
+    creator: String(row[5] ?? '后台维护') || '后台维护',
+    createdAt: String(row[6] ?? nowText()) || nowText(),
+  };
+}
+
+function calendarRowFromDraft(draft: CalendarDraft, previousRow?: string[]) {
+  return [
+    draft.name.trim(),
+    draft.period.trim() || '当月1日至当月最后一天为【当月】的考勤周期',
+    draft.workdays.trim() || '周一、周二、周三、周四、周五',
+    draft.maxRule.trim() || '工作日之和为应出勤天数',
+    draft.attendGroup.trim() || '默认考勤组',
+    draft.creator.trim() || '后台维护',
+    draft.createdAt.trim() || previousRow?.[6] || nowText(),
+    '后台维护',
+    nowText(),
+  ];
+}
+
+function emptyOvertimeRuleDraft(sequence = 1, defaultGroup = '默认考勤组'): OvertimeRuleDraft {
+  return {
+    name: `加班规则${sequence}`,
+    content: '工作日：仅统计时长 / 休息日：折算为调休 / 节假日：按节假日加班核算',
+    attendGroup: defaultGroup,
+    creator: '后台维护',
+    createdAt: nowText(),
+  };
+}
+
+function overtimeRuleDraftFromRow(row: string[]): OvertimeRuleDraft {
+  return {
+    name: String(row[0] ?? ''),
+    content: String(row[1] ?? '工作日/休息日/节假日均按默认口径核算') || '工作日/休息日/节假日均按默认口径核算',
+    attendGroup: String(row[2] ?? '默认考勤组') || '默认考勤组',
+    creator: String(row[3] ?? '后台维护') || '后台维护',
+    createdAt: String(row[4] ?? nowText()) || nowText(),
+  };
+}
+
+function overtimeRuleRowFromDraft(draft: OvertimeRuleDraft, previousRow?: string[]) {
+  return [
+    draft.name.trim(),
+    draft.content.trim() || '工作日/休息日/节假日均按默认口径核算',
+    draft.attendGroup.trim() || '默认考勤组',
+    draft.creator.trim() || '后台维护',
+    draft.createdAt.trim() || previousRow?.[4] || nowText(),
+    '后台维护',
+    nowText(),
+  ];
+}
+
+function emptyFieldRuleDraft(sequence = 1, defaultGroup = '默认考勤组'): FieldRuleDraft {
+  return {
+    name: `外勤规则${sequence}`,
+    content: '外勤打卡已启用 / 外出申请已启用',
+    attendGroup: defaultGroup,
+    creator: '后台维护',
+    createdAt: nowText(),
+  };
+}
+
+function fieldRuleDraftFromRow(row: string[]): FieldRuleDraft {
+  return {
+    name: String(row[0] ?? ''),
+    content: String(row[1] ?? '外勤打卡已启用 / 外出申请已启用') || '外勤打卡已启用 / 外出申请已启用',
+    attendGroup: String(row[2] ?? '默认考勤组') || '默认考勤组',
+    creator: String(row[3] ?? '后台维护') || '后台维护',
+    createdAt: String(row[4] ?? nowText()) || nowText(),
+  };
+}
+
+function fieldRuleRowFromDraft(draft: FieldRuleDraft, previousRow?: string[]) {
+  return [
+    draft.name.trim(),
+    draft.content.trim() || '外勤打卡已启用 / 外出申请已启用',
+    draft.attendGroup.trim() || '默认考勤组',
+    draft.creator.trim() || '后台维护',
+    draft.createdAt.trim() || previousRow?.[4] || nowText(),
+    '后台维护',
+    nowText(),
+  ];
+}
+
+function emptyStatSchemeDraft(sequence = 1, defaultScope = '默认考勤组'): StatSchemeDraft {
+  return {
+    name: `统计方案${sequence}`,
+    period: '当月1日至当月最后一天为【当月】的一个考勤统计周期',
+    stopRule: '部门：待配置',
+    scope: defaultScope,
+    creator: '后台维护',
+    createdAt: nowText(),
+  };
+}
+
+function statSchemeDraftFromRow(row: string[]): StatSchemeDraft {
+  return {
+    name: String(row[0] ?? ''),
+    period: String(row[1] ?? '当月1日至当月最后一天为【当月】的一个考勤统计周期') || '当月1日至当月最后一天为【当月】的一个考勤统计周期',
+    stopRule: String(row[2] ?? '部门：待配置') || '部门：待配置',
+    scope: String(row[3] ?? '默认考勤组') || '默认考勤组',
+    creator: String(row[4] ?? '后台维护') || '后台维护',
+    createdAt: String(row[5] ?? nowText()) || nowText(),
+  };
+}
+
+function statSchemeRowFromDraft(draft: StatSchemeDraft, previousRow?: string[]) {
+  return [
+    draft.name.trim(),
+    draft.period.trim() || '当月1日至当月最后一天为【当月】的一个考勤统计周期',
+    draft.stopRule.trim() || '部门：待配置',
+    draft.scope.trim() || '默认考勤组',
+    draft.creator.trim() || '后台维护',
+    draft.createdAt.trim() || previousRow?.[5] || nowText(),
+    '后台维护',
+    nowText(),
+  ];
+}
+
+function emptyShiftDraft(sequence = 1): ShiftDraft {
+  return {
+    name: `新建班次${sequence}`,
+    shortName: `新建班次${sequence}`,
+    color: '#B53A2A',
+    tag: '-',
+    season: '通用',
+    clockInTime: '09:00',
+    clockOutTime: '18:00',
+    duration: '8小时',
+    attendGroup: '通用',
+    creator: '后台维护',
+    createdAt: nowText(),
+  };
+}
+
+function shiftDraftFromRow(row: string[]): ShiftDraft {
+  const parsedTime = parseShiftTimeRange(row[5]);
+  return {
+    name: String(row[0] ?? ''),
+    shortName: String(row[1] ?? ''),
+    color: /^#[0-9a-f]{6}$/i.test(String(row[2] ?? '')) ? String(row[2]) : '#B53A2A',
+    tag: String(row[3] ?? '-') || '-',
+    season: String(row[4] ?? '通用') || '通用',
+    clockInTime: parsedTime.clockInTime || '09:00',
+    clockOutTime: parsedTime.clockOutTime || '18:00',
+    duration: String(row[6] ?? '8小时') || '8小时',
+    attendGroup: String(row[7] ?? '通用') || '通用',
+    creator: String(row[8] ?? '后台维护') || '后台维护',
+    createdAt: String(row[9] ?? nowText()) || nowText(),
+  };
+}
+
+function shiftRowFromDraft(draft: ShiftDraft, previousRow?: string[]) {
+  const name = draft.name.trim();
+  const shortName = draft.shortName.trim() || name.slice(0, 8);
+  const color = /^#[0-9a-f]{6}$/i.test(draft.color.trim()) ? draft.color.trim() : '#B53A2A';
+  const tag = draft.tag.trim() || '-';
+  const season = draft.season.trim() || '通用';
+  const clockInTime = draft.clockInTime.trim() || '09:00';
+  const clockOutTime = draft.clockOutTime.trim() || '18:00';
+  const duration = draft.duration.trim() || inferShiftDuration(clockInTime, clockOutTime);
+  const attendGroup = draft.attendGroup.trim() || '通用';
+  const creator = draft.creator.trim() || '后台维护';
+  const createdAt = draft.createdAt.trim() || previousRow?.[9] || nowText();
+  return [
+    name,
+    shortName,
+    color,
+    tag,
+    season,
+    `${clockInTime}-${clockOutTime}(正常出勤)`,
+    duration,
+    attendGroup,
+    creator,
+    createdAt,
+    '后台维护',
+    nowText(),
+  ];
+}
+
+function inferShiftDuration(clockInTime: string, clockOutTime: string) {
+  const [inHour, inMinute] = clockInTime.split(':').map(Number);
+  const [outHour, outMinute] = clockOutTime.split(':').map(Number);
+  if (![inHour, inMinute, outHour, outMinute].every(Number.isFinite)) return '8小时';
+  let minutes = (outHour * 60 + outMinute) - (inHour * 60 + inMinute);
+  if (minutes <= 0) minutes += 24 * 60;
+  if (minutes >= 60 * 6) minutes -= 60;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  return restMinutes ? `${hours}小时${restMinutes}分钟` : `${hours}小时`;
+}
+
 const GROUP_ROWS = [
   ['冲床组', '排班制', '部门：冲压车间', '早十晚六 / 早十午六', '何山', '2025-08-28 11:10:29', '棠乐', '2026-04-22 14:55:09'],
   ['装配工序', '排班制', '部门：装配工序', '早八晚六', '何山', '2025-08-28 11:15:12', '棠乐', '2026-04-22 14:54:27'],
@@ -261,6 +749,15 @@ export default function AttendanceSettings() {
     fixedOvertime: false,
   });
   const [shiftRows, setShiftRows] = useState<string[][]>([]);
+  const [groupRows, setGroupRows] = useState<string[][]>([]);
+  const [cardRuleRows, setCardRuleRows] = useState<string[][]>([]);
+  const [mobileClockRows, setMobileClockRows] = useState<string[][]>([]);
+  const [locationRows, setLocationRows] = useState<string[][]>([]);
+  const [holidayRows, setHolidayRows] = useState<string[][]>([]);
+  const [calendarRows, setCalendarRows] = useState<string[][]>([]);
+  const [overtimeRuleRows, setOvertimeRuleRows] = useState<string[][]>([]);
+  const [fieldRuleRows, setFieldRuleRows] = useState<string[][]>([]);
+  const [statSchemeRows, setStatSchemeRows] = useState<string[][]>([]);
   const [peopleRows, setPeopleRows] = useState<string[][]>([]);
   const [faceRows, setFaceRows] = useState<string[][]>([]);
   const [sourceInfo, setSourceInfo] = useState('');
@@ -268,15 +765,33 @@ export default function AttendanceSettings() {
 
   const loadSettingsData = useCallback(async () => {
     try {
-      const [shifts, people, face] = await Promise.all([
+      const [shifts, groups, cardRules, mobileClock, settingsLocation, holiday, settingsCalendar, overtimeRules, fieldRules, statSchemes, people, face] = await Promise.all([
         fetchSettingsShifts(),
+        fetchSettingsGroups(),
+        fetchSettingsCardRules(),
+        fetchSettingsMobileClock(),
+        fetchSettingsLocation(),
+        fetchSettingsHoliday(),
+        fetchSettingsCalendar(),
+        fetchSettingsOvertimeRules(),
+        fetchSettingsFieldRules(),
+        fetchSettingsStatSchemes(),
         fetchSettingsPeople(),
         fetchSettingsFace(),
       ]);
       setShiftRows(shifts.rows || []);
+      setGroupRows(groups.rows || []);
+      setCardRuleRows(cardRules.rows || []);
+      setMobileClockRows(mobileClock.rows || []);
+      setLocationRows(settingsLocation.rows || []);
+      setHolidayRows(holiday.rows || []);
+      setCalendarRows(settingsCalendar.rows || []);
+      setOvertimeRuleRows(overtimeRules.rows || []);
+      setFieldRuleRows(fieldRules.rows || []);
+      setStatSchemeRows(statSchemes.rows || []);
       setPeopleRows(people.rows || []);
       setFaceRows(face.rows || []);
-      setSourceInfo(`班次：${shifts.sourceFile}；人员：${people.sourceFile}；人脸：${face.sourceFile}`);
+      setSourceInfo(`考勤组：${groups.sourceFile}；班次：${shifts.sourceFile}；打卡规则：${cardRules.sourceFile}；移动打卡：${mobileClock.sourceFile}；上班地点：${settingsLocation.sourceFile}；节假日：${holiday.sourceFile}；司历：${settingsCalendar.sourceFile}；加班规则：${overtimeRules.sourceFile}；外勤规则：${fieldRules.sourceFile}；统计方案：${statSchemes.sourceFile}；人员：${people.sourceFile}；人脸：${face.sourceFile}`);
       setLoadError('');
     } catch (_error) {
       setLoadError('真实设置数据连接失败，当前不展示本地静态人员');
@@ -293,6 +808,9 @@ export default function AttendanceSettings() {
     return LEGACY_ALIAS[sub] ?? (ROUTE_TABS.find(tab => tab.path === location.pathname)?.key ?? 'overview');
   }, [location.pathname]);
   const shiftOptions = useMemo(() => shiftOptionsFromRows(shiftRows), [shiftRows]);
+  const groupOptions = useMemo(() => groupOptionsFromRows(groupRows), [groupRows]);
+  const mobileSchemeOptions = useMemo(() => mobileSchemeOptionsFromRows(mobileClockRows), [mobileClockRows]);
+  const calendarOptions = useMemo(() => calendarOptionsFromRows(calendarRows), [calendarRows]);
 
   const toggleMore = (key: string) => setShowMore(prev => ({ ...prev, [key]: !prev[key] }));
   const openTab = (view: SettingView) => {
@@ -319,18 +837,29 @@ export default function AttendanceSettings() {
           onOpenPath={path => navigate(path)}
         />
       )}
-      {activeView === 'groups' && <GroupsView colors={colors} showMore={!!showMore.groups} onToggleMore={() => toggleMore('groups')} />}
-      {activeView === 'shifts' && <ShiftsView colors={colors} showMore={!!showMore.shifts} onToggleMore={() => toggleMore('shifts')} shiftRows={shiftRows} onShiftRowsChange={setShiftRows} sourceInfo={sourceInfo} loadError={loadError} />}
+      {activeView === 'groups' && <GroupsView
+        colors={colors}
+        showMore={!!showMore.groups}
+        onToggleMore={() => toggleMore('groups')}
+        groupRows={groupRows}
+        shiftOptions={shiftOptions}
+        peopleRows={peopleRows}
+        onGroupRowsChange={setGroupRows}
+        sourceInfo={sourceInfo}
+        loadError={loadError}
+      />}
+      {activeView === 'shifts' && <ShiftsView colors={colors} showMore={!!showMore.shifts} onToggleMore={() => toggleMore('shifts')} shiftRows={shiftRows} groupOptions={groupOptions} onShiftRowsChange={setShiftRows} sourceInfo={sourceInfo} loadError={loadError} />}
       {activeView === 'people' && <PeopleView colors={colors} showMore={!!showMore.people} onToggleMore={() => toggleMore('people')} peopleRows={peopleRows} sourceInfo={sourceInfo} loadError={loadError} />}
-      {activeView === 'card-rules' && <CardRulesView colors={colors} />}
-      {activeView === 'mobile-clock' && <MobileClockView colors={colors} />}
-      {activeView === 'location' && <LocationView colors={colors} showMore={!!showMore.location} onToggleMore={() => toggleMore('location')} />}
+      {activeView === 'card-rules' && <CardRulesView colors={colors} cardRuleRows={cardRuleRows} groupOptions={groupOptions} onCardRuleRowsChange={setCardRuleRows} sourceInfo={sourceInfo} loadError={loadError} />}
+      {activeView === 'mobile-clock' && <MobileClockView colors={colors} mobileClockRows={mobileClockRows} groupOptions={groupOptions} onMobileClockRowsChange={setMobileClockRows} sourceInfo={sourceInfo} loadError={loadError} />}
+      {activeView === 'location' && <LocationView colors={colors} showMore={!!showMore.location} onToggleMore={() => toggleMore('location')} locationRows={locationRows} groupOptions={groupOptions} mobileSchemeOptions={mobileSchemeOptions} onLocationRowsChange={setLocationRows} sourceInfo={sourceInfo} loadError={loadError} />}
       {activeView === 'face' && <FaceView
         colors={colors}
         showMore={!!showMore.face}
         onToggleMore={() => toggleMore('face')}
         faceRows={faceRows}
         shiftOptions={shiftOptions}
+        groupOptions={groupOptions}
         sourceInfo={sourceInfo}
         loadError={loadError}
         onEmployeeCreated={(peopleRow, faceRow) => {
@@ -346,11 +875,11 @@ export default function AttendanceSettings() {
         }}
       />}
       {activeView === 'devices' && <DevicesView colors={colors} />}
-      {activeView === 'holiday' && <HolidayView colors={colors} />}
-      {activeView === 'calendar' && <CalendarView colors={colors} />}
-      {activeView === 'overtime-rules' && <OvertimeRulesView colors={colors} />}
-      {activeView === 'field-rules' && <FieldRulesView colors={colors} />}
-      {activeView === 'stat-schemes' && <StatSchemesView colors={colors} />}
+      {activeView === 'holiday' && <HolidayView colors={colors} holidayRows={holidayRows} calendarOptions={calendarOptions} onHolidayRowsChange={setHolidayRows} sourceInfo={sourceInfo} loadError={loadError} />}
+      {activeView === 'calendar' && <CalendarView colors={colors} calendarRows={calendarRows} groupOptions={groupOptions} onCalendarRowsChange={setCalendarRows} sourceInfo={sourceInfo} loadError={loadError} />}
+      {activeView === 'overtime-rules' && <OvertimeRulesView colors={colors} overtimeRuleRows={overtimeRuleRows} groupOptions={groupOptions} onOvertimeRuleRowsChange={setOvertimeRuleRows} sourceInfo={sourceInfo} loadError={loadError} />}
+      {activeView === 'field-rules' && <FieldRulesView colors={colors} fieldRuleRows={fieldRuleRows} groupOptions={groupOptions} onFieldRuleRowsChange={setFieldRuleRows} sourceInfo={sourceInfo} loadError={loadError} />}
+      {activeView === 'stat-schemes' && <StatSchemesView colors={colors} statSchemeRows={statSchemeRows} groupOptions={groupOptions} onStatSchemeRowsChange={setStatSchemeRows} sourceInfo={sourceInfo} loadError={loadError} />}
     </div>
   );
 }
@@ -491,21 +1020,58 @@ function OverviewView({
   );
 }
 
-function GroupsView({ colors, showMore, onToggleMore }: { colors: any; showMore: boolean; onToggleMore: () => void }) {
-  const [rowsData, setRowsData] = useState<string[][]>(GROUP_ROWS);
+function GroupsView({
+  colors,
+  showMore,
+  onToggleMore,
+  groupRows,
+  shiftOptions,
+  peopleRows,
+  onGroupRowsChange,
+  sourceInfo,
+  loadError,
+}: {
+  colors: any;
+  showMore: boolean;
+  onToggleMore: () => void;
+  groupRows: string[][];
+  shiftOptions: ShiftOption[];
+  peopleRows: string[][];
+  onGroupRowsChange: (rows: string[][]) => void;
+  sourceInfo?: string;
+  loadError?: string;
+}) {
+  const [rowsData, setRowsData] = useState<string[][]>(groupRows);
   const [draftFilters, setDraftFilters] = useState({ name: '', types: ['排班制'] });
   const [appliedFilters, setAppliedFilters] = useState(draftFilters);
   const [peopleMode, setPeopleMode] = useState<'schedule' | 'shift'>('schedule');
+  const [showGroupModal, setShowGroupModal] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [groupDraft, setGroupDraft] = useState<GroupDraft>(() => emptyGroupDraft(groupRows.length + 1, shiftOptions[0]?.name || '早九晚六'));
+  const effectiveShiftOptions = shiftOptions.length ? shiftOptions : [{ id: 'shift_0900_1800', name: '早九晚六', time: '09:00-18:00' }];
+
+  useEffect(() => {
+    setRowsData(groupRows);
+  }, [groupRows]);
+
+  const commitRows = (updater: (rows: string[][]) => string[][]) => {
+    setRowsData(current => {
+      const next = updater(current);
+      onGroupRowsChange(next);
+      void saveSettingsGroups(next).catch(() => window.alert('考勤组已在页面更新，但保存到后端失败，请稍后重试'));
+      return next;
+    });
+  };
 
   const filteredRows = useMemo(() => {
     const nameKeyword = appliedFilters.name.trim().toLowerCase();
     return rowsData.filter(row => {
       const matchName = !nameKeyword || String(row[0] ?? '').toLowerCase().includes(nameKeyword);
       const matchType = !appliedFilters.types.length || appliedFilters.types.includes(String(row[1] ?? ''));
-      const matchMode = peopleMode === 'schedule' || String(row[3] ?? '').includes('/');
+      const matchMode = peopleMode === 'schedule' || peopleRows.some(person => String(person[12] ?? '') === String(row[0] ?? ''));
       return matchName && matchType && matchMode;
     });
-  }, [appliedFilters, peopleMode, rowsData]);
+  }, [appliedFilters, peopleMode, peopleRows, rowsData]);
 
   const resetFilters = () => {
     const next = { name: '', types: ['排班制'] };
@@ -513,16 +1079,31 @@ function GroupsView({ colors, showMore, onToggleMore }: { colors: any; showMore:
     setAppliedFilters(next);
   };
 
-  const addGroup = (source = '手动创建') => {
-    const name = window.prompt('请输入考勤组名称', `新建考勤组${rowsData.length + 1}`);
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setRowsData(current => [[trimmed, '排班制', '部门：待配置', '早九晚六', source, nowText(), source, nowText()], ...current]);
+  const openCreateGroupModal = () => {
+    setEditingGroupId(null);
+    setGroupDraft(emptyGroupDraft(rowsData.length + 1, effectiveShiftOptions[0]?.name || '早九晚六'));
+    setShowGroupModal(true);
+  };
+
+  const updateGroupDraft = (key: keyof GroupDraft, value: string) => {
+    setGroupDraft(current => ({ ...current, [key]: value }));
+  };
+
+  const saveGroupDraft = () => {
+    if (!groupDraft.name.trim()) {
+      window.alert('考勤组名称不能为空');
+      return;
+    }
+    commitRows(current => {
+      if (!editingGroupId) return [groupRowFromDraft(groupDraft), ...current];
+      return current.map(row => createRowId(row) === editingGroupId ? groupRowFromDraft(groupDraft, row) : row);
+    });
+    setShowGroupModal(false);
+    setEditingGroupId(null);
   };
 
   const importGroups = () => {
-    setRowsData(current => [
+    commitRows(current => [
       [`导入考勤组${current.length + 1}`, '排班制', '部门：导入组织', '早十晚七', '导入', nowText(), '导入', nowText()],
       ...current,
     ]);
@@ -531,23 +1112,29 @@ function GroupsView({ colors, showMore, onToggleMore }: { colors: any; showMore:
   const handleAction = (label: string, row: string[]) => {
     const rowId = createRowId(row);
     if (label === '修改') {
-      const nextName = window.prompt('请输入考勤组名称', row[0] ?? '');
-      if (nextName === null) return;
-      const trimmed = nextName.trim();
-      if (!trimmed) return;
-      setRowsData(current => current.map(item => createRowId(item) === rowId ? setRowCell(item, 0, trimmed) : item));
+      setEditingGroupId(rowId);
+      setGroupDraft(groupDraftFromRow(row));
+      setShowGroupModal(true);
       return;
     }
     if (label === '排班') {
-      setRowsData(current => current.map(item => createRowId(item) === rowId ? setRowCell(item, 3, '已更新排班') : item));
+      const nextShift = window.prompt('请输入要关联的班次名称', String(row[3] ?? effectiveShiftOptions[0]?.name ?? '早九晚六'));
+      if (nextShift === null) return;
+      const trimmed = nextShift.trim();
+      if (!trimmed) return;
+      commitRows(current => current.map(item => createRowId(item) === rowId ? setRowCell(item, 3, trimmed) : item));
       return;
     }
-    window.alert(`考勤组：${row[0] ?? '-'}`);
+    const groupName = String(row[0] ?? '');
+    const groupPeople = peopleRows.filter(person => String(person[12] ?? '') === groupName);
+    const relatedShifts = shiftOptions.filter(shift => String(row[3] ?? '').includes(shift.name)).map(shift => `${shift.name} ${shift.time}`);
+    window.alert(`考勤组：${groupName}\n关联人员：${groupPeople.length}人\n关联班次：${relatedShifts.join('、') || row[3] || '-'}`);
   };
 
   const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['修改', '排班', '...'], label => handleAction(label, row))]);
   return (
     <ListPage colors={colors}>
+      <SourceNotice sourceInfo={sourceInfo} loadError={loadError} />
       <FilterBar colors={colors}>
         <SearchField label="考勤组名称" placeholder="请输入" colors={colors} width={180} value={draftFilters.name} onChange={value => setDraftFilters(current => ({ ...current, name: value }))} />
         <CheckboxGroup label="考勤类型" items={['固定班制', '排班制', '自由工时']} colors={colors} value={draftFilters.types} onChange={types => setDraftFilters(current => ({ ...current, types }))} />
@@ -557,14 +1144,81 @@ function GroupsView({ colors, showMore, onToggleMore }: { colors: any; showMore:
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button onClick={() => addGroup()} style={primaryBtn(colors)}>新建考勤组</button>
+        <button onClick={openCreateGroupModal} style={primaryBtn(colors)}>新建考勤组</button>
         <button onClick={importGroups} style={outlineBtn(colors)}>重新导入</button>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <TagPill colors={colors} label="排班人员" count={String(rowsData.length)} active={peopleMode === 'schedule'} onClick={() => setPeopleMode('schedule')} />
-          <TagPill colors={colors} label="班次人员" count={String(rowsData.filter(row => String(row[3] ?? '').includes('/')).length)} active={peopleMode === 'shift'} onClick={() => setPeopleMode('shift')} />
+          <TagPill colors={colors} label="排班人员" count={String(peopleRows.filter(row => row[12]).length)} active={peopleMode === 'schedule'} onClick={() => setPeopleMode('schedule')} />
+          <TagPill colors={colors} label="班次人员" count={String(rowsData.filter(row => peopleRows.some(person => String(person[12] ?? '') === String(row[0] ?? ''))).length)} active={peopleMode === 'shift'} onClick={() => setPeopleMode('shift')} />
         </div>
       </Toolbar>
       <DataTable columns={GROUP_COLUMNS} rows={rows} colors={colors} footerText={`共${filteredRows.length}条 / 总${rowsData.length}条`} />
+      {showGroupModal ? (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.38)',
+          zIndex: 900,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+        }}>
+          <div style={{
+            width: 640,
+            maxWidth: 'calc(100vw - 48px)',
+            backgroundColor: colors.cardBg,
+            border: `1px solid ${colors.cardBorder}`,
+            borderRadius: 8,
+            boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: 52,
+              padding: '0 18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderBottom: `1px solid ${colors.cardBorder}`,
+            }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{editingGroupId ? '修改考勤组' : '新建考勤组'}</div>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>保存后会同步到考勤组表格，并可在班次、新增员工和人脸录入中使用</div>
+              </div>
+              <button onClick={() => setShowGroupModal(false)} style={iconBtn(colors)}>×</button>
+            </div>
+            <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+              <FormField label="考勤组名称" required colors={colors}>
+                <input value={groupDraft.name} onChange={event => updateGroupDraft('name', event.target.value)} placeholder="例如：华托大厦" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="考勤类型" colors={colors}>
+                <select value={groupDraft.type} onChange={event => updateGroupDraft('type', event.target.value)} style={modalInput(colors)}>
+                  {['固定班制', '排班制', '自由工时'].map(option => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </FormField>
+              <FormField label="适用范围" colors={colors} full>
+                <input value={groupDraft.scope} onChange={event => updateGroupDraft('scope', event.target.value)} placeholder="例如：部门：新人培训组 / 员工：张青" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="默认班次" colors={colors}>
+                <select value={groupDraft.shiftName} onChange={event => updateGroupDraft('shiftName', event.target.value)} style={modalInput(colors)}>
+                  {effectiveShiftOptions.map(shift => <option key={shift.id} value={shift.name}>{shift.name} {shift.time !== '休息' ? `（${shift.time}）` : ''}</option>)}
+                </select>
+              </FormField>
+              <FormField label="创建人" colors={colors}>
+                <input value={groupDraft.creator} onChange={event => updateGroupDraft('creator', event.target.value)} placeholder="后台维护" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="创建时间" colors={colors} full>
+                <input value={groupDraft.createdAt} onChange={event => updateGroupDraft('createdAt', event.target.value)} placeholder="例如：2026-05-21 09:00" style={modalInput(colors)} />
+              </FormField>
+            </div>
+            <div style={{ padding: '12px 18px 16px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${colors.cardBorder}` }}>
+              <button onClick={() => setShowGroupModal(false)} style={outlineBtn(colors)}>取消</button>
+              <button onClick={saveGroupDraft} disabled={!groupDraft.name.trim()} style={!groupDraft.name.trim() ? disabledBtn(colors) : primaryBtn(colors)}>
+                保存考勤组
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </ListPage>
   );
 }
@@ -574,7 +1228,7 @@ function SourceNotice({ sourceInfo, loadError }: { sourceInfo?: string; loadErro
   return <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>{sourceInfo ? `已连接真实数据源：${sourceInfo}` : ''}{loadError ? ` ${loadError}` : ''}</div>;
 }
 
-function ShiftsView({ colors, showMore, onToggleMore, shiftRows, onShiftRowsChange, sourceInfo, loadError }: { colors: any; showMore: boolean; onToggleMore: () => void; shiftRows: string[][]; onShiftRowsChange: (rows: string[][]) => void; sourceInfo?: string; loadError?: string }) {
+function ShiftsView({ colors, showMore, onToggleMore, shiftRows, groupOptions, onShiftRowsChange, sourceInfo, loadError }: { colors: any; showMore: boolean; onToggleMore: () => void; shiftRows: string[][]; groupOptions: string[]; onShiftRowsChange: (rows: string[][]) => void; sourceInfo?: string; loadError?: string }) {
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [rowsData, setRowsData] = useState<string[][]>(shiftRows);
   const [draftFilters, setDraftFilters] = useState({ name: '', tag: '' });
@@ -583,6 +1237,9 @@ function ShiftsView({ colors, showMore, onToggleMore, shiftRows, onShiftRowsChan
   const [tagOptions, setTagOptions] = useState<string[]>([]);
   const [newTagName, setNewTagName] = useState('');
   const [sortConfig, setSortConfig] = useState<TableSortConfig | null>(null);
+  const [showShiftModal, setShowShiftModal] = useState(false);
+  const [editingShiftId, setEditingShiftId] = useState<string | null>(null);
+  const [shiftDraft, setShiftDraft] = useState<ShiftDraft>(() => emptyShiftDraft(shiftRows.length + 1));
 
   useEffect(() => {
     setRowsData(shiftRows);
@@ -628,14 +1285,9 @@ function ShiftsView({ colors, showMore, onToggleMore, shiftRows, onShiftRowsChan
     shiftActionLinks(colors, row, {
       onDetail: () => window.alert(`班次详情\n名称：${row[0] ?? '-'}\n出勤时间：${row[5] ?? '-'}\n适用考勤组：${row[7] ?? '-'}`),
       onEdit: () => {
-        const nextName = window.prompt('请输入新的班次名称', String(row[0] ?? ''));
-        if (nextName === null) return;
-        const trimmedName = nextName.trim();
-        if (!trimmedName) {
-          window.alert('班次名称不能为空');
-          return;
-        }
-        commitRows(current => current.map(item => getShiftRowId(item) === getShiftRowId(row) ? [trimmedName, ...item.slice(1)] : item));
+        setEditingShiftId(getShiftRowId(row));
+        setShiftDraft(shiftDraftFromRow(row));
+        setShowShiftModal(true);
       },
       onMore: () => window.alert(`更多操作\n可对「${row[0] ?? '-'}」执行复制、停用或查看引用。`),
     }),
@@ -674,16 +1326,37 @@ function ShiftsView({ colors, showMore, onToggleMore, shiftRows, onShiftRowsChan
     setSelectedRowIds(new Set());
   };
 
-  const addShift = () => {
-    const name = window.prompt('请输入班次名称', `新建班次${rowsData.length + 1}`);
-    if (name === null) return;
-    const trimmedName = name.trim();
+  const openCreateShiftModal = () => {
+    setEditingShiftId(null);
+    setShiftDraft(emptyShiftDraft(rowsData.length + 1));
+    setShowShiftModal(true);
+  };
+
+  const updateShiftDraft = (key: keyof ShiftDraft, value: string) => {
+    setShiftDraft(current => {
+      const next = { ...current, [key]: value };
+      if ((key === 'clockInTime' || key === 'clockOutTime') && current.duration === inferShiftDuration(current.clockInTime, current.clockOutTime)) {
+        return { ...next, duration: inferShiftDuration(next.clockInTime, next.clockOutTime) };
+      }
+      if (key === 'name' && (!current.shortName || current.shortName === current.name.slice(0, 8))) {
+        return { ...next, shortName: value.trim().slice(0, 8) };
+      }
+      return next;
+    });
+  };
+
+  const saveShiftDraft = () => {
+    const trimmedName = shiftDraft.name.trim();
     if (!trimmedName) {
       window.alert('班次名称不能为空');
       return;
     }
-    const shortName = window.prompt('请输入班次简称', trimmedName.slice(0, 8))?.trim() || trimmedName.slice(0, 8);
-    commitRows(current => [[trimmedName, shortName, '#B53A2A', '-', '通用', '09:00-18:00(正常出勤)', '8小时', '通用', '后台维护', nowText(), '后台维护', nowText()], ...current]);
+    commitRows(current => {
+      if (!editingShiftId) return [shiftRowFromDraft(shiftDraft), ...current];
+      return current.map(row => getShiftRowId(row) === editingShiftId ? shiftRowFromDraft(shiftDraft, row) : row);
+    });
+    setShowShiftModal(false);
+    setEditingShiftId(null);
   };
 
   const addTag = () => {
@@ -777,7 +1450,7 @@ function ShiftsView({ colors, showMore, onToggleMore, shiftRows, onShiftRowsChan
         )}
       </FilterBar>
       <Toolbar colors={colors}>
-        <button onClick={addShift} style={primaryBtn(colors)}>新建班次</button>
+        <button onClick={openCreateShiftModal} style={primaryBtn(colors)}>新建班次</button>
         <button onClick={() => importInputRef.current?.click()} style={outlineBtn(colors)}>导入班次</button>
         <button onClick={exportRows} style={outlineBtn(colors)}>导出</button>
         <button
@@ -806,6 +1479,91 @@ function ShiftsView({ colors, showMore, onToggleMore, shiftRows, onShiftRowsChan
         nonSortableColumnIndices={[SHIFT_COLUMNS.length - 1]}
         footerText={`共${sortedRows.length}条 / 总${rowsData.length}条`}
       />
+      {showShiftModal ? (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.38)',
+          zIndex: 900,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+        }}>
+          <div style={{
+            width: 720,
+            maxWidth: 'calc(100vw - 48px)',
+            backgroundColor: colors.cardBg,
+            border: `1px solid ${colors.cardBorder}`,
+            borderRadius: 8,
+            boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: 52,
+              padding: '0 18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderBottom: `1px solid ${colors.cardBorder}`,
+            }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{editingShiftId ? '修改班次' : '新建班次'}</div>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>保存后会同步到班次管理表格，并可在新增员工、考勤组和排班中使用</div>
+              </div>
+              <button onClick={() => setShowShiftModal(false)} style={iconBtn(colors)}>×</button>
+            </div>
+            <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+              <FormField label="班次名称" required colors={colors}>
+                <input value={shiftDraft.name} onChange={event => updateShiftDraft('name', event.target.value)} placeholder="例如：早九晚六" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="班次简称" required colors={colors}>
+                <input value={shiftDraft.shortName} onChange={event => updateShiftDraft('shortName', event.target.value)} placeholder="例如：早9晚6" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="班次颜色" colors={colors}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="color" value={/^#[0-9a-f]{6}$/i.test(shiftDraft.color) ? shiftDraft.color : '#B53A2A'} onChange={event => updateShiftDraft('color', event.target.value)} style={{ width: 44, height: 34, padding: 2, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, backgroundColor: colors.inputBg }} />
+                  <input value={shiftDraft.color} onChange={event => updateShiftDraft('color', event.target.value)} placeholder="#B53A2A" style={modalInput(colors)} />
+                </div>
+              </FormField>
+              <FormField label="标签" colors={colors}>
+                <input value={shiftDraft.tag} onChange={event => updateShiftDraft('tag', event.target.value)} placeholder="例如：门店班 / 通用 / -" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="冬夏令时" colors={colors}>
+                <select value={shiftDraft.season} onChange={event => updateShiftDraft('season', event.target.value)} style={modalInput(colors)}>
+                  {['通用', '冬令时', '夏令时'].map(option => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </FormField>
+              <FormField label="适用考勤组" colors={colors}>
+                <select value={shiftDraft.attendGroup} onChange={event => updateShiftDraft('attendGroup', event.target.value)} style={modalInput(colors)}>
+                  {Array.from(new Set(['通用', ...groupOptions, shiftDraft.attendGroup].filter(Boolean))).map(group => <option key={group} value={group}>{group}</option>)}
+                </select>
+              </FormField>
+              <FormField label="上班时间" colors={colors}>
+                <input type="time" value={shiftDraft.clockInTime} onChange={event => updateShiftDraft('clockInTime', event.target.value)} style={modalInput(colors)} />
+              </FormField>
+              <FormField label="下班时间" colors={colors}>
+                <input type="time" value={shiftDraft.clockOutTime} onChange={event => updateShiftDraft('clockOutTime', event.target.value)} style={modalInput(colors)} />
+              </FormField>
+              <FormField label="出勤时长" colors={colors}>
+                <input value={shiftDraft.duration} onChange={event => updateShiftDraft('duration', event.target.value)} placeholder="例如：8小时" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="创建人" colors={colors}>
+                <input value={shiftDraft.creator} onChange={event => updateShiftDraft('creator', event.target.value)} placeholder="后台维护" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="创建时间" colors={colors} full>
+                <input value={shiftDraft.createdAt} onChange={event => updateShiftDraft('createdAt', event.target.value)} placeholder="例如：2026-05-21 09:00" style={modalInput(colors)} />
+              </FormField>
+            </div>
+            <div style={{ padding: '12px 18px 16px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${colors.cardBorder}` }}>
+              <button onClick={() => setShowShiftModal(false)} style={outlineBtn(colors)}>取消</button>
+              <button onClick={saveShiftDraft} disabled={!shiftDraft.name.trim() || !shiftDraft.shortName.trim()} style={!shiftDraft.name.trim() || !shiftDraft.shortName.trim() ? disabledBtn(colors) : primaryBtn(colors)}>
+                保存班次
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </ListPage>
   );
 }
@@ -880,22 +1638,84 @@ function PeopleView({ colors, showMore, onToggleMore, peopleRows, sourceInfo, lo
   );
 }
 
-function CardRulesView({ colors }: { colors: any }) {
-  const [rowsData, setRowsData] = useState<string[][]>(CARD_RULE_ROWS);
+function CardRulesView({
+  colors,
+  cardRuleRows,
+  groupOptions,
+  onCardRuleRowsChange,
+  sourceInfo,
+  loadError,
+}: {
+  colors: any;
+  cardRuleRows: string[][];
+  groupOptions: string[];
+  onCardRuleRowsChange: (rows: string[][]) => void;
+  sourceInfo?: string;
+  loadError?: string;
+}) {
+  const [rowsData, setRowsData] = useState<string[][]>(cardRuleRows);
   const [draftName, setDraftName] = useState('');
   const [appliedName, setAppliedName] = useState('');
-  const filteredRows = useMemo(() => filterRowsByText(rowsData, appliedName, [0, 1, 2]), [appliedName, rowsData]);
-  const addRule = () => {
-    const name = window.prompt('请输入打卡规则名称', `新增打卡规则${rowsData.length + 1}`);
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setRowsData(current => [[trimmed, '允许移动端与考勤机打卡', '默认考勤组', '手动创建', nowText(), '手动创建', nowText()], ...current]);
+  const [showRuleModal, setShowRuleModal] = useState(false);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [ruleDraft, setRuleDraft] = useState<CardRuleDraft>(() => emptyCardRuleDraft(cardRuleRows.length + 1, groupOptions[0] || '默认考勤组'));
+
+  useEffect(() => {
+    setRowsData(cardRuleRows);
+  }, [cardRuleRows]);
+
+  const commitRows = (updater: (rows: string[][]) => string[][]) => {
+    setRowsData(current => {
+      const next = updater(current);
+      onCardRuleRowsChange(next);
+      void saveSettingsCardRules(next).catch(() => window.alert('打卡规则已在页面更新，但保存到后端失败，请稍后重试'));
+      return next;
+    });
   };
-  const handleAction = (label: string, row: string[]) => mutateNamedRow(label, row, rowsData, setRowsData, 0);
+
+  const filteredRows = useMemo(() => filterRowsByText(rowsData, appliedName, [0, 1, 2]), [appliedName, rowsData]);
+  const effectiveGroupOptions = Array.from(new Set([...groupOptions, '默认考勤组', ruleDraft.attendGroup].filter(Boolean)));
+
+  const openCreateRuleModal = () => {
+    setEditingRuleId(null);
+    setRuleDraft(emptyCardRuleDraft(rowsData.length + 1, groupOptions[0] || '默认考勤组'));
+    setShowRuleModal(true);
+  };
+
+  const updateRuleDraft = (key: keyof CardRuleDraft, value: string) => {
+    setRuleDraft(current => ({ ...current, [key]: value }));
+  };
+
+  const saveRuleDraft = () => {
+    if (!ruleDraft.name.trim()) {
+      window.alert('规则名称不能为空');
+      return;
+    }
+    commitRows(current => {
+      if (!editingRuleId) return [cardRuleRowFromDraft(ruleDraft), ...current];
+      return current.map(row => createRowId(row) === editingRuleId ? cardRuleRowFromDraft(ruleDraft, row) : row);
+    });
+    setShowRuleModal(false);
+    setEditingRuleId(null);
+  };
+
+  const handleAction = (label: string, row: string[]) => {
+    const rowId = createRowId(row);
+    if (label === '修改') {
+      setEditingRuleId(rowId);
+      setRuleDraft(cardRuleDraftFromRow(row));
+      setShowRuleModal(true);
+      return;
+    }
+    if (label === '删除') {
+      if (!window.confirm(`确认删除打卡规则「${row[0] ?? '-'}」？`)) return;
+      commitRows(current => current.filter(item => createRowId(item) !== rowId));
+    }
+  };
   const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['修改', '删除'], label => handleAction(label, row))]);
   return (
     <ListPage colors={colors}>
+      <SourceNotice sourceInfo={sourceInfo} loadError={loadError} />
       <FilterBar colors={colors}>
         <SearchField label="规则名称" placeholder="请输入规则名称" colors={colors} width={200} value={draftName} onChange={setDraftName} />
         <div style={rightActionRow}>
@@ -904,28 +1724,153 @@ function CardRulesView({ colors }: { colors: any }) {
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button onClick={addRule} style={primaryBtn(colors)}>新增打卡规则</button>
+        <button onClick={openCreateRuleModal} style={primaryBtn(colors)}>新增打卡规则</button>
       </Toolbar>
       <DataTable columns={CARD_RULE_COLUMNS} rows={rows} colors={colors} footerText={`共${filteredRows.length}笔`} />
+      {showRuleModal ? (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.38)',
+          zIndex: 900,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+        }}>
+          <div style={{
+            width: 640,
+            maxWidth: 'calc(100vw - 48px)',
+            backgroundColor: colors.cardBg,
+            border: `1px solid ${colors.cardBorder}`,
+            borderRadius: 8,
+            boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: 52,
+              padding: '0 18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderBottom: `1px solid ${colors.cardBorder}`,
+            }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{editingRuleId ? '修改打卡规则' : '新增打卡规则'}</div>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>保存后会同步到打卡规则表格，并关联到已维护的考勤组</div>
+              </div>
+              <button onClick={() => setShowRuleModal(false)} style={iconBtn(colors)}>×</button>
+            </div>
+            <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+              <FormField label="规则名称" required colors={colors}>
+                <input value={ruleDraft.name} onChange={event => updateRuleDraft('name', event.target.value)} placeholder="例如：迟到打卡规则" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="关联考勤组" colors={colors}>
+                <select value={ruleDraft.attendGroup} onChange={event => updateRuleDraft('attendGroup', event.target.value)} style={modalInput(colors)}>
+                  {effectiveGroupOptions.map(group => <option key={group} value={group}>{group}</option>)}
+                </select>
+              </FormField>
+              <FormField label="规则内容" required colors={colors} full>
+                <textarea value={ruleDraft.content} onChange={event => updateRuleDraft('content', event.target.value)} placeholder="例如：禁止工出勤在9小时内发起迟到流程" style={{ ...modalInput(colors), height: 82, resize: 'vertical', paddingTop: 8 }} />
+              </FormField>
+              <FormField label="创建人" colors={colors}>
+                <input value={ruleDraft.creator} onChange={event => updateRuleDraft('creator', event.target.value)} placeholder="后台维护" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="创建时间" colors={colors}>
+                <input value={ruleDraft.createdAt} onChange={event => updateRuleDraft('createdAt', event.target.value)} placeholder="例如：2026-05-21 09:00" style={modalInput(colors)} />
+              </FormField>
+            </div>
+            <div style={{ padding: '12px 18px 16px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${colors.cardBorder}` }}>
+              <button onClick={() => setShowRuleModal(false)} style={outlineBtn(colors)}>取消</button>
+              <button onClick={saveRuleDraft} disabled={!ruleDraft.name.trim() || !ruleDraft.content.trim()} style={!ruleDraft.name.trim() || !ruleDraft.content.trim() ? disabledBtn(colors) : primaryBtn(colors)}>
+                保存打卡规则
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </ListPage>
   );
 }
 
-function MobileClockView({ colors }: { colors: any }) {
-  const [rowsData, setRowsData] = useState<string[][]>(MOBILE_ROWS);
+function MobileClockView({
+  colors,
+  mobileClockRows,
+  groupOptions,
+  onMobileClockRowsChange,
+  sourceInfo,
+  loadError,
+}: {
+  colors: any;
+  mobileClockRows: string[][];
+  groupOptions: string[];
+  onMobileClockRowsChange: (rows: string[][]) => void;
+  sourceInfo?: string;
+  loadError?: string;
+}) {
+  const [rowsData, setRowsData] = useState<string[][]>(mobileClockRows);
   const [draftName, setDraftName] = useState('');
   const [appliedName, setAppliedName] = useState('');
-  const filteredRows = useMemo(() => filterRowsByText(rowsData, appliedName, [0, 1, 2]), [appliedName, rowsData]);
-  const addScheme = () => {
-    const name = window.prompt('请输入移动打卡方案名称', `移动打卡方案${rowsData.length + 1}`);
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setRowsData(current => [[trimmed, 'GPS/Wi-Fi/蓝牙均可打卡', '默认考勤组', '手动创建', nowText(), '手动创建', nowText()], ...current]);
+  const [showSchemeModal, setShowSchemeModal] = useState(false);
+  const [editingSchemeId, setEditingSchemeId] = useState<string | null>(null);
+  const [schemeDraft, setSchemeDraft] = useState<MobileClockDraft>(() => emptyMobileClockDraft(mobileClockRows.length + 1, groupOptions[0] || '默认考勤组'));
+
+  useEffect(() => {
+    setRowsData(mobileClockRows);
+  }, [mobileClockRows]);
+
+  const commitRows = (updater: (rows: string[][]) => string[][]) => {
+    setRowsData(current => {
+      const next = updater(current);
+      onMobileClockRowsChange(next);
+      void saveSettingsMobileClock(next).catch(() => window.alert('移动打卡方案已在页面更新，但保存到后端失败，请稍后重试'));
+      return next;
+    });
   };
-  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['修改', '删除'], label => mutateNamedRow(label, row, rowsData, setRowsData, 0))]);
+
+  const filteredRows = useMemo(() => filterRowsByText(rowsData, appliedName, [0, 1, 2]), [appliedName, rowsData]);
+  const effectiveGroupOptions = Array.from(new Set([...groupOptions, '默认考勤组', schemeDraft.attendGroup].filter(Boolean)));
+
+  const openCreateSchemeModal = () => {
+    setEditingSchemeId(null);
+    setSchemeDraft(emptyMobileClockDraft(rowsData.length + 1, groupOptions[0] || '默认考勤组'));
+    setShowSchemeModal(true);
+  };
+
+  const updateSchemeDraft = (key: keyof MobileClockDraft, value: string) => {
+    setSchemeDraft(current => ({ ...current, [key]: value }));
+  };
+
+  const saveSchemeDraft = () => {
+    if (!schemeDraft.name.trim()) {
+      window.alert('方案名称不能为空');
+      return;
+    }
+    commitRows(current => {
+      if (!editingSchemeId) return [mobileClockRowFromDraft(schemeDraft), ...current];
+      return current.map(row => createRowId(row) === editingSchemeId ? mobileClockRowFromDraft(schemeDraft, row) : row);
+    });
+    setShowSchemeModal(false);
+    setEditingSchemeId(null);
+  };
+
+  const handleAction = (label: string, row: string[]) => {
+    const rowId = createRowId(row);
+    if (label === '修改') {
+      setEditingSchemeId(rowId);
+      setSchemeDraft(mobileClockDraftFromRow(row));
+      setShowSchemeModal(true);
+      return;
+    }
+    if (label === '删除') {
+      if (!window.confirm(`确认删除移动打卡方案「${row[0] ?? '-'}」？`)) return;
+      commitRows(current => current.filter(item => createRowId(item) !== rowId));
+    }
+  };
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['修改', '删除'], label => handleAction(label, row))]);
   return (
     <ListPage colors={colors}>
+      <SourceNotice sourceInfo={sourceInfo} loadError={loadError} />
       <FilterBar colors={colors}>
         <SearchField label="方案名称" placeholder="请输入方案名称" colors={colors} width={210} value={draftName} onChange={setDraftName} />
         <div style={rightActionRow}>
@@ -934,18 +1879,120 @@ function MobileClockView({ colors }: { colors: any }) {
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button onClick={addScheme} style={primaryBtn(colors)}>新建方案</button>
+        <button onClick={openCreateSchemeModal} style={primaryBtn(colors)}>新建方案</button>
       </Toolbar>
       <DataTable columns={MOBILE_COLUMNS} rows={rows} colors={colors} emptyText="暂无内容" footerText={`共${filteredRows.length}笔`} />
+      {showSchemeModal ? (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.38)',
+          zIndex: 900,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+        }}>
+          <div style={{
+            width: 640,
+            maxWidth: 'calc(100vw - 48px)',
+            backgroundColor: colors.cardBg,
+            border: `1px solid ${colors.cardBorder}`,
+            borderRadius: 8,
+            boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: 52,
+              padding: '0 18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderBottom: `1px solid ${colors.cardBorder}`,
+            }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{editingSchemeId ? '修改移动打卡方案' : '新建移动打卡方案'}</div>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>保存后会同步到移动打卡方案表格，并可在上班地点中引用</div>
+              </div>
+              <button onClick={() => setShowSchemeModal(false)} style={iconBtn(colors)}>×</button>
+            </div>
+            <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+              <FormField label="方案名称" required colors={colors}>
+                <input value={schemeDraft.name} onChange={event => updateSchemeDraft('name', event.target.value)} placeholder="例如：华托大厦移动打卡" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="关联考勤组" colors={colors}>
+                <select value={schemeDraft.attendGroup} onChange={event => updateSchemeDraft('attendGroup', event.target.value)} style={modalInput(colors)}>
+                  {effectiveGroupOptions.map(group => <option key={group} value={group}>{group}</option>)}
+                </select>
+              </FormField>
+              <FormField label="方案内容" required colors={colors} full>
+                <textarea value={schemeDraft.content} onChange={event => updateSchemeDraft('content', event.target.value)} placeholder="例如：GPS/Wi-Fi/蓝牙均可打卡，超出范围需拍照说明" style={{ ...modalInput(colors), height: 82, resize: 'vertical', paddingTop: 8 }} />
+              </FormField>
+              <FormField label="创建人" colors={colors}>
+                <input value={schemeDraft.creator} onChange={event => updateSchemeDraft('creator', event.target.value)} placeholder="后台维护" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="创建时间" colors={colors}>
+                <input value={schemeDraft.createdAt} onChange={event => updateSchemeDraft('createdAt', event.target.value)} placeholder="例如：2026-05-21 09:00" style={modalInput(colors)} />
+              </FormField>
+            </div>
+            <div style={{ padding: '12px 18px 16px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${colors.cardBorder}` }}>
+              <button onClick={() => setShowSchemeModal(false)} style={outlineBtn(colors)}>取消</button>
+              <button onClick={saveSchemeDraft} disabled={!schemeDraft.name.trim() || !schemeDraft.content.trim()} style={!schemeDraft.name.trim() || !schemeDraft.content.trim() ? disabledBtn(colors) : primaryBtn(colors)}>
+                保存方案
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </ListPage>
   );
 }
 
-function LocationView({ colors, showMore, onToggleMore }: { colors: any; showMore: boolean; onToggleMore: () => void }) {
-  const [rowsData, setRowsData] = useState<string[][]>(LOCATION_ROWS);
+function LocationView({
+  colors,
+  showMore,
+  onToggleMore,
+  locationRows,
+  groupOptions,
+  mobileSchemeOptions,
+  onLocationRowsChange,
+  sourceInfo,
+  loadError,
+}: {
+  colors: any;
+  showMore: boolean;
+  onToggleMore: () => void;
+  locationRows: string[][];
+  groupOptions: string[];
+  mobileSchemeOptions: string[];
+  onLocationRowsChange: (rows: string[][]) => void;
+  sourceInfo?: string;
+  loadError?: string;
+}) {
+  const [rowsData, setRowsData] = useState<string[][]>(locationRows);
   const [draftFilters, setDraftFilters] = useState({ name: '', gps: '', wifi: '', bluetooth: '', mobile: '' });
   const [appliedFilters, setAppliedFilters] = useState(draftFilters);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
+  const [locationDraft, setLocationDraft] = useState<LocationDraft>(() => emptyLocationDraft(locationRows.length + 1, groupOptions[0] || '默认考勤组', mobileSchemeOptions[0] || '未关联移动打卡方案'));
+
+  useEffect(() => {
+    setRowsData(locationRows);
+    setSelectedRowIds(new Set());
+  }, [locationRows]);
+
+  const effectiveGroupOptions = Array.from(new Set([...groupOptions, locationDraft.attendGroup || '默认考勤组'].filter(Boolean)));
+  const effectiveMobileSchemeOptions = Array.from(new Set([...mobileSchemeOptions, locationDraft.mobileScheme || '未关联移动打卡方案'].filter(Boolean)));
+
+  const commitRows = (updater: (rows: string[][]) => string[][]) => {
+    setRowsData(current => {
+      const next = updater(current);
+      onLocationRowsChange(next);
+      void saveSettingsLocation(next).catch(() => window.alert('上班地点已在页面更新，但保存到后端失败，请稍后重试'));
+      return next;
+    });
+  };
 
   const filteredRows = useMemo(() => rowsData.filter(row => {
     return textIncludes(row[0], appliedFilters.name)
@@ -962,16 +2009,44 @@ function LocationView({ colors, showMore, onToggleMore }: { colors: any; showMor
     setAppliedFilters(next);
   };
 
-  const addLocation = (source = '手动创建') => {
-    const name = window.prompt('请输入上班地点名称', `上班地点${rowsData.length + 1}`);
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setRowsData(current => [[trimmed, '默认考勤组', '上海市静安区南京西路', '蓝牙-A1', 'Office-WiFi', '默认移动打卡方案', source, nowText(), source, nowText()], ...current]);
+  const openCreateLocationModal = () => {
+    setEditingLocationId(null);
+    setLocationDraft(emptyLocationDraft(rowsData.length + 1, groupOptions[0] || '默认考勤组', mobileSchemeOptions[0] || '未关联移动打卡方案'));
+    setShowLocationModal(true);
+  };
+
+  const openEditLocationModal = (row: string[]) => {
+    setEditingLocationId(createRowId(row));
+    setLocationDraft(locationDraftFromRow(row));
+    setShowLocationModal(true);
+  };
+
+  const updateLocationDraft = (key: keyof LocationDraft, value: string) => {
+    setLocationDraft(current => ({ ...current, [key]: value }));
+  };
+
+  const saveLocationDraft = () => {
+    if (!locationDraft.name.trim()) return;
+    commitRows(current => {
+      if (!editingLocationId) return [locationRowFromDraft(locationDraft), ...current];
+      return current.map(row => createRowId(row) === editingLocationId ? locationRowFromDraft(locationDraft, row) : row);
+    });
+    setShowLocationModal(false);
   };
 
   const importLocation = () => {
-    setRowsData(current => [[`导入地点${current.length + 1}`, '华北大区', '杭州市西湖区', '蓝牙-IMPORT', 'Guest-WiFi', '导入移动方案', '导入', nowText(), '导入', nowText()], ...current]);
+    commitRows(current => [[
+      `导入地点${current.length + 1}`,
+      groupOptions[0] || '默认考勤组',
+      '杭州市西湖区',
+      '蓝牙-IMPORT',
+      'Guest-WiFi',
+      mobileSchemeOptions[0] || '未关联移动打卡方案',
+      '导入',
+      nowText(),
+      '导入',
+      nowText(),
+    ], ...current]);
   };
 
   const deleteSelected = () => {
@@ -981,8 +2056,14 @@ function LocationView({ colors, showMore, onToggleMore }: { colors: any; showMor
       return;
     }
     if (!window.confirm(`确认删除选中的 ${visibleSelectedIds.length} 个上班地点？`)) return;
-    setRowsData(current => current.filter(row => !visibleSelectedIds.includes(createRowId(row))));
+    commitRows(current => current.filter(row => !visibleSelectedIds.includes(createRowId(row))));
     setSelectedRowIds(new Set());
+  };
+
+  const deleteLocation = (row: string[]) => {
+    if (!window.confirm(`确认删除「${row[0] ?? '当前地点'}」？`)) return;
+    const rowId = createRowId(row);
+    commitRows(current => current.filter(item => createRowId(item) !== rowId));
   };
 
   const exportRows = () => {
@@ -990,9 +2071,13 @@ function LocationView({ colors, showMore, onToggleMore }: { colors: any; showMor
     downloadCsv(LOCATION_COLUMNS.slice(0, -1), selectedRows.length ? selectedRows : filteredRows, selectedRows.length ? '上班地点-选中数据.csv' : '上班地点-筛选结果.csv');
   };
 
-  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['修改', '删除'], label => mutateNamedRow(label, row, rowsData, setRowsData, 0))]);
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['修改', '删除'], label => {
+    if (label === '修改') openEditLocationModal(row);
+    if (label === '删除') deleteLocation(row);
+  })]);
   return (
     <ListPage colors={colors}>
+      <SourceNotice sourceInfo={sourceInfo} loadError={loadError} />
       <FilterBar colors={colors}>
         <SearchField label="上班地点" placeholder="请输入" colors={colors} width={180} value={draftFilters.name} onChange={value => setDraftFilters(current => ({ ...current, name: value }))} />
         <SearchField label="GPS打卡地址" placeholder="请输入" colors={colors} width={180} value={draftFilters.gps} onChange={value => setDraftFilters(current => ({ ...current, gps: value }))} />
@@ -1009,7 +2094,7 @@ function LocationView({ colors, showMore, onToggleMore }: { colors: any; showMor
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button onClick={() => addLocation()} style={primaryBtn(colors)}>新建上班地点</button>
+        <button onClick={openCreateLocationModal} style={primaryBtn(colors)}>新建上班地点</button>
         <button onClick={importLocation} style={outlineBtn(colors)}>导入</button>
         <button onClick={exportRows} style={outlineBtn(colors)}>导出</button>
         <button onClick={deleteSelected} disabled={!selectedRowIds.size} style={selectedRowIds.size ? outlineBtn(colors) : disabledBtn(colors)}>批量删除</button>
@@ -1026,6 +2111,79 @@ function LocationView({ colors, showMore, onToggleMore }: { colors: any; showMor
         emptyText="暂无内容"
         footerText={`共${filteredRows.length}笔`}
       />
+      {showLocationModal ? (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.38)',
+          zIndex: 900,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+        }}>
+          <div style={{
+            width: 720,
+            maxWidth: 'calc(100vw - 48px)',
+            backgroundColor: colors.cardBg,
+            border: `1px solid ${colors.cardBorder}`,
+            borderRadius: 8,
+            boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: 52,
+              padding: '0 18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderBottom: `1px solid ${colors.cardBorder}`,
+            }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{editingLocationId ? '修改上班地点' : '新建上班地点'}</div>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>保存后会同步到上班地点表格，并关联真实考勤组和移动打卡方案</div>
+              </div>
+              <button onClick={() => setShowLocationModal(false)} style={iconBtn(colors)}>×</button>
+            </div>
+            <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+              <FormField label="上班地点名称" required colors={colors}>
+                <input value={locationDraft.name} onChange={event => updateLocationDraft('name', event.target.value)} placeholder="例如：华托大厦" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="考勤组名称" required colors={colors}>
+                <select value={locationDraft.attendGroup} onChange={event => updateLocationDraft('attendGroup', event.target.value)} style={modalInput(colors)}>
+                  {effectiveGroupOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </FormField>
+              <FormField label="GPS打卡地址" colors={colors} full>
+                <input value={locationDraft.gpsAddress} onChange={event => updateLocationDraft('gpsAddress', event.target.value)} placeholder="例如：上海市静安区南京西路" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="打卡蓝牙" colors={colors}>
+                <input value={locationDraft.bluetooth} onChange={event => updateLocationDraft('bluetooth', event.target.value)} placeholder="例如：蓝牙-A1" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="打卡Wi-Fi" colors={colors}>
+                <input value={locationDraft.wifi} onChange={event => updateLocationDraft('wifi', event.target.value)} placeholder="例如：Office-WiFi" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="关联移动打卡方案" colors={colors} full>
+                <select value={locationDraft.mobileScheme} onChange={event => updateLocationDraft('mobileScheme', event.target.value)} style={modalInput(colors)}>
+                  {effectiveMobileSchemeOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </FormField>
+              <FormField label="创建人" colors={colors}>
+                <input value={locationDraft.creator} onChange={event => updateLocationDraft('creator', event.target.value)} placeholder="后台维护" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="创建时间" colors={colors}>
+                <input value={locationDraft.createdAt} onChange={event => updateLocationDraft('createdAt', event.target.value)} placeholder="例如：2026-05-21 09:00" style={modalInput(colors)} />
+              </FormField>
+            </div>
+            <div style={{ padding: '12px 18px 16px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${colors.cardBorder}` }}>
+              <button onClick={() => setShowLocationModal(false)} style={outlineBtn(colors)}>取消</button>
+              <button onClick={saveLocationDraft} disabled={!locationDraft.name.trim()} style={!locationDraft.name.trim() ? disabledBtn(colors) : primaryBtn(colors)}>
+                保存地点
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </ListPage>
   );
 }
@@ -1036,6 +2194,7 @@ function FaceView({
   onToggleMore,
   faceRows,
   shiftOptions,
+  groupOptions,
   sourceInfo,
   loadError,
   onEmployeeCreated,
@@ -1046,6 +2205,7 @@ function FaceView({
   onToggleMore: () => void;
   faceRows: string[][];
   shiftOptions: ShiftOption[];
+  groupOptions: string[];
   sourceInfo?: string;
   loadError?: string;
   onEmployeeCreated: (peopleRow: string[], faceRow: string[]) => void;
@@ -1075,6 +2235,7 @@ function FaceView({
     userId: '',
   });
   const effectiveShiftOptions = shiftOptions.length ? shiftOptions : [{ id: 'shift_0900_1800', name: '早九晚六', time: '09:00-18:00' }];
+  const effectiveGroupOptions = Array.from(new Set([...groupOptions, ...ONBOARD_ATTEND_GROUPS, employeeDraft.attendanceGroupName].filter(Boolean)));
 
   useEffect(() => {
     setRowsData(faceRows);
@@ -1220,7 +2381,7 @@ function FaceView({
   const managerOptions = rowsData
     .map(row => ({ employeeNo: String(row[1] ?? '').trim(), name: String(row[0] ?? '').trim() }))
     .filter(item => item.employeeNo && item.employeeNo !== employeeDraft.employeeNo.trim());
-  const groupOptions = uniqueOptions(rowsData, 4);
+  const faceGroupOptions = uniqueOptions(rowsData, 4);
   const statusOptions = uniqueOptions(rowsData, 6);
 
   return (
@@ -1230,7 +2391,7 @@ function FaceView({
       <FilterBar colors={colors}>
         <SearchField label="员工" placeholder="请输入姓名或员工号" colors={colors} width={200} showUserIcon value={draftFilters.employee} onChange={value => setDraftFilters(current => ({ ...current, employee: value }))} />
         <SelectField label="部门" placeholder="请选择" colors={colors} width={150} options={deptOptions} value={draftFilters.dept} onChange={value => setDraftFilters(current => ({ ...current, dept: value }))} />
-        <SelectField label="考勤组" placeholder="请选择" colors={colors} width={150} options={groupOptions} value={draftFilters.group} onChange={value => setDraftFilters(current => ({ ...current, group: value }))} />
+        <SelectField label="考勤组" placeholder="请选择" colors={colors} width={150} options={faceGroupOptions} value={draftFilters.group} onChange={value => setDraftFilters(current => ({ ...current, group: value }))} />
         <DateRangeField label="入职日期" colors={colors} width={240} start={draftFilters.start} end={draftFilters.end} onChange={(start, end) => setDraftFilters(current => ({ ...current, start, end }))} />
         <SelectField label="录入状态" placeholder="请选择" colors={colors} width={150} options={statusOptions} value={draftFilters.status} onChange={value => setDraftFilters(current => ({ ...current, status: value }))} />
         <div style={rightActionRow}>
@@ -1332,7 +2493,7 @@ function FaceView({
               </FormField>
               <FormField label="考勤组" colors={colors}>
                 <select value={employeeDraft.attendanceGroupName} onChange={event => updateEmployeeDraft('attendanceGroupName', event.target.value)} style={modalInput(colors)}>
-                  {ONBOARD_ATTEND_GROUPS.map(group => <option key={group} value={group}>{group}</option>)}
+                  {effectiveGroupOptions.map(group => <option key={group} value={group}>{group}</option>)}
                 </select>
               </FormField>
               <FormField label="班次" colors={colors}>
@@ -1420,21 +2581,83 @@ function DevicesView({ colors }: { colors: any }) {
   );
 }
 
-function HolidayView({ colors }: { colors: any }) {
-  const [rowsData, setRowsData] = useState<string[][]>(HOLIDAY_ROWS);
+function HolidayView({
+  colors,
+  holidayRows,
+  calendarOptions,
+  onHolidayRowsChange,
+  sourceInfo,
+  loadError,
+}: {
+  colors: any;
+  holidayRows: string[][];
+  calendarOptions: string[];
+  onHolidayRowsChange: (rows: string[][]) => void;
+  sourceInfo?: string;
+  loadError?: string;
+}) {
+  const [rowsData, setRowsData] = useState<string[][]>(holidayRows);
   const [draftName, setDraftName] = useState('');
   const [appliedName, setAppliedName] = useState('');
-  const filteredRows = useMemo(() => filterRowsByText(rowsData, appliedName, [0, 2]), [appliedName, rowsData]);
-  const addHoliday = () => {
-    const name = window.prompt('请输入节假日方案名称', `节假日方案${rowsData.length + 1}`);
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setRowsData(current => [[trimmed, '2026', '双休', '手动创建', nowText(), '手动创建', nowText()], ...current]);
+  const [showHolidayModal, setShowHolidayModal] = useState(false);
+  const [editingHolidayId, setEditingHolidayId] = useState<string | null>(null);
+  const [holidayDraft, setHolidayDraft] = useState<HolidayDraft>(() => emptyHolidayDraft(holidayRows.length + 1, calendarOptions[0] || '双休'));
+
+  useEffect(() => {
+    setRowsData(holidayRows);
+  }, [holidayRows]);
+
+  const effectiveCalendarOptions = Array.from(new Set([...calendarOptions, holidayDraft.calendarName || '双休'].filter(Boolean)));
+
+  const commitRows = (updater: (rows: string[][]) => string[][]) => {
+    setRowsData(current => {
+      const next = updater(current);
+      onHolidayRowsChange(next);
+      void saveSettingsHoliday(next).catch(() => window.alert('节假日方案已在页面更新，但保存到后端失败，请稍后重试'));
+      return next;
+    });
   };
-  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['编辑', '删除'], label => mutateNamedRow(label, row, rowsData, setRowsData, 0))]);
+
+  const filteredRows = useMemo(() => filterRowsByText(rowsData, appliedName, [0, 2]), [appliedName, rowsData]);
+
+  const openCreateHolidayModal = () => {
+    setEditingHolidayId(null);
+    setHolidayDraft(emptyHolidayDraft(rowsData.length + 1, calendarOptions[0] || '双休'));
+    setShowHolidayModal(true);
+  };
+
+  const openEditHolidayModal = (row: string[]) => {
+    setEditingHolidayId(createRowId(row));
+    setHolidayDraft(holidayDraftFromRow(row));
+    setShowHolidayModal(true);
+  };
+
+  const updateHolidayDraft = (key: keyof HolidayDraft, value: string) => {
+    setHolidayDraft(current => ({ ...current, [key]: value }));
+  };
+
+  const saveHolidayDraft = () => {
+    if (!holidayDraft.name.trim()) return;
+    commitRows(current => {
+      if (!editingHolidayId) return [holidayRowFromDraft(holidayDraft), ...current];
+      return current.map(row => createRowId(row) === editingHolidayId ? holidayRowFromDraft(holidayDraft, row) : row);
+    });
+    setShowHolidayModal(false);
+  };
+
+  const deleteHoliday = (row: string[]) => {
+    if (!window.confirm(`确认删除「${row[0] ?? '当前方案'}」？`)) return;
+    const rowId = createRowId(row);
+    commitRows(current => current.filter(item => createRowId(item) !== rowId));
+  };
+
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['编辑', '删除'], label => {
+    if (label === '编辑') openEditHolidayModal(row);
+    if (label === '删除') deleteHoliday(row);
+  })]);
   return (
     <ListPage colors={colors}>
+      <SourceNotice sourceInfo={sourceInfo} loadError={loadError} />
       <FilterBar colors={colors}>
         <SearchField label="方案名称" placeholder="请输入方案名称" colors={colors} width={210} value={draftName} onChange={setDraftName} />
         <div style={rightActionRow}>
@@ -1443,28 +2666,147 @@ function HolidayView({ colors }: { colors: any }) {
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button onClick={addHoliday} style={primaryBtn(colors)}>新增节假日方案</button>
+        <button onClick={openCreateHolidayModal} style={primaryBtn(colors)}>新增节假日方案</button>
       </Toolbar>
       <DataTable columns={HOLIDAY_COLUMNS} rows={rows} colors={colors} emptyText="暂无内容" footerText={`共${filteredRows.length}笔`} />
+      {showHolidayModal ? (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.38)',
+          zIndex: 900,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+        }}>
+          <div style={{
+            width: 640,
+            maxWidth: 'calc(100vw - 48px)',
+            backgroundColor: colors.cardBg,
+            border: `1px solid ${colors.cardBorder}`,
+            borderRadius: 8,
+            boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: 52,
+              padding: '0 18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderBottom: `1px solid ${colors.cardBorder}`,
+            }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{editingHolidayId ? '编辑节假日方案' : '新增节假日方案'}</div>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>保存后会同步到节假日管理表格，并关联司历方案</div>
+              </div>
+              <button onClick={() => setShowHolidayModal(false)} style={iconBtn(colors)}>×</button>
+            </div>
+            <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+              <FormField label="方案名称" required colors={colors}>
+                <input value={holidayDraft.name} onChange={event => updateHolidayDraft('name', event.target.value)} placeholder="例如：2026法定节假日" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="已设置年份" required colors={colors}>
+                <input value={holidayDraft.years} onChange={event => updateHolidayDraft('years', event.target.value)} placeholder="例如：2026" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="关联司历" required colors={colors} full>
+                <select value={holidayDraft.calendarName} onChange={event => updateHolidayDraft('calendarName', event.target.value)} style={modalInput(colors)}>
+                  {effectiveCalendarOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </FormField>
+              <FormField label="创建人" colors={colors}>
+                <input value={holidayDraft.creator} onChange={event => updateHolidayDraft('creator', event.target.value)} placeholder="后台维护" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="创建时间" colors={colors}>
+                <input value={holidayDraft.createdAt} onChange={event => updateHolidayDraft('createdAt', event.target.value)} placeholder="例如：2026-05-21 09:00" style={modalInput(colors)} />
+              </FormField>
+            </div>
+            <div style={{ padding: '12px 18px 16px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${colors.cardBorder}` }}>
+              <button onClick={() => setShowHolidayModal(false)} style={outlineBtn(colors)}>取消</button>
+              <button onClick={saveHolidayDraft} disabled={!holidayDraft.name.trim() || !holidayDraft.years.trim()} style={!holidayDraft.name.trim() || !holidayDraft.years.trim() ? disabledBtn(colors) : primaryBtn(colors)}>
+                保存方案
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </ListPage>
   );
 }
 
-function CalendarView({ colors }: { colors: any }) {
-  const [rowsData, setRowsData] = useState<string[][]>(CALENDAR_ROWS);
+function CalendarView({
+  colors,
+  calendarRows,
+  groupOptions,
+  onCalendarRowsChange,
+  sourceInfo,
+  loadError,
+}: {
+  colors: any;
+  calendarRows: string[][];
+  groupOptions: string[];
+  onCalendarRowsChange: (rows: string[][]) => void;
+  sourceInfo?: string;
+  loadError?: string;
+}) {
+  const [rowsData, setRowsData] = useState<string[][]>(calendarRows);
   const [draftFilters, setDraftFilters] = useState({ name: '', period: '' });
   const [appliedFilters, setAppliedFilters] = useState(draftFilters);
-  const filteredRows = useMemo(() => rowsData.filter(row => textIncludes(row[0], appliedFilters.name) && textIncludes(row[1], appliedFilters.period)), [appliedFilters, rowsData]);
-  const addCalendar = () => {
-    const name = window.prompt('请输入司历方案名称', `司历方案${rowsData.length + 1}`);
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setRowsData(current => [[trimmed, '当月1日至当月最后一天为【当月】的考勤周期', '周一、周二、周三、周四、周五', '工作日之和为应出勤天数', '默认考勤组', '手动创建', nowText(), '手动创建', nowText()], ...current]);
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
+  const [editingCalendarId, setEditingCalendarId] = useState<string | null>(null);
+  const [calendarDraft, setCalendarDraft] = useState<CalendarDraft>(() => emptyCalendarDraft(calendarRows.length + 1, groupOptions[0] || '默认考勤组'));
+  useEffect(() => {
+    setRowsData(calendarRows);
+  }, [calendarRows]);
+  const effectiveGroupOptions = Array.from(new Set([...groupOptions, '默认考勤组', calendarDraft.attendGroup].filter(Boolean)));
+  const commitRows = (updater: (rows: string[][]) => string[][]) => {
+    setRowsData(current => {
+      const next = updater(current);
+      onCalendarRowsChange(next);
+      void saveSettingsCalendar(next).catch(() => window.alert('司历方案已在页面更新，但保存到后端失败，请稍后重试'));
+      return next;
+    });
   };
-  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['编辑', '删除'], label => mutateNamedRow(label, row, rowsData, setRowsData, 0))]);
+  const filteredRows = useMemo(() => rowsData.filter(row => textIncludes(row[0], appliedFilters.name) && textIncludes(row[1], appliedFilters.period)), [appliedFilters, rowsData]);
+
+  const openCreateCalendarModal = () => {
+    setEditingCalendarId(null);
+    setCalendarDraft(emptyCalendarDraft(rowsData.length + 1, groupOptions[0] || '默认考勤组'));
+    setShowCalendarModal(true);
+  };
+
+  const openEditCalendarModal = (row: string[]) => {
+    setEditingCalendarId(createRowId(row));
+    setCalendarDraft(calendarDraftFromRow(row));
+    setShowCalendarModal(true);
+  };
+
+  const updateCalendarDraft = (key: keyof CalendarDraft, value: string) => {
+    setCalendarDraft(current => ({ ...current, [key]: value }));
+  };
+
+  const saveCalendarDraft = () => {
+    if (!calendarDraft.name.trim()) return;
+    commitRows(current => {
+      if (!editingCalendarId) return [calendarRowFromDraft(calendarDraft), ...current];
+      return current.map(row => createRowId(row) === editingCalendarId ? calendarRowFromDraft(calendarDraft, row) : row);
+    });
+    setShowCalendarModal(false);
+  };
+
+  const deleteCalendar = (row: string[]) => {
+    if (!window.confirm(`确认删除「${row[0] ?? '当前方案'}」？`)) return;
+    const rowId = createRowId(row);
+    commitRows(current => current.filter(item => createRowId(item) !== rowId));
+  };
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['编辑', '删除'], label => {
+    if (label === '编辑') openEditCalendarModal(row);
+    if (label === '删除') deleteCalendar(row);
+  })]);
   return (
     <ListPage colors={colors}>
+      <SourceNotice sourceInfo={sourceInfo} loadError={loadError} />
       <FilterBar colors={colors}>
         <SearchField label="方案名称" placeholder="请输入方案名称" colors={colors} width={210} value={draftFilters.name} onChange={value => setDraftFilters(current => ({ ...current, name: value }))} />
         <SelectField label="考勤周期" placeholder="请选择考勤周期" colors={colors} width={180} options={uniqueOptions(rowsData, 1)} value={draftFilters.period} onChange={value => setDraftFilters(current => ({ ...current, period: value }))} />
@@ -1474,32 +2816,165 @@ function CalendarView({ colors }: { colors: any }) {
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button onClick={addCalendar} style={primaryBtn(colors)}>新建司历方案</button>
+        <button onClick={openCreateCalendarModal} style={primaryBtn(colors)}>新建司历方案</button>
       </Toolbar>
       <DataTable columns={CALENDAR_COLUMNS} rows={rows} colors={colors} footerText={`共${filteredRows.length}笔`} />
+      {showCalendarModal ? (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.38)',
+          zIndex: 900,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+        }}>
+          <div style={{
+            width: 760,
+            maxWidth: 'calc(100vw - 48px)',
+            backgroundColor: colors.cardBg,
+            border: `1px solid ${colors.cardBorder}`,
+            borderRadius: 8,
+            boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: 52,
+              padding: '0 18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderBottom: `1px solid ${colors.cardBorder}`,
+            }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{editingCalendarId ? '编辑司历方案' : '新建司历方案'}</div>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>保存后会同步到司历管理表格，并可被节假日方案关联</div>
+              </div>
+              <button onClick={() => setShowCalendarModal(false)} style={iconBtn(colors)}>×</button>
+            </div>
+            <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+              <FormField label="方案名称" required colors={colors}>
+                <input value={calendarDraft.name} onChange={event => updateCalendarDraft('name', event.target.value)} placeholder="例如：双休" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="适用考勤组" required colors={colors}>
+                <select value={calendarDraft.attendGroup} onChange={event => updateCalendarDraft('attendGroup', event.target.value)} style={modalInput(colors)}>
+                  {effectiveGroupOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </FormField>
+              <FormField label="考勤周期" required colors={colors} full>
+                <input value={calendarDraft.period} onChange={event => updateCalendarDraft('period', event.target.value)} placeholder="例如：当月1日至当月最后一天为【当月】的考勤周期" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="每周工作日" required colors={colors} full>
+                <input value={calendarDraft.workdays} onChange={event => updateCalendarDraft('workdays', event.target.value)} placeholder="例如：周一、周二、周三、周四、周五" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="包含最大天数规则" required colors={colors} full>
+                <input value={calendarDraft.maxRule} onChange={event => updateCalendarDraft('maxRule', event.target.value)} placeholder="例如：工作日之和为应出勤天数" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="创建人" colors={colors}>
+                <input value={calendarDraft.creator} onChange={event => updateCalendarDraft('creator', event.target.value)} placeholder="后台维护" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="创建时间" colors={colors}>
+                <input value={calendarDraft.createdAt} onChange={event => updateCalendarDraft('createdAt', event.target.value)} placeholder="例如：2026-05-21 09:00" style={modalInput(colors)} />
+              </FormField>
+            </div>
+            <div style={{ padding: '12px 18px 16px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${colors.cardBorder}` }}>
+              <button onClick={() => setShowCalendarModal(false)} style={outlineBtn(colors)}>取消</button>
+              <button onClick={saveCalendarDraft} disabled={!calendarDraft.name.trim() || !calendarDraft.period.trim()} style={!calendarDraft.name.trim() || !calendarDraft.period.trim() ? disabledBtn(colors) : primaryBtn(colors)}>
+                保存方案
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </ListPage>
   );
 }
 
-function OvertimeRulesView({ colors }: { colors: any }) {
-  const [rowsData, setRowsData] = useState<string[][]>(OVERTIME_RULE_ROWS);
+function OvertimeRulesView({
+  colors,
+  overtimeRuleRows,
+  groupOptions,
+  onOvertimeRuleRowsChange,
+  sourceInfo,
+  loadError,
+}: {
+  colors: any;
+  overtimeRuleRows: string[][];
+  groupOptions: string[];
+  onOvertimeRuleRowsChange: (rows: string[][]) => void;
+  sourceInfo?: string;
+  loadError?: string;
+}) {
+  const [rowsData, setRowsData] = useState<string[][]>(overtimeRuleRows);
   const [draftName, setDraftName] = useState('');
   const [appliedName, setAppliedName] = useState('');
   const [useDefault, setUseDefault] = useState(true);
+  const [showRuleModal, setShowRuleModal] = useState(false);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [ruleDraft, setRuleDraft] = useState<OvertimeRuleDraft>(() => emptyOvertimeRuleDraft(overtimeRuleRows.length + 1, groupOptions[0] || '默认考勤组'));
+
+  useEffect(() => {
+    setRowsData(overtimeRuleRows);
+  }, [overtimeRuleRows]);
+
+  const effectiveGroupOptions = Array.from(new Set([...groupOptions, '默认考勤组', ruleDraft.attendGroup].filter(Boolean)));
+  const commitRows = (updater: (rows: string[][]) => string[][]) => {
+    setRowsData(current => {
+      const next = updater(current);
+      onOvertimeRuleRowsChange(next);
+      void saveSettingsOvertimeRules(next).catch(() => window.alert('加班规则已在页面更新，但保存到后端失败，请稍后重试'));
+      return next;
+    });
+  };
+
   const filteredRows = useMemo(() => filterRowsByText(rowsData, appliedName, [0, 1, 2]), [appliedName, rowsData]);
+
+  const openCreateRuleModal = () => {
+    setEditingRuleId(null);
+    setRuleDraft(emptyOvertimeRuleDraft(rowsData.length + 1, groupOptions[0] || '默认考勤组'));
+    setShowRuleModal(true);
+  };
+
+  const openEditRuleModal = (row: string[]) => {
+    setEditingRuleId(createRowId(row));
+    setRuleDraft(overtimeRuleDraftFromRow(row));
+    setShowRuleModal(true);
+  };
+
+  const updateRuleDraft = (key: keyof OvertimeRuleDraft, value: string) => {
+    setRuleDraft(current => ({ ...current, [key]: value }));
+  };
+
+  const saveRuleDraft = () => {
+    if (!ruleDraft.name.trim()) return;
+    commitRows(current => {
+      if (!editingRuleId) return [overtimeRuleRowFromDraft(ruleDraft), ...current];
+      return current.map(row => createRowId(row) === editingRuleId ? overtimeRuleRowFromDraft(ruleDraft, row) : row);
+    });
+    setShowRuleModal(false);
+  };
+
   const importDefault = () => {
-    setRowsData(current => [[`默认加班规则${current.length + 1}`, '工作日/休息日/节假日均按默认口径核算', '默认考勤组', '系统默认', nowText(), '系统默认', nowText()], ...current]);
+    commitRows(current => [[`默认加班规则${current.length + 1}`, '工作日/休息日/节假日均按默认口径核算', '默认考勤组', '系统默认', nowText(), '系统默认', nowText()], ...current]);
     setUseDefault(true);
+  };
+  const deleteRule = (row: string[]) => {
+    if (!window.confirm(`确认删除「${row[0] ?? '当前规则'}」？`)) return;
+    const rowId = createRowId(row);
+    commitRows(current => current.filter(item => createRowId(item) !== rowId));
   };
   const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['查看', '修改', '删除'], label => {
     if (label === '查看') {
       window.alert(`加班规则\n${row[0] ?? '-'}\n${row[1] ?? '-'}`);
       return;
     }
-    mutateNamedRow(label, row, rowsData, setRowsData, 0);
+    if (label === '修改') openEditRuleModal(row);
+    if (label === '删除') deleteRule(row);
   })]);
   return (
     <ListPage colors={colors}>
+      <SourceNotice sourceInfo={sourceInfo} loadError={loadError} />
       <InfoBanner colors={colors} messages={['设置加班补偿方式、核算方式，完成后可在考勤管理中使用。']} />
       <FilterBar colors={colors}>
         <SearchField label="规则名称" placeholder="请输入方案名称" colors={colors} width={210} value={draftName} onChange={setDraftName} />
@@ -1509,6 +2984,7 @@ function OvertimeRulesView({ colors }: { colors: any }) {
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
+        <button onClick={openCreateRuleModal} style={primaryBtn(colors)}>新建加班规则</button>
         <button onClick={importDefault} style={primaryBtn(colors)}>导入默认加班规则</button>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '12px', color: colors.textMuted }}>
@@ -1518,25 +2994,147 @@ function OvertimeRulesView({ colors }: { colors: any }) {
         </div>
       </Toolbar>
       <DataTable columns={OVERTIME_RULE_COLUMNS} rows={rows} colors={colors} footerText={`共${filteredRows.length}笔`} />
+      {showRuleModal ? (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.38)',
+          zIndex: 900,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+        }}>
+          <div style={{
+            width: 720,
+            maxWidth: 'calc(100vw - 48px)',
+            backgroundColor: colors.cardBg,
+            border: `1px solid ${colors.cardBorder}`,
+            borderRadius: 8,
+            boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: 52,
+              padding: '0 18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderBottom: `1px solid ${colors.cardBorder}`,
+            }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{editingRuleId ? '修改加班规则' : '新建加班规则'}</div>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>保存后会同步到加班规则表格，并关联真实考勤组</div>
+              </div>
+              <button onClick={() => setShowRuleModal(false)} style={iconBtn(colors)}>×</button>
+            </div>
+            <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+              <FormField label="加班规则名称" required colors={colors}>
+                <input value={ruleDraft.name} onChange={event => updateRuleDraft('name', event.target.value)} placeholder="例如：调休" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="关联考勤组" required colors={colors}>
+                <select value={ruleDraft.attendGroup} onChange={event => updateRuleDraft('attendGroup', event.target.value)} style={modalInput(colors)}>
+                  {effectiveGroupOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </FormField>
+              <FormField label="规则内容" required colors={colors} full>
+                <textarea value={ruleDraft.content} onChange={event => updateRuleDraft('content', event.target.value)} placeholder="例如：工作日：仅统计时长 / 休息日：折算为调休 / 节假日：按节假日加班核算" style={{ ...modalInput(colors), height: 82, resize: 'vertical', paddingTop: 8 }} />
+              </FormField>
+              <FormField label="创建人" colors={colors}>
+                <input value={ruleDraft.creator} onChange={event => updateRuleDraft('creator', event.target.value)} placeholder="后台维护" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="创建时间" colors={colors}>
+                <input value={ruleDraft.createdAt} onChange={event => updateRuleDraft('createdAt', event.target.value)} placeholder="例如：2026-05-21 09:00" style={modalInput(colors)} />
+              </FormField>
+            </div>
+            <div style={{ padding: '12px 18px 16px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${colors.cardBorder}` }}>
+              <button onClick={() => setShowRuleModal(false)} style={outlineBtn(colors)}>取消</button>
+              <button onClick={saveRuleDraft} disabled={!ruleDraft.name.trim() || !ruleDraft.content.trim()} style={!ruleDraft.name.trim() || !ruleDraft.content.trim() ? disabledBtn(colors) : primaryBtn(colors)}>
+                保存规则
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </ListPage>
   );
 }
 
-function FieldRulesView({ colors }: { colors: any }) {
-  const [rowsData, setRowsData] = useState<string[][]>(FIELD_RULE_ROWS);
+function FieldRulesView({
+  colors,
+  fieldRuleRows,
+  groupOptions,
+  onFieldRuleRowsChange,
+  sourceInfo,
+  loadError,
+}: {
+  colors: any;
+  fieldRuleRows: string[][];
+  groupOptions: string[];
+  onFieldRuleRowsChange: (rows: string[][]) => void;
+  sourceInfo?: string;
+  loadError?: string;
+}) {
+  const [rowsData, setRowsData] = useState<string[][]>(fieldRuleRows);
   const [draftName, setDraftName] = useState('');
   const [appliedName, setAppliedName] = useState('');
-  const filteredRows = useMemo(() => filterRowsByText(rowsData, appliedName, [0, 1, 2]), [appliedName, rowsData]);
-  const addRule = () => {
-    const name = window.prompt('请输入外勤规则名称', `外勤规则${rowsData.length + 1}`);
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setRowsData(current => [[trimmed, '外勤打卡已启用 / 外出申请已启用', '默认考勤组', '手动创建', nowText(), '手动创建', nowText()], ...current]);
+  const [showRuleModal, setShowRuleModal] = useState(false);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [ruleDraft, setRuleDraft] = useState<FieldRuleDraft>(() => emptyFieldRuleDraft(fieldRuleRows.length + 1, groupOptions[0] || '默认考勤组'));
+
+  useEffect(() => {
+    setRowsData(fieldRuleRows);
+  }, [fieldRuleRows]);
+
+  const effectiveGroupOptions = Array.from(new Set([...groupOptions, '默认考勤组', ruleDraft.attendGroup].filter(Boolean)));
+  const commitRows = (updater: (rows: string[][]) => string[][]) => {
+    setRowsData(current => {
+      const next = updater(current);
+      onFieldRuleRowsChange(next);
+      void saveSettingsFieldRules(next).catch(() => window.alert('外勤规则已在页面更新，但保存到后端失败，请稍后重试'));
+      return next;
+    });
   };
-  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['修改', '删除'], label => mutateNamedRow(label, row, rowsData, setRowsData, 0))]);
+
+  const filteredRows = useMemo(() => filterRowsByText(rowsData, appliedName, [0, 1, 2]), [appliedName, rowsData]);
+
+  const openCreateRuleModal = () => {
+    setEditingRuleId(null);
+    setRuleDraft(emptyFieldRuleDraft(rowsData.length + 1, groupOptions[0] || '默认考勤组'));
+    setShowRuleModal(true);
+  };
+
+  const openEditRuleModal = (row: string[]) => {
+    setEditingRuleId(createRowId(row));
+    setRuleDraft(fieldRuleDraftFromRow(row));
+    setShowRuleModal(true);
+  };
+
+  const updateRuleDraft = (key: keyof FieldRuleDraft, value: string) => {
+    setRuleDraft(current => ({ ...current, [key]: value }));
+  };
+
+  const saveRuleDraft = () => {
+    if (!ruleDraft.name.trim()) return;
+    commitRows(current => {
+      if (!editingRuleId) return [fieldRuleRowFromDraft(ruleDraft), ...current];
+      return current.map(row => createRowId(row) === editingRuleId ? fieldRuleRowFromDraft(ruleDraft, row) : row);
+    });
+    setShowRuleModal(false);
+  };
+
+  const deleteRule = (row: string[]) => {
+    if (!window.confirm(`确认删除「${row[0] ?? '当前规则'}」？`)) return;
+    const rowId = createRowId(row);
+    commitRows(current => current.filter(item => createRowId(item) !== rowId));
+  };
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['修改', '删除'], label => {
+    if (label === '修改') openEditRuleModal(row);
+    if (label === '删除') deleteRule(row);
+  })]);
   return (
     <ListPage colors={colors}>
+      <SourceNotice sourceInfo={sourceInfo} loadError={loadError} />
       <FilterBar colors={colors}>
         <SearchField label="外勤规则" placeholder="请输入外勤规则名称" colors={colors} width={210} value={draftName} onChange={setDraftName} />
         <div style={rightActionRow}>
@@ -1545,28 +3143,156 @@ function FieldRulesView({ colors }: { colors: any }) {
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button onClick={addRule} style={primaryBtn(colors)}>新增外勤规则</button>
+        <button onClick={openCreateRuleModal} style={primaryBtn(colors)}>新增外勤规则</button>
       </Toolbar>
       <DataTable columns={FIELD_RULE_COLUMNS} rows={rows} colors={colors} footerText={`共${filteredRows.length}笔`} />
+      {showRuleModal ? (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.38)',
+          zIndex: 900,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+        }}>
+          <div style={{
+            width: 720,
+            maxWidth: 'calc(100vw - 48px)',
+            backgroundColor: colors.cardBg,
+            border: `1px solid ${colors.cardBorder}`,
+            borderRadius: 8,
+            boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: 52,
+              padding: '0 18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderBottom: `1px solid ${colors.cardBorder}`,
+            }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{editingRuleId ? '修改外勤规则' : '新增外勤规则'}</div>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>保存后会同步到外勤规则表格，并关联真实考勤组</div>
+              </div>
+              <button onClick={() => setShowRuleModal(false)} style={iconBtn(colors)}>×</button>
+            </div>
+            <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+              <FormField label="规则名称" required colors={colors}>
+                <input value={ruleDraft.name} onChange={event => updateRuleDraft('name', event.target.value)} placeholder="例如：外勤" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="关联考勤组" required colors={colors}>
+                <select value={ruleDraft.attendGroup} onChange={event => updateRuleDraft('attendGroup', event.target.value)} style={modalInput(colors)}>
+                  {effectiveGroupOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </FormField>
+              <FormField label="规则内容" required colors={colors} full>
+                <textarea value={ruleDraft.content} onChange={event => updateRuleDraft('content', event.target.value)} placeholder="例如：外勤打卡已启用 / 外出申请已启用" style={{ ...modalInput(colors), height: 82, resize: 'vertical', paddingTop: 8 }} />
+              </FormField>
+              <FormField label="创建人" colors={colors}>
+                <input value={ruleDraft.creator} onChange={event => updateRuleDraft('creator', event.target.value)} placeholder="后台维护" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="创建时间" colors={colors}>
+                <input value={ruleDraft.createdAt} onChange={event => updateRuleDraft('createdAt', event.target.value)} placeholder="例如：2026-05-21 09:00" style={modalInput(colors)} />
+              </FormField>
+            </div>
+            <div style={{ padding: '12px 18px 16px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${colors.cardBorder}` }}>
+              <button onClick={() => setShowRuleModal(false)} style={outlineBtn(colors)}>取消</button>
+              <button onClick={saveRuleDraft} disabled={!ruleDraft.name.trim() || !ruleDraft.content.trim()} style={!ruleDraft.name.trim() || !ruleDraft.content.trim() ? disabledBtn(colors) : primaryBtn(colors)}>
+                保存规则
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </ListPage>
   );
 }
 
-function StatSchemesView({ colors }: { colors: any }) {
-  const [rowsData, setRowsData] = useState<string[][]>(STAT_SCHEME_ROWS);
+function StatSchemesView({
+  colors,
+  statSchemeRows,
+  groupOptions,
+  onStatSchemeRowsChange,
+  sourceInfo,
+  loadError,
+}: {
+  colors: any;
+  statSchemeRows: string[][];
+  groupOptions: string[];
+  onStatSchemeRowsChange: (rows: string[][]) => void;
+  sourceInfo?: string;
+  loadError?: string;
+}) {
+  const [rowsData, setRowsData] = useState<string[][]>(statSchemeRows);
   const [draftFilters, setDraftFilters] = useState({ name: '', employee: '' });
   const [appliedFilters, setAppliedFilters] = useState(draftFilters);
-  const filteredRows = useMemo(() => rowsData.filter(row => textIncludes(row[0], appliedFilters.name) && textIncludes(row.join(' '), appliedFilters.employee)), [appliedFilters, rowsData]);
-  const addScheme = () => {
-    const name = window.prompt('请输入统计方案名称', `统计方案${rowsData.length + 1}`);
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setRowsData(current => [[trimmed, '当月1日至当月最后一天为【当月】的一个考勤统计周期', '部门：待配置', '部门：待配置', '手动创建', nowText(), '手动创建', nowText()], ...current]);
+  const [showSchemeModal, setShowSchemeModal] = useState(false);
+  const [editingSchemeId, setEditingSchemeId] = useState<string | null>(null);
+  const [schemeDraft, setSchemeDraft] = useState<StatSchemeDraft>(() => emptyStatSchemeDraft(statSchemeRows.length + 1, groupOptions[0] || '默认考勤组'));
+
+  useEffect(() => {
+    setRowsData(statSchemeRows);
+  }, [statSchemeRows]);
+
+  const effectiveScopeOptions = Array.from(new Set([...groupOptions, '默认考勤组', schemeDraft.scope].filter(Boolean)));
+  const commitRows = (updater: (rows: string[][]) => string[][]) => {
+    setRowsData(current => {
+      const next = updater(current);
+      onStatSchemeRowsChange(next);
+      void saveSettingsStatSchemes(next).catch(() => window.alert('统计方案已在页面更新，但保存到后端失败，请稍后重试'));
+      return next;
+    });
   };
-  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['编辑', '复制', '删除'], label => mutateNamedRow(label, row, rowsData, setRowsData, 0))]);
+
+  const filteredRows = useMemo(() => rowsData.filter(row => textIncludes(row[0], appliedFilters.name) && textIncludes(row.join(' '), appliedFilters.employee)), [appliedFilters, rowsData]);
+
+  const openCreateSchemeModal = () => {
+    setEditingSchemeId(null);
+    setSchemeDraft(emptyStatSchemeDraft(rowsData.length + 1, groupOptions[0] || '默认考勤组'));
+    setShowSchemeModal(true);
+  };
+
+  const openEditSchemeModal = (row: string[]) => {
+    setEditingSchemeId(createRowId(row));
+    setSchemeDraft(statSchemeDraftFromRow(row));
+    setShowSchemeModal(true);
+  };
+
+  const updateSchemeDraft = (key: keyof StatSchemeDraft, value: string) => {
+    setSchemeDraft(current => ({ ...current, [key]: value }));
+  };
+
+  const saveSchemeDraft = () => {
+    if (!schemeDraft.name.trim()) return;
+    commitRows(current => {
+      if (!editingSchemeId) return [statSchemeRowFromDraft(schemeDraft), ...current];
+      return current.map(row => createRowId(row) === editingSchemeId ? statSchemeRowFromDraft(schemeDraft, row) : row);
+    });
+    setShowSchemeModal(false);
+  };
+
+  const deleteScheme = (row: string[]) => {
+    if (!window.confirm(`确认删除「${row[0] ?? '当前方案'}」？`)) return;
+    const rowId = createRowId(row);
+    commitRows(current => current.filter(item => createRowId(item) !== rowId));
+  };
+
+  const copyScheme = (row: string[]) => {
+    const draft = statSchemeDraftFromRow(row);
+    commitRows(current => [statSchemeRowFromDraft({ ...draft, name: `${draft.name || '统计方案'}-副本`, creator: '后台维护', createdAt: nowText() }), ...current]);
+  };
+  const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['编辑', '复制', '删除'], label => {
+    if (label === '编辑') openEditSchemeModal(row);
+    if (label === '复制') copyScheme(row);
+    if (label === '删除') deleteScheme(row);
+  })]);
   return (
     <ListPage colors={colors}>
+      <SourceNotice sourceInfo={sourceInfo} loadError={loadError} />
       <InfoBanner colors={colors} messages={['什么是统计方案？统计方案用于在业务停止计算时配置业务截止周期、出勤统计周期以及考勤汇总统计项。']} />
       <FilterBar colors={colors}>
         <SearchField label="方案名称" placeholder="请输入方案名称" colors={colors} width={210} value={draftFilters.name} onChange={value => setDraftFilters(current => ({ ...current, name: value }))} />
@@ -1577,9 +3303,74 @@ function StatSchemesView({ colors }: { colors: any }) {
         </div>
       </FilterBar>
       <Toolbar colors={colors}>
-        <button onClick={addScheme} style={primaryBtn(colors)}>新增方案</button>
+        <button onClick={openCreateSchemeModal} style={primaryBtn(colors)}>新增方案</button>
       </Toolbar>
       <DataTable columns={STAT_SCHEME_COLUMNS} rows={rows} colors={colors} footerText={`共${filteredRows.length}笔`} />
+      {showSchemeModal ? (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.38)',
+          zIndex: 900,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+        }}>
+          <div style={{
+            width: 760,
+            maxWidth: 'calc(100vw - 48px)',
+            backgroundColor: colors.cardBg,
+            border: `1px solid ${colors.cardBorder}`,
+            borderRadius: 8,
+            boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: 52,
+              padding: '0 18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderBottom: `1px solid ${colors.cardBorder}`,
+            }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{editingSchemeId ? '编辑统计方案' : '新增统计方案'}</div>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>保存后会同步到统计方案表格，并可被考勤人员与统计汇总使用</div>
+              </div>
+              <button onClick={() => setShowSchemeModal(false)} style={iconBtn(colors)}>×</button>
+            </div>
+            <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+              <FormField label="方案名称" required colors={colors}>
+                <input value={schemeDraft.name} onChange={event => updateSchemeDraft('name', event.target.value)} placeholder="例如：默认方案" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="适用范围" required colors={colors}>
+                <select value={schemeDraft.scope} onChange={event => updateSchemeDraft('scope', event.target.value)} style={modalInput(colors)}>
+                  {effectiveScopeOptions.map(option => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </FormField>
+              <FormField label="考勤周期" required colors={colors} full>
+                <input value={schemeDraft.period} onChange={event => updateSchemeDraft('period', event.target.value)} placeholder="例如：当月1日至当月最后一天为【当月】的一个考勤统计周期" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="业务停止规则" required colors={colors} full>
+                <input value={schemeDraft.stopRule} onChange={event => updateSchemeDraft('stopRule', event.target.value)} placeholder="例如：部门：上海拉蜜克有限公司" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="创建人" colors={colors}>
+                <input value={schemeDraft.creator} onChange={event => updateSchemeDraft('creator', event.target.value)} placeholder="后台维护" style={modalInput(colors)} />
+              </FormField>
+              <FormField label="创建时间" colors={colors}>
+                <input value={schemeDraft.createdAt} onChange={event => updateSchemeDraft('createdAt', event.target.value)} placeholder="例如：2026-05-21 09:00" style={modalInput(colors)} />
+              </FormField>
+            </div>
+            <div style={{ padding: '12px 18px 16px', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${colors.cardBorder}` }}>
+              <button onClick={() => setShowSchemeModal(false)} style={outlineBtn(colors)}>取消</button>
+              <button onClick={saveSchemeDraft} disabled={!schemeDraft.name.trim() || !schemeDraft.period.trim()} style={!schemeDraft.name.trim() || !schemeDraft.period.trim() ? disabledBtn(colors) : primaryBtn(colors)}>
+                保存方案
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </ListPage>
   );
 }

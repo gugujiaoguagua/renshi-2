@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
-import { fetchExternalRecords, type ExternalRecord as RealExternalRecord } from '../api/realData';
+import { fetchExternalRecords, fetchSettingsPeople, fetchStatItems, saveExternalRecords, type ExternalRecord as RealExternalRecord, type StatItemRecord } from '../api/realData';
 import { currentMonthLabel } from '../utils/date';
 import {
   ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X, Search,
@@ -9,11 +9,15 @@ import {
 
 // ─── Types ───────────────────────────────────
 type ExternalRecord = RealExternalRecord;
+type EmployeeOption = { name: string; employeeNo: string; department: string };
 
 type ColDef = { key: string; label: string; width: number; visible: boolean };
 
 const ALL_COLS_DEFAULT: ColDef[] = [
   { key: 'module',     label: '应用模块', width: 100, visible: true },
+  { key: 'employeeName', label: '员工姓名', width: 90, visible: true },
+  { key: 'employeeNo', label: '员工号', width: 90, visible: true },
+  { key: 'dept', label: '部门', width: 110, visible: true },
   { key: 'attendDate', label: '考勤日期', width: 100, visible: true },
   { key: 'period',     label: '考勤周期', width: 100, visible: true },
   { key: 'statItem',   label: '统计项',   width: 120, visible: true },
@@ -37,6 +41,24 @@ const DEPT_OPTIONS = ['产品研发中心', '产品运营部', '研发设计一�
 
 // ─── Mock Data ────────────────────────────────
 const RECORDS: ExternalRecord[] = [];
+
+function peopleRowsToExternalOptions(rows: Array<Array<unknown>>): EmployeeOption[] {
+  return rows
+    .map(row => ({
+      name: String(row[0] ?? '').trim(),
+      employeeNo: String(row[1] ?? '').trim(),
+      department: String(row[2] ?? '').trim(),
+    }))
+    .filter(row => row.name && row.employeeNo);
+}
+
+function statItemsForExternal(items: StatItemRecord[]) {
+  const enabled = items
+    .filter(item => item.enabled !== false && (item.externalEnabled || item.isCustom || item.category === '自定义'))
+    .map(item => item.name)
+    .filter(Boolean);
+  return enabled.length ? enabled : STAT_ITEMS;
+}
 
 // ─── Helpers ─────────────────────────────────
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, cb: () => void) {
@@ -166,7 +188,70 @@ function ColSettingsModal({ cols, onClose, onApply, colors }: {
 }
 
 // ─── Add Data Modal ───────────────────────────
-function AddDataModal({ colors, onClose }: { colors: any; onClose: () => void }) {
+function AddDataModal({
+  colors,
+  statItems,
+  employees,
+  onClose,
+  onSave,
+}: {
+  colors: any;
+  statItems: string[];
+  employees: EmployeeOption[];
+  onClose: () => void;
+  onSave: (record: ExternalRecord) => Promise<void>;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [module, setModule] = useState(MODULE_OPTIONS[0]);
+  const [attendDate, setAttendDate] = useState(today);
+  const [period, setPeriod] = useState(PERIOD_OPTIONS[0]);
+  const [statItem, setStatItem] = useState(statItems[0] || '');
+  const [statValue, setStatValue] = useState('');
+  const [employeeQuery, setEmployeeQuery] = useState('');
+  const [saving, setSaving] = useState(false);
+  const matchedEmployee = employees.find(employee => `${employee.name} / ${employee.employeeNo}` === employeeQuery || employee.employeeNo === employeeQuery || employee.name === employeeQuery);
+
+  useEffect(() => {
+    if (!statItem && statItems[0]) setStatItem(statItems[0]);
+  }, [statItem, statItems]);
+
+  const save = async () => {
+    if (!matchedEmployee) {
+      window.alert('请先通过姓名或工号选择员工');
+      return;
+    }
+    if (!statItem || !statValue) {
+      window.alert('请填写统计项和统计项值');
+      return;
+    }
+    const nowText = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const record: ExternalRecord = {
+      id: Date.now(),
+      module,
+      attendDate,
+      period,
+      statItem,
+      statValue,
+      employeeName: matchedEmployee.name,
+      employeeNo: matchedEmployee.employeeNo,
+      empId: matchedEmployee.employeeNo,
+      dept: matchedEmployee.department,
+      creator: '后台维护',
+      createTime: nowText,
+      modifier: '',
+      modifyTime: '',
+    };
+    try {
+      setSaving(true);
+      await onSave(record);
+      onClose();
+    } catch (_error) {
+      window.alert('保存失败：外部数据接口未连接成功');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 500, backgroundColor: 'rgba(0,0,0,0.32)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ backgroundColor: colors.cardBg, borderRadius: 12, width: 440, boxShadow: '0 8px 32px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
@@ -176,13 +261,12 @@ function AddDataModal({ colors, onClose }: { colors: any; onClose: () => void })
         </div>
         <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           {[
-            { label: '应用模块', el: <select style={{ ...inS(colors), flex: 1 }}>{MODULE_OPTIONS.map(o => <option key={o}>{o}</option>)}</select> },
-            { label: '业务类型', el: <select style={{ ...inS(colors), flex: 1 }}>{BIZ_TYPE_OPTIONS.map(o => <option key={o}>{o}</option>)}</select> },
-            { label: '考勤日期', el: <input type="date" style={{ ...inS(colors), flex: 1 }}/> },
-            { label: '考勤周期', el: <select style={{ ...inS(colors), flex: 1 }}>{PERIOD_OPTIONS.map(o => <option key={o}>{o}</option>)}</select> },
-            { label: '统计项',   el: <select style={{ ...inS(colors), flex: 1 }}>{STAT_ITEMS.map(o => <option key={o}>{o}</option>)}</select> },
-            { label: '统计项值', el: <input type="number" placeholder="请输入数值" style={{ ...inS(colors), flex: 1 }}/> },
-            { label: '员工',     el: <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg }}><Search size={12} style={{ color: colors.textMuted }}/><input placeholder="搜索员工姓名或工号" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }}/></div> },
+            { label: '应用模块', el: <select value={module} onChange={e => setModule(e.target.value)} style={{ ...inS(colors), flex: 1 }}>{MODULE_OPTIONS.map(o => <option key={o}>{o}</option>)}</select> },
+            { label: '考勤日期', el: <input type="date" value={attendDate} onChange={e => setAttendDate(e.target.value)} style={{ ...inS(colors), flex: 1 }}/> },
+            { label: '考勤周期', el: <select value={period} onChange={e => setPeriod(e.target.value)} style={{ ...inS(colors), flex: 1 }}>{PERIOD_OPTIONS.map(o => <option key={o}>{o}</option>)}</select> },
+            { label: '统计项',   el: <select value={statItem} onChange={e => setStatItem(e.target.value)} style={{ ...inS(colors), flex: 1 }}>{statItems.map(o => <option key={o}>{o}</option>)}</select> },
+            { label: '统计项值', el: <input value={statValue} onChange={e => setStatValue(e.target.value)} placeholder="请输入数值或文本" style={{ ...inS(colors), flex: 1 }}/> },
+            { label: '员工',     el: <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg }}><Search size={12} style={{ color: colors.textMuted }}/><input list="external-employee-options" value={employeeQuery} onChange={e => setEmployeeQuery(e.target.value)} placeholder="搜索员工姓名或工号" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }}/><datalist id="external-employee-options">{employees.map(employee => <option key={employee.employeeNo} value={`${employee.name} / ${employee.employeeNo}`}>{employee.department}</option>)}</datalist></div> },
           ].map(({ label, el }) => (
             <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontSize: '12px', color: colors.text, width: 65, flexShrink: 0, textAlign: 'right' }}>{label}</span>
@@ -192,7 +276,7 @@ function AddDataModal({ colors, onClose }: { colors: any; onClose: () => void })
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '12px 20px', borderTop: `1px solid ${colors.divider}` }}>
           <button onClick={onClose} style={oBtn(colors)}>取消</button>
-          <button onClick={onClose} style={pBtn(colors)}>保存</button>
+          <button onClick={save} disabled={saving} style={{ ...pBtn(colors), opacity: saving ? 0.7 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}>{saving ? '保存中...' : '保存'}</button>
         </div>
       </div>
     </div>
@@ -279,6 +363,8 @@ export default function ExternalDataManagement() {
   const [pageSize, setPageSize] = useState(20);
   const [jumpPage, setJumpPage] = useState('');
   const [rows, setRows] = useState<ExternalRecord[]>([]);
+  const [statItems, setStatItems] = useState<string[]>(STAT_ITEMS);
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [sourceFile, setSourceFile] = useState('');
   const [loadError, setLoadError] = useState('');
   const [moduleFilter, setModuleFilter] = useState('');
@@ -304,14 +390,25 @@ export default function ExternalDataManagement() {
     loadExternalRows();
   }, [loadExternalRows]);
 
+  useEffect(() => {
+    fetchStatItems()
+      .then(res => setStatItems(statItemsForExternal(res.rows || [])))
+      .catch(() => setStatItems(STAT_ITEMS));
+    fetchSettingsPeople()
+      .then(res => setEmployees(peopleRowsToExternalOptions(res.rows || [])))
+      .catch(() => setEmployees([]));
+  }, []);
+
   const filteredRows = useMemo(() => {
     const keyword = empSearch.trim().toLowerCase();
     return rows.filter(row => {
       const bizMatched = !bizTypeFilter || String(row.statItem || '').includes(bizTypeFilter) || String(row.statValue || '').includes(bizTypeFilter);
-      const deptMatched = !deptFilter || row.creator.includes(deptFilter) || row.module.includes(deptFilter);
+      const deptMatched = !deptFilter || String(row.dept || '').includes(deptFilter) || row.creator.includes(deptFilter) || row.module.includes(deptFilter);
       const keywordMatched = !keyword
         || row.creator.toLowerCase().includes(keyword)
         || row.module.toLowerCase().includes(keyword)
+        || String(row.employeeName || '').toLowerCase().includes(keyword)
+        || String(row.employeeNo || row.empId || '').toLowerCase().includes(keyword)
         || String(row.statItem || '').toLowerCase().includes(keyword)
         || String(row.statValue || '').toLowerCase().includes(keyword);
       return keywordMatched
@@ -372,9 +469,21 @@ export default function ExternalDataManagement() {
     setPage(1);
   };
   const exportRows = () => downloadExternalCsv('外部数据.csv', visibleCols.map(col => col.label), filteredRows.map(row => visibleCols.map(col => String((row as any)[col.key] ?? ''))));
+  const saveRows = async (nextRows: ExternalRecord[]) => {
+    const saved = await saveExternalRecords(nextRows);
+    setRows(saved.rows || nextRows);
+    setSourceFile(saved.sourceFile || '员工主数据 + 小程序移动端 API');
+    setLoadError('');
+  };
+  const addExternalRecord = async (record: ExternalRecord) => {
+    await saveRows([record, ...rows]);
+    setSelected(new Set([record.id]));
+    setPage(1);
+  };
   const deleteRows = () => {
     if (!selected.size) return;
-    setRows(current => current.filter(row => !selected.has(row.id)));
+    const nextRows = rows.filter(row => !selected.has(row.id));
+    saveRows(nextRows).catch(() => setLoadError('外部数据删除保存失败，请检查后端服务'));
     setSelected(new Set());
     setPage(1);
   };
@@ -425,7 +534,7 @@ export default function ExternalDataManagement() {
         {/* Row 2 (expanded) */}
         {showMore && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            <SimpleSelect label="统计项" options={STAT_ITEMS} colors={colors} value={statItemFilter} onChange={setStatItemFilter}/>
+            <SimpleSelect label="统计项" options={statItems} colors={colors} value={statItemFilter} onChange={setStatItemFilter}/>
             <SimpleSelect label="部门" options={DEPT_OPTIONS} colors={colors} value={deptFilter} onChange={setDeptFilter}/>
           </div>
         )}
@@ -543,7 +652,7 @@ export default function ExternalDataManagement() {
 
       {/* ── Modals ────────────────────────── */}
       {showColSettings && <ColSettingsModal cols={cols} onClose={() => setShowColSettings(false)} onApply={(newCols) => setCols(newCols)} colors={colors}/>}
-      {showAddData && <AddDataModal colors={colors} onClose={() => setShowAddData(false)}/>}
+      {showAddData && <AddDataModal colors={colors} statItems={statItems} employees={employees} onClose={() => setShowAddData(false)} onSave={addExternalRecord}/>}
       {showImport && <ImportModal colors={colors} onClose={() => setShowImport(false)}/>}
     </div>
   );

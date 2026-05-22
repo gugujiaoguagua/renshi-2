@@ -132,15 +132,16 @@ function EditPage({ mode, item, colors, onBack, onSave }: {
 
   const [name, setName]               = useState(item?.name ?? '');
   const [module, setModule]           = useState(item?.module ?? '基础考勤');
+  const [scopeValue, setScopeValue]   = useState(item?.scope ?? '日考勤统计与月汇总');
   const [dataType, setDataType]       = useState(item?.dataType ?? '数值型');
-  const [defaultVal, setDefaultVal]   = useState('0');
-  const [statResult, setStatResult]   = useState('求和');
-  const [unit, setUnit]               = useState('');
-  const [decimal, setDecimal]         = useState(2);
-  const [roundMode, setRoundMode]     = useState('四舍五入');
+  const [defaultVal, setDefaultVal]   = useState(item?.defaultValue ?? '0');
+  const [statResult, setStatResult]   = useState(item?.resultType ?? '求和');
+  const [unit, setUnit]               = useState(item?.unit ?? '');
+  const [decimal, setDecimal]         = useState(item?.decimal ?? 2);
+  const [roundMode, setRoundMode]     = useState(item?.roundMode ?? '四舍五入');
   const [userDesc, setUserDesc]       = useState(item?.desc ?? '');
-  const [enableExt, setEnableExt]     = useState(false);
-  const [formulas, setFormulas]       = useState<Formula[]>([]);
+  const [enableExt, setEnableExt]     = useState(item?.externalEnabled ?? item?.isCustom ?? false);
+  const [formulas, setFormulas]       = useState<Formula[]>((item?.formulas || []).map((formula, index) => ({ id: Date.now() + index, name: formula.name, expr: formula.expr })));
   const category = item?.category ?? '自定义';
   const sysDesc = SYSTEM_DESCS[category] ?? SYSTEM_DESCS['自定义'];
   const isNum = dataType === '数值型';
@@ -168,6 +169,16 @@ function EditPage({ mode, item, colors, onBack, onSave }: {
       hasFormula: formulas.some(f => f.name.trim() || f.expr.trim()),
       dataType,
       isCustom: item?.isCustom ?? true,
+      scope: scopeValue,
+      externalEnabled: enableExt,
+      defaultValue: defaultVal,
+      resultType: statResult,
+      unit,
+      decimal,
+      roundMode,
+      formulas: formulas
+        .filter(f => f.name.trim() || f.expr.trim())
+        .map(f => ({ name: f.name.trim(), expr: f.expr.trim() })),
     };
 
     try {
@@ -202,6 +213,10 @@ function EditPage({ mode, item, colors, onBack, onSave }: {
           </FormRow>
           <FormRow label="应用模块 *" colors={colors}>
             <InlineSelect options={MODULES} value={module} onChange={setModule} colors={colors} width={200}/>
+          </FormRow>
+          <FormRow label="适用范围 *" colors={colors}>
+            <InlineSelect options={SCOPES} value={scopeValue} onChange={setScopeValue} colors={colors} width={220}/>
+            <div style={{ fontSize: '12px', color: colors.textMuted, marginTop: 6 }}>保存后会按范围进入日考勤、月汇总或两边同时生效。</div>
           </FormRow>
           <FormRow label="数据类型 *" colors={colors}>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -246,12 +261,12 @@ function EditPage({ mode, item, colors, onBack, onSave }: {
             </div>
           </FormRow>
           {mode === 'add' && (
-            <FormRow label="外部数据" colors={colors}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Toggle checked={enableExt} onChange={() => setEnableExt(v => !v)}/>
-                <span style={{ fontSize: '12px', color: colors.textMuted }}>开启后可通过外部数据管理写入该统计项的数值</span>
-              </div>
-            </FormRow>
+          <FormRow label="外部数据" colors={colors}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Toggle checked={enableExt} onChange={() => setEnableExt(v => !v)}/>
+                <span style={{ fontSize: '12px', color: colors.textMuted }}>开启后会出现在外部数据管理的统计项下拉中，外部数据会汇总到月考勤汇总自定义列。</span>
+            </div>
+          </FormRow>
           )}
         </SectionCard>
 
@@ -356,6 +371,7 @@ export default function StatItemsManagement() {
 
   const persistStatItems = useCallback(async (nextItems: StatItem[]) => {
     const saved = await saveStatItems(nextItems);
+    setItems(saved.rows || nextItems);
     setSourceFile(saved.sourceFile || '本地持久化数据 data-store.json');
     setLoadError('');
   }, []);
@@ -397,8 +413,10 @@ export default function StatItemsManagement() {
 
 
   const filtered = items.filter(i => {
+    const itemScope = i.scope || SCOPES[0];
+    if (scope !== SCOPES[0] && itemScope !== SCOPES[0] && itemScope !== scope) return false;
     if (category !== '全部' && i.category !== category) return false;
-    if (nameSearch && !i.name.includes(nameSearch)) return false;
+    if (nameSearch && !`${i.name}${i.desc}${i.module}${i.category}`.toLowerCase().includes(nameSearch.toLowerCase())) return false;
     if (onlyEnabled && !i.enabled) return false;
     if (onlyFormula && !i.hasFormula) return false;
     return true;
@@ -501,6 +519,8 @@ export default function StatItemsManagement() {
                 { key: 'name',       label: '统计项名称', width: 180 },
                 { key: 'module',     label: '应用模块',   width: 100 },
                 { key: 'category',   label: '分类',       width: 90 },
+                { key: 'scope',      label: '适用范围',   width: 130 },
+                { key: 'externalEnabled', label: '外部数据', width: 82 },
                 { key: 'desc',       label: '说明',       width: 280 },
                 { key: 'enabled',    label: '是否启用',   width: 80 },
               ].map(col => (
@@ -512,7 +532,7 @@ export default function StatItemsManagement() {
           </thead>
           <tbody>
             {pageRows.length === 0 ? (
-              <tr><td colSpan={6} style={{ textAlign: 'center', padding: '56px 0', color: colors.textMuted, fontSize: '13px' }}>暂无统计项数据</td></tr>
+              <tr><td colSpan={8} style={{ textAlign: 'center', padding: '56px 0', color: colors.textMuted, fontSize: '13px' }}>暂无统计项数据</td></tr>
             ) : pageRows.map((item, ri) => (
               <tr key={item.id}
                 style={{ backgroundColor: ri % 2 === 0 ? colors.cardBg : colors.tableStripe, borderBottom: `1px solid ${colors.tableBorder}` }}
@@ -526,6 +546,10 @@ export default function StatItemsManagement() {
                 <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}`, fontSize: '11px', color: colors.textMuted }}>{item.module}</td>
                 <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}` }}>
                   <span style={{ fontSize: '11px', padding: '2px 7px', borderRadius: 9, backgroundColor: colors.badgeGrayBg, color: colors.badgeGrayText }}>{item.category}</span>
+                </td>
+                <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}`, fontSize: '11px', color: colors.textMuted }}>{item.scope || SCOPES[0]}</td>
+                <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}` }}>
+                  <span style={{ fontSize: '11px', padding: '2px 7px', borderRadius: 9, backgroundColor: item.externalEnabled ? colors.badgeGreenBg : colors.badgeGrayBg, color: item.externalEnabled ? colors.badgeGreenText : colors.badgeGrayText }}>{item.externalEnabled ? '可写入' : '关闭'}</span>
                 </td>
                 <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: colors.textMuted, fontSize: '11px' }} title={item.desc}>{item.desc}</td>
                 <td style={{ ...tdS(colors), borderLeft: `1px solid ${colors.tableBorder}`, textAlign: 'center' }}>

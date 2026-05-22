@@ -522,6 +522,36 @@ const DEFAULT_SHIFT_SETTING_ROWS = [
   ['休息', '休', '#94A3B8', '休息', '通用', '休息', '0小时', '通用', '系统', '2026-05-16 00:00:00', '系统', '2026-05-16 00:00:00'],
 ];
 
+const DEFAULT_GROUP_SETTING_ROWS = [
+  ['冲床组', '排班制', '部门：冲压车间', '早十晚六 / 早十午六', '何山', '2025-08-28 11:10:29', '棠乐', '2026-04-22 14:55:09'],
+  ['装配工序', '排班制', '部门：装配工序', '早八晚六', '何山', '2025-08-28 11:15:12', '棠乐', '2026-04-22 14:54:27'],
+  ['项目门店', '排班制', '部门：项目门店', '早一晚九', '何山', '2025-08-28 11:18:10', '棠乐', '2026-04-22 14:53:47'],
+  ['直营门店', '排班制', '部门：直营门店', '早九晚六 / 早十晚七', '何山', '2025-08-28 11:09:27', '棠乐', '2026-04-22 14:52:54'],
+];
+
+const DEFAULT_CARD_RULE_ROWS = [
+  ['无规则打卡', '无规则打卡', '无规则打卡', '棠乐', '2026-04-15 09:54:58', '棠乐', '2026-04-15 09:54:58'],
+  ['迟到打卡规则', '禁止工出勤在9小时内发起迟到流程', '家和里 / 项目门店 / 冲压车间', '棠乐', '2026-04-15 09:45:40', '棠乐', '2026-04-15 09:45:40'],
+];
+
+const DEFAULT_MOBILE_CLOCK_ROWS = [];
+const DEFAULT_LOCATION_SETTING_ROWS = [];
+const DEFAULT_HOLIDAY_SETTING_ROWS = [];
+const DEFAULT_CALENDAR_SETTING_ROWS = [
+  ['周连班', '当月1日至当月最后一天为【当月】的考勤周期', '周一、周二、周三、周四、周五、周六、周日', '工作日之和为应出勤天数', '华北大区 / 荥州十月直营中心 / 庐山直营', '棠乐', '2026-04-15 09:47:51', '棠乐', '2026-04-15 09:47:52'],
+  ['双休', '当月1日至当月最后一天为【当月】的考勤周期', '周一、周二、周三、周四、周五', '工作日之和为应出勤天数', '华北大区 / 项目门店 / 直营门店', '何山', '2025-08-28 09:37:47', '何山', '2025-08-28 09:37:48'],
+];
+const DEFAULT_OVERTIME_RULE_ROWS = [
+  ['仅计时长', '工作日：仅统计时长 / 休息日：仅统计时长 / 节假日：仅统计时长', '直营门店 / 经济YOUNG', '棠乐', '2026-04-21 10:37:42', '棠乐', '2026-04-21 10:37:42'],
+  ['调休', '工作日：折算为调休 / 休息日：折算为调休 / 节假日：折算为调休', '家和里 / 庐山 / 项目门店', '棠乐', '2026-04-15 09:59:04', '棠乐', '2026-04-15 09:59:04'],
+];
+const DEFAULT_FIELD_RULE_ROWS = [
+  ['外勤', '外勤打卡已启用 / 外出申请已启用', '默认考勤组', '棠乐', '2026-04-02 10:26:42', '棠乐', '2026-04-02 10:26:42'],
+];
+const DEFAULT_STAT_SCHEME_ROWS = [
+  ['默认方案', '当月1日至当月最后一天为【当月】的一个考勤统计周期', '部门：上海拉蜜克有限公司', '部门：上海拉蜜克有限公司', '棠乐', '2026-04-15 09:46:15', '棠乐', '2026-04-15 09:46:15'],
+];
+
 function getOnboardedEmployees() {
   return getStoredRows('onboardedEmployees') || [];
 }
@@ -673,31 +703,58 @@ function countUniqueClockDates(employee, periodPrefix = currentDateText().slice(
 }
 
 function scheduleRowsForEmployee(employee, periodPrefix = currentDateText().slice(0, 7)) {
-  return (getStoredRows('employeeSchedules') || [])
+  const stored = (getStoredRows('employeeSchedules') || [])
     .filter((row) => asRawText(row.employeeNo) === asRawText(employee.employeeNo)
       && asText(row.date, '').startsWith(periodPrefix));
+  if (stored.length) return stored;
+
+  const [year, month] = periodPrefix.split('-').map(Number);
+  if (![year, month].every(Number.isFinite)) return [];
+  const endDay = periodPrefix === currentDateText().slice(0, 7)
+    ? Number(currentDateText().slice(8, 10))
+    : new Date(Date.UTC(year, month, 0, 4, 0, 0)).getUTCDate();
+  const shift = getEmployeeDefaultShift(employee);
+  const restShift = { id: 'shift_rest', name: '休息' };
+  const rows = [];
+  for (let day = 1; day <= endDay; day += 1) {
+    const date = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const workingDay = isConfiguredWorkday(employee, date);
+    rows.push({
+      id: `auto_${employee.employeeNo}_${date}`,
+      employeeNo: employee.employeeNo,
+      employeeName: employee.name,
+      dept: employee.department,
+      date,
+      shiftId: workingDay ? shift.id : restShift.id,
+      shiftName: workingDay ? shift.name : restShift.name,
+      source: '考勤设置自动排班',
+    });
+  }
+  return rows;
 }
 
 function getEmployeeSchedule(employee, dateText = currentDateText()) {
-  return (getStoredRows('employeeSchedules') || [])
+  const stored = (getStoredRows('employeeSchedules') || [])
     .find((row) => asRawText(row.employeeNo) === asRawText(employee.employeeNo)
-      && asText(row.date, '') === dateText) || null;
+      && asText(row.date, '') === dateText);
+  if (stored) return stored;
+  return scheduleRowsForEmployee(employee, dateText.slice(0, 7)).find((row) => asText(row.date, '') === dateText) || null;
 }
 
-function currentMonthWorkdayCount() {
+function currentMonthWorkdayCount(employee = null) {
   const parts = currentDateText().split('-').map(Number);
   const [year, month, day] = parts;
   if (![year, month, day].every(Number.isFinite)) return 0;
   let count = 0;
   for (let cursorDay = 1; cursorDay <= day; cursorDay += 1) {
-    const date = new Date(Date.UTC(year, month - 1, cursorDay, 4, 0, 0));
-    const weekday = date.getUTCDay();
-    if (weekday >= 1 && weekday <= 5) count += 1;
+    const dateText = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(cursorDay).padStart(2, '0')}`;
+    if (employee ? isConfiguredWorkday(employee, dateText) : isDefaultWeekday(dateText)) count += 1;
   }
   return count;
 }
 
 function employeeBase(employee) {
+  const shift = getEmployeeDefaultShift(employee);
   return {
     name: employee.name,
     empId: employee.employeeNo,
@@ -705,8 +762,90 @@ function employeeBase(employee) {
     deptPath: employee.deptFullPath,
     position: employee.position,
     attendGroup: employee.attendanceGroupName,
-    shiftName: employee.shiftName,
+    shiftName: shift.name,
   };
+}
+
+function isDefaultWeekday(dateText) {
+  const date = new Date(`${dateText}T04:00:00Z`);
+  const weekday = date.getUTCDay();
+  return weekday >= 1 && weekday <= 5;
+}
+
+function weekdayNameForDate(dateText) {
+  const names = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  const date = new Date(`${dateText}T04:00:00Z`);
+  return names[date.getUTCDay()] || '';
+}
+
+function rowMatchesAttendGroup(row, employee) {
+  const text = Array.isArray(row) ? row.map((cell) => asText(cell, '')).join(' / ') : asText(row, '');
+  const groupName = asText(employee?.attendanceGroupName, '');
+  if (!groupName) return false;
+  return text.includes(groupName) || text.includes('默认考勤组') || text.includes('通用');
+}
+
+function groupSettingForEmployee(employee) {
+  const groupName = asText(employee?.attendanceGroupName, '');
+  return getGroupSettingRows().find((row) => asText(row?.[0], '') === groupName)
+    || getGroupSettingRows().find((row) => rowMatchesAttendGroup(row, employee))
+    || null;
+}
+
+function calendarSettingForEmployee(employee) {
+  return getCalendarSettingRows().find((row) => rowMatchesAttendGroup(row, employee))
+    || getCalendarSettingRows()[0]
+    || null;
+}
+
+function isConfiguredHoliday(dateText) {
+  return getHolidaySettingRows().some((row) => Array.isArray(row) && row.some((cell) => asText(cell, '').includes(dateText)));
+}
+
+function isConfiguredWorkday(employee, dateText = currentDateText()) {
+  if (isConfiguredHoliday(dateText)) return false;
+  const calendar = calendarSettingForEmployee(employee);
+  if (!calendar) return isDefaultWeekday(dateText);
+  const weekdayName = weekdayNameForDate(dateText);
+  const workdaysText = asText(calendar[2], '');
+  return workdaysText ? workdaysText.includes(weekdayName) : isDefaultWeekday(dateText);
+}
+
+function getEmployeeDateType(employee, dateText = currentDateText()) {
+  if (isConfiguredHoliday(dateText)) return '节假日';
+  return isConfiguredWorkday(employee, dateText) ? '工作日' : '休息日';
+}
+
+function mobileSchemeForEmployee(employee) {
+  const office = getEmployeeOffice(employee);
+  const schemeName = asText(office.mobileScheme, '');
+  return getMobileClockSettingRows().find((row) => schemeName && asText(row?.[0], '') === schemeName)
+    || getMobileClockSettingRows().find((row) => rowMatchesAttendGroup(row, employee))
+    || null;
+}
+
+function cardRuleForEmployee(employee) {
+  return getCardRuleSettingRows().find((row) => rowMatchesAttendGroup(row, employee))
+    || getCardRuleSettingRows()[0]
+    || null;
+}
+
+function fieldRuleForEmployee(employee) {
+  return getFieldRuleSettingRows().find((row) => rowMatchesAttendGroup(row, employee))
+    || getFieldRuleSettingRows()[0]
+    || null;
+}
+
+function overtimeRuleForEmployee(employee) {
+  return getOvertimeRuleSettingRows().find((row) => rowMatchesAttendGroup(row, employee))
+    || getOvertimeRuleSettingRows()[0]
+    || null;
+}
+
+function mobileSchemeDisabled(employee) {
+  const scheme = mobileSchemeForEmployee(employee);
+  const content = asText(scheme?.[1], '');
+  return /禁用|停用|关闭|不允许/.test(content);
 }
 
 function buildLinkedAttendanceStatsRows() {
@@ -732,12 +871,14 @@ function buildLinkedAttendanceStatsRows() {
 function buildLinkedDailyRows() {
   return linkedDemoEmployees().map((employee) => {
     const base = employeeBase(employee);
+    const dateType = getEmployeeDateType(employee, currentDateText());
     const todayRows = clockRowsForEmployeeDate(employee);
     const hasClock = todayRows.length > 0;
     const hasAnomaly = clockRowsHaveAnomaly(todayRows);
     const clockIn = clockInText(employee, todayRows);
     const clockOut = clockOutText(employee, todayRows);
     const shift = getEmployeeShift(employee);
+    const isRestDay = dateType !== '工作日' || shift.name === '休息';
     return {
       name: base.name,
       confirmStatus: hasClock ? '待确认' : '未确认',
@@ -750,10 +891,10 @@ function buildLinkedDailyRows() {
       regularDate: '-',
       attendGroup: base.attendGroup,
       shiftName: base.shiftName,
-      dateType: '工作日',
+      dateType,
       weekday: currentWeekdayText().replace('星期', ''),
-      attendResult: !hasClock ? '未打卡' : (hasAnomaly ? '异常' : '正常'),
-      anomalyDesc: hasClock ? clockAnomalyText(todayRows) : '未打卡',
+      attendResult: !hasClock ? (isRestDay ? '休息' : '未打卡') : (hasAnomaly ? '异常' : '正常'),
+      anomalyDesc: hasClock ? clockAnomalyText(todayRows) : (isRestDay ? '' : '未打卡'),
       taskSummary: hasClock ? `打卡${todayRows.length}次` : '-',
       normalHours: clockIn !== '-' && clockOut !== '-' ? 8 : 0,
       lateMinutes: minutesAfter(clockIn, shift.clockInTime || MOBILE_SHIFT.clockInTime),
@@ -794,9 +935,10 @@ function buildLinkedMonthlyRows() {
 
 function buildLinkedMonthlySummaryRows() {
   const period = currentDateText().slice(0, 7);
-  const shouldWorkDays = currentMonthWorkdayCount();
+  const externalValues = externalMetricValuesByEmployee(period);
   return linkedDemoEmployees().map((employee, index) => {
     const base = employeeBase(employee);
+    const shouldWorkDays = currentMonthWorkdayCount(employee);
     const monthRows = clockRowsForEmployee(employee).filter((row) => asText(row.date, '').startsWith(period));
     const scheduledRows = scheduleRowsForEmployee(employee, period);
     const scheduleDays = scheduledRows.filter((row) => asText(row.shiftName, '') !== '休息').length;
@@ -828,6 +970,7 @@ function buildLinkedMonthlySummaryRows() {
       lateMinutes,
       earlyLeaveMinutes: 0,
       confirmStatus: monthRows.length ? '未发送' : '未生成',
+      customMetrics: externalValues.get(asRawText(employee.employeeNo)) || {},
     };
   });
 }
@@ -912,6 +1055,38 @@ function buildLinkedMakeupRows() {
 
 function buildLinkedExternalRows() {
   return filterRowsToOnboardedEmployees(getStoredRows('externalRecords') || []);
+}
+
+function statItemAppliesToMonth(item) {
+  const scope = asText(item?.scope, '日考勤统计与月汇总');
+  return scope === '日考勤统计与月汇总' || scope === '月考勤汇总';
+}
+
+function externalMetricValuesByEmployee(period) {
+  const enabledItems = getStatItemRows()
+    .filter((item) => item.enabled !== false && statItemAppliesToMonth(item) && (item.isCustom || item.externalEnabled))
+    .map((item) => asText(item.name, ''))
+    .filter(Boolean);
+  const enabledSet = new Set(enabledItems);
+  const values = new Map();
+  for (const row of buildLinkedExternalRows()) {
+    const itemName = asText(row.statItem, '');
+    if (!enabledSet.has(itemName)) continue;
+    const rowPeriod = asText(row.period, '');
+    const rowDate = asText(row.attendDate, '');
+    if (period && rowPeriod && rowPeriod !== period && !rowDate.startsWith(period)) continue;
+    const empId = asRawText(row.empId || row.employeeNo || row.employeeId);
+    if (!empId) continue;
+    const current = values.get(empId) || {};
+    const numeric = Number(String(row.statValue ?? '').replace(/,/g, ''));
+    if (!Number.isNaN(numeric) && String(row.statValue ?? '').trim() !== '') {
+      current[itemName] = Number(((Number(current[itemName]) || 0) + numeric).toFixed(2));
+    } else {
+      current[itemName] = asText(row.statValue, current[itemName] || '-');
+    }
+    values.set(empId, current);
+  }
+  return values;
 }
 
 function approvalStatusText(status) {
@@ -1316,6 +1491,116 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, dataDir: DATA_DIR, files: listExcelFiles().map((f) => f.name) });
 });
 
+app.get('/api/settings-linkage-report', (_req, res) => {
+  const rows = [
+    {
+      setting: '考勤人员',
+      status: '生效',
+      count: getOnboardedEmployees().length,
+      adminRoutes: ['/attendance/stats', '/attendance/daily', '/attendance/monthly', '/attendance/monthly-summary', '/attendance/clock-records', '/attendance/leave', '/attendance/field-out'],
+      mobileRoutes: ['/api/mobile/login', '/api/mobile/me', '/api/mobile/today', '/api/mobile/clock'],
+      effect: '作为所有考勤、打卡、假勤、外勤、排班与小程序员工身份的主数据',
+    },
+    {
+      setting: '考勤组管理',
+      status: '生效',
+      count: getGroupSettingRows().length,
+      adminRoutes: ['/attendance/stats', '/attendance/daily', '/attendance/monthly', '/attendance/monthly-summary', '/attendance/settings/people'],
+      mobileRoutes: ['/api/mobile/me', '/api/mobile/today'],
+      effect: '用于人员归属、默认班次、司历/地点/规则按考勤组匹配',
+    },
+    {
+      setting: '班次管理',
+      status: '生效',
+      count: getShiftSettingRows().length,
+      adminRoutes: ['/attendance/stats', '/attendance/daily', '/attendance/monthly', '/attendance/monthly-summary', '/attendance/schedules'],
+      mobileRoutes: ['/api/mobile/today', '/api/mobile/clock'],
+      effect: '用于排班、迟到计算、今日班次和移动端打卡班次',
+    },
+    {
+      setting: '司历管理',
+      status: '生效',
+      count: getCalendarSettingRows().length,
+      adminRoutes: ['/attendance/daily', '/attendance/monthly', '/attendance/monthly-summary', '/attendance/schedules'],
+      mobileRoutes: ['/api/mobile/today'],
+      effect: '用于判断工作日/休息日并生成未手工排班时的自动排班',
+    },
+    {
+      setting: '节假日管理',
+      status: getHolidaySettingRows().length ? '部分生效' : '未配置',
+      count: getHolidaySettingRows().length,
+      adminRoutes: ['/attendance/daily', '/attendance/monthly-summary'],
+      mobileRoutes: ['/api/mobile/today'],
+      effect: '配置中包含具体日期时会覆盖司历工作日，标记为节假日',
+    },
+    {
+      setting: '移动打卡方案',
+      status: getMobileClockSettingRows().length ? '生效' : '未配置',
+      count: getMobileClockSettingRows().length,
+      adminRoutes: ['/attendance/settings/location', '/attendance/clock-records'],
+      mobileRoutes: ['/api/mobile/me', '/api/mobile/today', '/api/mobile/clock'],
+      effect: '由上班地点关联到考勤组，小程序今日接口展示，停用方案会阻止移动打卡',
+    },
+    {
+      setting: '上班地点',
+      status: getLocationSettingRows().length ? '生效' : '使用默认地点',
+      count: getLocationSettingRows().length,
+      adminRoutes: ['/attendance/clock-records', '/attendance/stats'],
+      mobileRoutes: ['/api/mobile/me', '/api/mobile/today', '/api/mobile/clock'],
+      effect: '用于移动端定位打卡地点、打卡记录地点和实时统计地点',
+    },
+    {
+      setting: '打卡规则',
+      status: '生效',
+      count: getCardRuleSettingRows().length,
+      adminRoutes: ['/attendance/stats', '/attendance/clock-records', '/attendance/anomalies'],
+      mobileRoutes: ['/api/mobile/me', '/api/mobile/today'],
+      effect: '按考勤组返回当前规则，供今日状态和异常复核展示',
+    },
+    {
+      setting: '加班规则',
+      status: '生效',
+      count: getOvertimeRuleSettingRows().length,
+      adminRoutes: ['/attendance/overtime', '/attendance/monthly-summary'],
+      mobileRoutes: ['/api/mobile/me'],
+      effect: '按考勤组返回当前规则，供加班记录和月汇总核算口径使用',
+    },
+    {
+      setting: '外勤规则',
+      status: '生效',
+      count: getFieldRuleSettingRows().length,
+      adminRoutes: ['/attendance/field-out', '/attendance/clock-field'],
+      mobileRoutes: ['/api/mobile/me'],
+      effect: '按考勤组返回当前规则，供外勤/外出记录和移动端规则说明使用',
+    },
+    {
+      setting: '统计方案',
+      status: '生效',
+      count: getStatSchemeSettingRows().length,
+      adminRoutes: ['/attendance/monthly-summary', '/attendance/stat-items', '/attendance/external-data'],
+      mobileRoutes: [],
+      effect: '用于月汇总统计范围，统计项和外部数据已进入月汇总自定义列',
+    },
+    {
+      setting: '人脸管理',
+      status: '生效',
+      count: getSettingsFaceRows().length,
+      adminRoutes: ['/attendance/clock-records', '/attendance/settings/people'],
+      mobileRoutes: ['/api/mobile/face-verify', '/api/mobile/clock'],
+      effect: '移动端打卡必须携带人脸核验结果，后台打卡记录会展示照片/核验来源',
+    },
+    {
+      setting: '考勤机管理',
+      status: '仅前端选择',
+      count: 0,
+      adminRoutes: ['/attendance/settings/devices'],
+      mobileRoutes: [],
+      effect: '当前只在设置页选择机型模板，尚未接入真实设备同步接口',
+    },
+  ];
+  res.json({ ok: true, generatedAt: nowText(), total: rows.length, rows });
+});
+
 app.get('/api/data-sources', (_req, res) => {
   const files = listExcelFiles().map((f) => ({ name: f.name, mtime: f.stat.mtime, size: f.stat.size }));
   res.json({ files, dataDir: DATA_DIR });
@@ -1362,6 +1647,68 @@ app.get('/api/clock-records', (_req, res) => {
   return sendLinkedRows(res, 'mobileClockRecords', mobileRows);
 });
 
+app.put('/api/clock-records', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) {
+    return res.status(400).json({ message: 'rows必须是打卡记录数组' });
+  }
+  const employees = linkedDemoEmployees();
+  const byNo = new Map(employees.map((employee) => [asRawText(employee.employeeNo), employee]));
+  const normalizedRows = rows
+    .filter((row) => row && typeof row === 'object' && !Array.isArray(row))
+    .map((row, index) => {
+      const employeeNo = asText(row.empId || row.employeeNo, '');
+      const employee = byNo.get(asRawText(employeeNo));
+      const fallbackName = asText(row.name || row.employeeName, employee?.name || '');
+      const date = asText(row.date, currentDateText());
+      const time = asText(row.time, nowText().slice(11, 16));
+      const createTime = asText(row.createTime || row.serverTime, `${date} ${time}`);
+      const typeText = asText(row.freeWork, '上班') === '下班' ? 'clockOut' : 'clockIn';
+      const note = asText(row.note, '');
+      return {
+        id: asText(row.rawId || row.mobileId || row.id, `manual_clock_${Date.now()}_${index}`),
+        employeeId: employee?.id || employeeNo,
+        employeeName: fallbackName,
+        employeeNo,
+        dept: asText(row.dept, employee?.department || ''),
+        attendanceGroupName: employee?.attendanceGroupName || asText(row.workLocation, ''),
+        shiftName: employee?.shiftName || '',
+        date,
+        type: typeText,
+        time,
+        serverTime: createTime.length > 10 ? createTime : `${date} ${time}`,
+        latitude: Number(row.latitude || 0),
+        longitude: Number(row.longitude || 0),
+        accuracy: Number(row.accuracy || 0),
+        address: asText(row.location, asText(row.workLocation, MOBILE_OFFICE.name)),
+        workLocation: asText(row.workLocation, MOBILE_OFFICE.name),
+        distance: Number(row.distance || 0),
+        faceVerifyId: asText(row.faceVerifyId, row.hasPhoto ? 'manual_face_passed' : ''),
+        photoFileId: asText(row.photoFileId, ''),
+        photoUrl: asText(row.photoUrl, ''),
+        photoTakenAt: asText(row.photoTakenAt, ''),
+        result: note.includes('异常') ? 'abnormal' : 'normal',
+        message: note || '管理员预制打卡记录',
+        source: asText(row.source, 'HR手动添加'),
+        device: asText(row.device, '后台录入'),
+        creator: asText(row.creator, 'HR'),
+        modifier: asText(row.modifier, ''),
+        modifyTime: asText(row.modifyTime, ''),
+      };
+    })
+    .filter((row) => asRawText(row.employeeNo));
+  setMobileRows('mobileClockRecords', normalizedRows);
+  const adminRows = mapMobileClockRowsToAdmin(filterRowsToOnboardedEmployees(normalizedRows));
+  return res.json({
+    ok: true,
+    sourceFile: '员工主数据 + 小程序移动端 API',
+    sheetName: 'mobileClockRecords',
+    total: adminRows.length,
+    rows: adminRows,
+    linkedOnly: true,
+  });
+});
+
 app.get('/api/attendance-anomalies', (_req, res) => {
   return sendLinkedRows(res, 'mobileAnomalies', buildLinkedAnomalyRows());
 });
@@ -1388,8 +1735,86 @@ app.get('/api/field-out-records', (_req, res) => {
   return sendLinkedRows(res, 'fieldOutRecords', buildLinkedFieldOutRows());
 });
 
+app.put('/api/field-out-records', (req, res) => {
+  return saveRowsEndpoint(req, res, 'fieldOutRecords', 'fieldOutRecords', (row) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+    return {
+      id: Number(row.id) || Date.now(),
+      status: asText(row.status, '审批中'),
+      name: asText(row.name, ''),
+      empId: asText(row.empId, ''),
+      dept: asText(row.dept, ''),
+      deptPath: asText(row.deptPath, asText(row.dept, '')),
+      effect: asText(row.effect, '待生效'),
+      source: asText(row.source, 'PC端申请'),
+      values: Array.isArray(row.values) ? row.values.map((cell) => asText(cell, '')) : [],
+      flowStatus: asText(row.flowStatus, asText(row.status, '审批中')),
+    };
+  });
+});
+
 app.get('/api/field-trip-records', (_req, res) => {
   return sendLinkedRows(res, 'fieldTripRecords', buildLinkedFieldTripRows());
+});
+
+app.put('/api/field-trip-records', (req, res) => {
+  return saveRowsEndpoint(req, res, 'fieldTripRecords', 'fieldTripRecords', (row) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+    return {
+      id: Number(row.id) || Date.now(),
+      status: asText(row.status, '审批中'),
+      name: asText(row.name, ''),
+      empId: asText(row.empId, ''),
+      dept: asText(row.dept, ''),
+      deptPath: asText(row.deptPath, asText(row.dept, '')),
+      effect: asText(row.effect, '待生效'),
+      source: asText(row.source, 'PC端申请'),
+      values: Array.isArray(row.values) ? row.values.map((cell) => asText(cell, '')) : [],
+      flowStatus: asText(row.flowStatus, asText(row.status, '审批中')),
+    };
+  });
+});
+
+app.get('/api/schedules/month', (req, res) => {
+  const monthText = asText(req.query?.month, currentDateText().slice(0, 7));
+  const rows = linkedDemoEmployees().map((employee) => {
+    const dayResults = {};
+    for (const row of scheduleRowsForEmployee(employee, monthText)) {
+      const day = String(Number(asText(row.date, '').slice(8, 10)));
+      if (!day || day === 'NaN') continue;
+      dayResults[day] = asText(row.shiftName, '');
+    }
+    return {
+      name: employee.name,
+      employeeNo: employee.employeeNo,
+      dept: employee.department,
+      position: employee.position,
+      dayResults,
+    };
+  });
+  return res.json({
+    sourceFile: '员工主数据 + 小程序移动端 API',
+    sheetName: 'employeeSchedules',
+    month: monthText,
+    total: rows.length,
+    rows,
+    shifts: getShiftOptions(),
+    linkedOnly: true,
+  });
+});
+
+app.put('/api/schedules', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) return res.status(400).json({ message: 'rows必须是排班数组' });
+  const saved = rows.map((row) => upsertSchedule(row));
+  return res.json({
+    ok: true,
+    sourceFile: '员工主数据 + 小程序移动端 API',
+    sheetName: 'employeeSchedules',
+    total: saved.length,
+    rows: saved,
+    linkedOnly: true,
+  });
 });
 
 app.get('/api/leave-records', (_req, res) => {
@@ -1451,6 +1876,229 @@ app.get('/api/settings-shifts', (_req, res) => {
   return sendLinkedRows(res, 'settingsShifts', getShiftSettingRows());
 });
 
+app.get('/api/settings-groups', (_req, res) => {
+  return sendLinkedRows(res, 'settingsGroups', getGroupSettingRows());
+});
+
+app.put('/api/settings-groups', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) {
+    return res.status(400).json({ message: 'rows必须是考勤组数组' });
+  }
+  const normalizedRows = rows
+    .filter((row) => Array.isArray(row) && asRawText(row[0]))
+    .map((row) => [
+      asText(row[0], '-'),
+      asText(row[1], '排班制'),
+      asText(row[2], '部门：待配置'),
+      asText(row[3], '早九晚六'),
+      asText(row[4], '后台维护'),
+      asText(row[5], nowText()),
+      asText(row[6], '后台维护'),
+      nowText(),
+    ]);
+  setStoredRows('settingsGroups', normalizedRows);
+  return sendLinkedRows(res, 'settingsGroups', normalizedRows);
+});
+
+app.get('/api/settings-card-rules', (_req, res) => {
+  return sendLinkedRows(res, 'settingsCardRules', getCardRuleSettingRows());
+});
+
+app.put('/api/settings-card-rules', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) {
+    return res.status(400).json({ message: 'rows必须是打卡规则数组' });
+  }
+  const normalizedRows = rows
+    .filter((row) => Array.isArray(row) && asRawText(row[0]))
+    .map((row) => [
+      asText(row[0], '-'),
+      asText(row[1], '-'),
+      asText(row[2], '默认考勤组'),
+      asText(row[3], '后台维护'),
+      asText(row[4], nowText()),
+      asText(row[5], '后台维护'),
+      nowText(),
+    ]);
+  setStoredRows('settingsCardRules', normalizedRows);
+  return sendLinkedRows(res, 'settingsCardRules', normalizedRows);
+});
+
+app.get('/api/settings-mobile-clock', (_req, res) => {
+  return sendLinkedRows(res, 'settingsMobileClock', getMobileClockSettingRows());
+});
+
+app.put('/api/settings-mobile-clock', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) {
+    return res.status(400).json({ message: 'rows必须是移动打卡方案数组' });
+  }
+  const normalizedRows = rows
+    .filter((row) => Array.isArray(row) && asRawText(row[0]))
+    .map((row) => [
+      asText(row[0], '-'),
+      asText(row[1], 'GPS/Wi-Fi/蓝牙均可打卡'),
+      asText(row[2], '默认考勤组'),
+      asText(row[3], '后台维护'),
+      asText(row[4], nowText()),
+      asText(row[5], '后台维护'),
+      nowText(),
+    ]);
+  setStoredRows('settingsMobileClock', normalizedRows);
+  return sendLinkedRows(res, 'settingsMobileClock', normalizedRows);
+});
+
+app.get('/api/settings-location', (_req, res) => {
+  return sendLinkedRows(res, 'settingsLocation', getLocationSettingRows());
+});
+
+app.put('/api/settings-location', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) {
+    return res.status(400).json({ message: 'rows必须是上班地点数组' });
+  }
+  const normalizedRows = rows
+    .filter((row) => Array.isArray(row) && asRawText(row[0]))
+    .map((row) => [
+      asText(row[0], '-'),
+      asText(row[1], '默认考勤组'),
+      asText(row[2], '-'),
+      asText(row[3], '-'),
+      asText(row[4], '-'),
+      asText(row[5], '未关联移动打卡方案'),
+      asText(row[6], '后台维护'),
+      asText(row[7], nowText()),
+      asText(row[8], '后台维护'),
+      nowText(),
+    ]);
+  setStoredRows('settingsLocation', normalizedRows);
+  return sendLinkedRows(res, 'settingsLocation', normalizedRows);
+});
+
+app.get('/api/settings-holiday', (_req, res) => {
+  return sendLinkedRows(res, 'settingsHoliday', getHolidaySettingRows());
+});
+
+app.put('/api/settings-holiday', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) {
+    return res.status(400).json({ message: 'rows必须是节假日方案数组' });
+  }
+  const normalizedRows = rows
+    .filter((row) => Array.isArray(row) && asRawText(row[0]))
+    .map((row) => [
+      asText(row[0], '-'),
+      asText(row[1], String(new Date().getFullYear())),
+      asText(row[2], '双休'),
+      asText(row[3], '后台维护'),
+      asText(row[4], nowText()),
+      asText(row[5], '后台维护'),
+      nowText(),
+    ]);
+  setStoredRows('settingsHoliday', normalizedRows);
+  return sendLinkedRows(res, 'settingsHoliday', normalizedRows);
+});
+
+app.get('/api/settings-calendar', (_req, res) => {
+  return sendLinkedRows(res, 'settingsCalendar', getCalendarSettingRows());
+});
+
+app.put('/api/settings-calendar', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) {
+    return res.status(400).json({ message: 'rows必须是司历方案数组' });
+  }
+  const normalizedRows = rows
+    .filter((row) => Array.isArray(row) && asRawText(row[0]))
+    .map((row) => [
+      asText(row[0], '-'),
+      asText(row[1], '当月1日至当月最后一天为【当月】的考勤周期'),
+      asText(row[2], '周一、周二、周三、周四、周五'),
+      asText(row[3], '工作日之和为应出勤天数'),
+      asText(row[4], '默认考勤组'),
+      asText(row[5], '后台维护'),
+      asText(row[6], nowText()),
+      asText(row[7], '后台维护'),
+      nowText(),
+    ]);
+  setStoredRows('settingsCalendar', normalizedRows);
+  return sendLinkedRows(res, 'settingsCalendar', normalizedRows);
+});
+
+app.get('/api/settings-overtime-rules', (_req, res) => {
+  return sendLinkedRows(res, 'settingsOvertimeRules', getOvertimeRuleSettingRows());
+});
+
+app.put('/api/settings-overtime-rules', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) {
+    return res.status(400).json({ message: 'rows必须是加班规则数组' });
+  }
+  const normalizedRows = rows
+    .filter((row) => Array.isArray(row) && asRawText(row[0]))
+    .map((row) => [
+      asText(row[0], '-'),
+      asText(row[1], '工作日/休息日/节假日均按默认口径核算'),
+      asText(row[2], '默认考勤组'),
+      asText(row[3], '后台维护'),
+      asText(row[4], nowText()),
+      asText(row[5], '后台维护'),
+      nowText(),
+    ]);
+  setStoredRows('settingsOvertimeRules', normalizedRows);
+  return sendLinkedRows(res, 'settingsOvertimeRules', normalizedRows);
+});
+
+app.get('/api/settings-field-rules', (_req, res) => {
+  return sendLinkedRows(res, 'settingsFieldRules', getFieldRuleSettingRows());
+});
+
+app.put('/api/settings-field-rules', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) {
+    return res.status(400).json({ message: 'rows必须是外勤规则数组' });
+  }
+  const normalizedRows = rows
+    .filter((row) => Array.isArray(row) && asRawText(row[0]))
+    .map((row) => [
+      asText(row[0], '-'),
+      asText(row[1], '外勤打卡已启用 / 外出申请已启用'),
+      asText(row[2], '默认考勤组'),
+      asText(row[3], '后台维护'),
+      asText(row[4], nowText()),
+      asText(row[5], '后台维护'),
+      nowText(),
+    ]);
+  setStoredRows('settingsFieldRules', normalizedRows);
+  return sendLinkedRows(res, 'settingsFieldRules', normalizedRows);
+});
+
+app.get('/api/settings-stat-schemes', (_req, res) => {
+  return sendLinkedRows(res, 'settingsStatSchemes', getStatSchemeSettingRows());
+});
+
+app.put('/api/settings-stat-schemes', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) {
+    return res.status(400).json({ message: 'rows必须是统计方案数组' });
+  }
+  const normalizedRows = rows
+    .filter((row) => Array.isArray(row) && asRawText(row[0]))
+    .map((row) => [
+      asText(row[0], '-'),
+      asText(row[1], '当月1日至当月最后一天为【当月】的一个考勤统计周期'),
+      asText(row[2], '部门：待配置'),
+      asText(row[3], '默认考勤组'),
+      asText(row[4], '后台维护'),
+      asText(row[5], nowText()),
+      asText(row[6], '后台维护'),
+      nowText(),
+    ]);
+  setStoredRows('settingsStatSchemes', normalizedRows);
+  return sendLinkedRows(res, 'settingsStatSchemes', normalizedRows);
+});
+
 app.put('/api/settings-shifts', (req, res) => {
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
   if (!rows) {
@@ -1477,8 +2125,7 @@ app.put('/api/settings-shifts', (req, res) => {
 });
 
 app.get('/api/settings-face', (_req, res) => {
-  const onboardedRows = getOnboardedEmployees().map(onboardedEmployeeToFaceRow);
-  return sendLinkedRows(res, 'onboardedEmployees', onboardedRows);
+  return sendLinkedRows(res, 'onboardedEmployees', getSettingsFaceRows());
 });
 
 app.get('/api/settings-people', (_req, res) => {
@@ -1688,9 +2335,42 @@ const DEFAULT_STAT_ITEMS = [
   { id: 28, name: '项目津贴工时', module: '薪资核算', category: '自定义', desc: '项目组特殊津贴工时统计（外部数据支持）', enabled: true, hasFormula: false, dataType: '数值型', isCustom: true },
 ];
 
+function normalizeStatItemRow(row, index) {
+  return {
+    id: Number(row?.id) || index + 1,
+    name: asText(row?.name, ''),
+    module: asText(row?.module, '基础考勤'),
+    category: asText(row?.category, row?.isCustom ? '自定义' : '其他'),
+    desc: asText(row?.desc, ''),
+    enabled: row?.enabled !== false,
+    hasFormula: Boolean(row?.hasFormula),
+    dataType: asText(row?.dataType, '数值型'),
+    isCustom: Boolean(row?.isCustom),
+    scope: asText(row?.scope, '日考勤统计与月汇总'),
+    externalEnabled: row?.externalEnabled !== undefined ? Boolean(row.externalEnabled) : Boolean(row?.isCustom),
+    defaultValue: asText(row?.defaultValue, ''),
+    resultType: asText(row?.resultType, '求和'),
+    unit: asText(row?.unit, ''),
+    decimal: Number.isFinite(Number(row?.decimal)) ? Number(row.decimal) : 2,
+    roundMode: asText(row?.roundMode, '四舍五入'),
+    formulas: Array.isArray(row?.formulas)
+      ? row.formulas.map((formula) => ({
+        name: asText(formula?.name, ''),
+        expr: asText(formula?.expr, ''),
+      })).filter((formula) => formula.name || formula.expr)
+      : [],
+  };
+}
+
+function getStatItemRows() {
+  const storedRows = getStoredRows('statItems');
+  const sourceRows = storedRows && storedRows.length ? storedRows : DEFAULT_STAT_ITEMS;
+  return sourceRows.map(normalizeStatItemRow).filter((row) => row.name);
+}
+
 app.get('/api/stat-items', (_req, res) => {
   const storedRows = getStoredRows('statItems');
-  const rows = storedRows && storedRows.length ? storedRows : DEFAULT_STAT_ITEMS;
+  const rows = getStatItemRows();
   return res.json({
     sourceFile: storedRows && storedRows.length ? '本地持久化数据 data-store.json' : '系统默认统计项配置',
     sheetName: '统计项管理',
@@ -1704,13 +2384,47 @@ app.put('/api/stat-items', (req, res) => {
   if (!Array.isArray(rows)) {
     return res.status(400).json({ message: 'rows必须是数组' });
   }
-  setStoredRows('statItems', rows);
-  return res.json({ ok: true, sourceFile: '本地持久化数据 data-store.json', total: rows.length, rows });
+  const normalizedRows = rows.map(normalizeStatItemRow).filter((row) => row.name);
+  setStoredRows('statItems', normalizedRows);
+  return res.json({ ok: true, sourceFile: '本地持久化数据 data-store.json', total: normalizedRows.length, rows: normalizedRows });
 });
 
 
 app.get('/api/external-records', (_req, res) => {
   return sendLinkedRows(res, 'externalRecords', buildLinkedExternalRows());
+});
+
+app.put('/api/external-records', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) return res.status(400).json({ message: 'rows必须是外部数据数组' });
+  const employees = linkedDemoEmployees();
+  const byNo = new Map(employees.map((employee) => [asRawText(employee.employeeNo), employee]));
+  const normalizedRows = rows
+    .filter((row) => row && typeof row === 'object' && !Array.isArray(row))
+    .map((row, index) => {
+      const employeeNo = asText(row.empId || row.employeeNo || row.employeeId, '');
+      const employee = byNo.get(asRawText(employeeNo));
+      return {
+        id: Number(row.id) || Date.now() + index,
+        module: asText(row.module, '基础考勤'),
+        attendDate: asText(row.attendDate, currentDateText()),
+        period: asText(row.period, currentDateText().slice(0, 7)),
+        statItem: asText(row.statItem, ''),
+        statValue: row.statValue ?? '',
+        employeeName: asText(row.employeeName || row.name, employee?.name || ''),
+        employeeNo,
+        empId: employeeNo,
+        employeeId: employee?.id || employeeNo,
+        dept: asText(row.dept, employee?.department || ''),
+        creator: asText(row.creator, '后台维护'),
+        createTime: asText(row.createTime, nowText()),
+        modifier: asText(row.modifier, ''),
+        modifyTime: asText(row.modifyTime, ''),
+      };
+    })
+    .filter((row) => asRawText(row.empId) && asRawText(row.statItem));
+  setStoredRows('externalRecords', normalizedRows);
+  return sendLinkedRows(res, 'externalRecords', buildLinkedExternalRows(), { ok: true });
 });
 
 const MOBILE_OFFICE = {
@@ -1731,6 +2445,55 @@ const MOBILE_SHIFT = {
 function getShiftSettingRows() {
   const storedRows = getStoredRows('settingsShifts');
   return storedRows && storedRows.length ? storedRows : DEFAULT_SHIFT_SETTING_ROWS;
+}
+
+function getGroupSettingRows() {
+  const storedRows = getStoredRows('settingsGroups');
+  return storedRows && storedRows.length ? storedRows : DEFAULT_GROUP_SETTING_ROWS;
+}
+
+function getCardRuleSettingRows() {
+  const storedRows = getStoredRows('settingsCardRules');
+  return storedRows && storedRows.length ? storedRows : DEFAULT_CARD_RULE_ROWS;
+}
+
+function getMobileClockSettingRows() {
+  const storedRows = getStoredRows('settingsMobileClock');
+  return storedRows && storedRows.length ? storedRows : DEFAULT_MOBILE_CLOCK_ROWS;
+}
+
+function getLocationSettingRows() {
+  const storedRows = getStoredRows('settingsLocation');
+  return storedRows && storedRows.length ? storedRows : DEFAULT_LOCATION_SETTING_ROWS;
+}
+
+function getHolidaySettingRows() {
+  const storedRows = getStoredRows('settingsHoliday');
+  return storedRows && storedRows.length ? storedRows : DEFAULT_HOLIDAY_SETTING_ROWS;
+}
+
+function getCalendarSettingRows() {
+  const storedRows = getStoredRows('settingsCalendar');
+  return storedRows && storedRows.length ? storedRows : DEFAULT_CALENDAR_SETTING_ROWS;
+}
+
+function getOvertimeRuleSettingRows() {
+  const storedRows = getStoredRows('settingsOvertimeRules');
+  return storedRows && storedRows.length ? storedRows : DEFAULT_OVERTIME_RULE_ROWS;
+}
+
+function getFieldRuleSettingRows() {
+  const storedRows = getStoredRows('settingsFieldRules');
+  return storedRows && storedRows.length ? storedRows : DEFAULT_FIELD_RULE_ROWS;
+}
+
+function getStatSchemeSettingRows() {
+  const storedRows = getStoredRows('settingsStatSchemes');
+  return storedRows && storedRows.length ? storedRows : DEFAULT_STAT_SCHEME_ROWS;
+}
+
+function getSettingsFaceRows() {
+  return getOnboardedEmployees().map(onboardedEmployeeToFaceRow);
 }
 
 function parseShiftClockTimes(value) {
@@ -1788,6 +2551,14 @@ function resolveShiftOption(input = {}) {
     || options.find((item) => requestedName && item.name === requestedName)
     || options.find((item) => item.id === MOBILE_SHIFT.id)
     || { ...MOBILE_SHIFT, shortName: MOBILE_SHIFT.name, time: `${MOBILE_SHIFT.clockInTime}-${MOBILE_SHIFT.clockOutTime}`, color: '#B53A2A' };
+}
+
+function getEmployeeDefaultShift(employee) {
+  const group = groupSettingForEmployee(employee);
+  return resolveShiftOption({
+    shiftId: employee?.shiftId,
+    shiftName: employee?.shiftName || group?.[3],
+  });
 }
 
 const DEFAULT_MOBILE_EMPLOYEE = {
@@ -1934,12 +2705,24 @@ function getEmployeeShift(employee, dateText = currentDateText()) {
   const schedule = getEmployeeSchedule(employee, dateText);
   return resolveShiftOption({
     shiftId: schedule?.shiftId || employee.shiftId,
-    shiftName: schedule?.shiftName || employee.shiftName,
+    shiftName: schedule?.shiftName || employee.shiftName || groupSettingForEmployee(employee)?.[3],
   });
 }
 
 function getEmployeeOffice(employee) {
-  return employee.office || MOBILE_OFFICE;
+  const groupName = asText(employee?.attendanceGroupName, '');
+  const locationRow = getLocationSettingRows().find((row) => asText(row?.[1], '') === groupName)
+    || getLocationSettingRows().find((row) => asText(row?.[0], '') === asText(employee?.office?.name, ''))
+    || getLocationSettingRows()[0];
+  if (!locationRow) return employee.office || MOBILE_OFFICE;
+  return {
+    ...(employee.office || MOBILE_OFFICE),
+    name: asText(locationRow[0], employee.office?.name || MOBILE_OFFICE.name),
+    address: asText(locationRow[2], employee.office?.address || locationRow[0] || MOBILE_OFFICE.name),
+    wifi: asText(locationRow[4], ''),
+    bluetooth: asText(locationRow[3], ''),
+    mobileScheme: asText(locationRow[5], ''),
+  };
 }
 
 function getMobileRows(key, fallback = []) {
@@ -1992,8 +2775,8 @@ function mapMobileClockRowsToAdmin(rows) {
     dept: asText(row.dept, DEFAULT_MOBILE_EMPLOYEE.department),
     date: asText(row.date, currentDateText()),
     time: asText(row.time, ''),
-    source: '企业微信小程序',
-    device: '企业微信小程序',
+    source: asText(row.source, '企业微信小程序'),
+    device: asText(row.device, '企业微信小程序'),
     location: `${asText(row.address, MOBILE_OFFICE.name)} · 距离${Math.round(Number(row.distance || 0))}m · 精度${Math.round(Number(row.accuracy || 0))}m`,
     workLocation: asText(row.workLocation, MOBILE_OFFICE.name),
     freeWork: row.type === 'clockOut' ? '下班' : '上班',
@@ -2001,10 +2784,10 @@ function mapMobileClockRowsToAdmin(rows) {
     hasPhoto: Boolean(row.photoUrl),
     photoUrl: asText(row.photoUrl, ''),
     photoTakenAt: asText(row.photoTakenAt || row.serverTime, ''),
-    creator: '移动端',
+    creator: asText(row.creator, '移动端'),
     createTime: asText(row.serverTime, ''),
-    modifier: '',
-    modifyTime: '',
+    modifier: asText(row.modifier, ''),
+    modifyTime: asText(row.modifyTime, ''),
   }));
 }
 
@@ -2082,12 +2865,12 @@ function mapMobileMakeupRowsToAdmin(rows) {
     makeupDate: asText(row.date, ''),
     makeupTime: asText(row.time, ''),
     reason: asText(row.reason, ''),
-    initiator: asText(row.employeeName, DEFAULT_MOBILE_EMPLOYEE.name),
-    initiatorId: asText(row.employeeNo, DEFAULT_MOBILE_EMPLOYEE.employeeNo),
+    initiator: asText(row.initiatorName, asText(row.employeeName, DEFAULT_MOBILE_EMPLOYEE.name)),
+    initiatorId: asText(row.initiatorNo, asText(row.employeeNo, DEFAULT_MOBILE_EMPLOYEE.employeeNo)),
     initiateTime: asText(row.createTime, ''),
-    completeTime: '',
+    completeTime: asText(row.completeTime, ''),
     hasPhoto: Boolean(row.attachmentName),
-    archiveStatus: '未归档',
+    archiveStatus: asText(row.archiveStatus, '未归档'),
   }));
 }
 
@@ -2157,12 +2940,21 @@ app.post('/api/wecom/login', async (req, res) => {
 app.get('/api/mobile/me', (req, res) => {
   const employee = requireRequestEmployee(req, res);
   if (!employee) return;
+  const office = getEmployeeOffice(employee);
   res.json({
     employee,
     attendanceGroup: {
       id: employee.attendanceGroupId,
       name: employee.attendanceGroupName,
-      location: getEmployeeOffice(employee),
+      location: office,
+    },
+    settings: {
+      shift: getEmployeeShift(employee),
+      dateType: getEmployeeDateType(employee),
+      mobileScheme: mobileSchemeForEmployee(employee),
+      cardRule: cardRuleForEmployee(employee),
+      fieldRule: fieldRuleForEmployee(employee),
+      overtimeRule: overtimeRuleForEmployee(employee),
     },
     version: '0.1.0',
   });
@@ -2182,6 +2974,9 @@ app.get('/api/mobile/today', (req, res) => {
     employee,
     shift: getEmployeeShift(employee, date),
     location: getEmployeeOffice(employee),
+    dateType: getEmployeeDateType(employee, date),
+    mobileScheme: mobileSchemeForEmployee(employee),
+    cardRule: cardRuleForEmployee(employee),
     status,
     pendingAnomalies,
   });
@@ -2232,6 +3027,9 @@ app.post('/api/mobile/face-verify', async (req, res) => {
 app.post('/api/mobile/clock', (req, res) => {
   const employee = requireRequestEmployee(req, res);
   if (!employee) return;
+  if (mobileSchemeDisabled(employee)) {
+    return res.status(403).json({ message: '当前考勤组的移动打卡方案已停用，请联系管理员' });
+  }
   const office = getEmployeeOffice(employee);
   const shift = getEmployeeShift(employee, currentDateText());
   const type = req.body?.type;
@@ -2327,6 +3125,97 @@ app.get('/api/clock-makeup-records', (_req, res) => {
     sheetName: 'mobileMakeupRequests',
     total: rows.length,
     rows,
+    linkedOnly: true,
+  });
+});
+
+app.put('/api/clock-makeup-records', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) {
+    return res.status(400).json({ message: 'rows必须是补卡记录数组' });
+  }
+  const employees = linkedDemoEmployees();
+  const byNo = new Map(employees.map((employee) => [asRawText(employee.employeeNo), employee]));
+  const normalizedRows = rows
+    .filter((row) => row && typeof row === 'object' && !Array.isArray(row))
+    .map((row, index) => {
+      const employeeNo = asText(row.applicantId || row.employeeNo, '');
+      const employee = byNo.get(asRawText(employeeNo));
+      return {
+        id: asText(row.rawId || row.id, `manual_makeup_${Date.now()}_${index}`),
+        employeeId: employee?.id || employeeNo,
+        employeeName: asText(row.applicant || row.employeeName, employee?.name || ''),
+        employeeNo,
+        dept: asText(row.applicantDept, employee?.department || ''),
+        date: asText(row.makeupDate, currentDateText()),
+        time: asText(row.makeupTime, nowText().slice(11, 16)),
+        type: asText(row.clockType, '补卡'),
+        reason: asText(row.reason, '手动发起补卡记录'),
+        attachmentName: row.hasPhoto ? asText(row.attachmentName, '补卡附件') : '',
+        status: asText(row.status, '审批中') === '审批中' ? 'pending' : asText(row.status, '审批中'),
+        createTime: asText(row.initiateTime, nowText()),
+        completeTime: asText(row.completeTime, ''),
+        archiveStatus: asText(row.archiveStatus, '未归档'),
+        initiatorName: asText(row.initiator, '当前用户'),
+        initiatorNo: asText(row.initiatorId, 'CURRENT'),
+      };
+    })
+    .filter((row) => asRawText(row.employeeNo));
+  setMobileRows('mobileMakeupRequests', normalizedRows);
+  const adminRows = mapMobileMakeupRowsToAdmin(filterRowsToOnboardedEmployees(normalizedRows));
+  return res.json({
+    ok: true,
+    sourceFile: '员工主数据 + 小程序移动端 API',
+    sheetName: 'mobileMakeupRequests',
+    total: adminRows.length,
+    rows: adminRows,
+    linkedOnly: true,
+  });
+});
+
+app.get('/api/clock-field-records', (_req, res) => {
+  return sendLinkedRows(res, 'clockFieldRecords', filterRowsToOnboardedEmployees(getStoredRows('clockFieldRecords') || []));
+});
+
+app.put('/api/clock-field-records', (req, res) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) {
+    return res.status(400).json({ message: 'rows必须是外勤记录数组' });
+  }
+  const employees = linkedDemoEmployees();
+  const byNo = new Map(employees.map((employee) => [asRawText(employee.employeeNo), employee]));
+  const normalizedRows = rows
+    .filter((row) => row && typeof row === 'object' && !Array.isArray(row))
+    .map((row, index) => {
+      const employeeNo = asText(row.empId || row.employeeNo, '');
+      const employee = byNo.get(asRawText(employeeNo));
+      return {
+        id: Number(row.id) || Date.now() + index,
+        name: asText(row.name, employee?.name || ''),
+        empId: employeeNo,
+        initiator: asText(row.initiator, asText(row.name, employee?.name || '当前用户')),
+        initiatorId: asText(row.initiatorId, employeeNo || 'CURRENT'),
+        source: asText(row.source, 'PC端申请'),
+        dept: asText(row.dept, employee?.department || ''),
+        date: asText(row.date, currentDateText()),
+        time: asText(row.time, '09:00 - 18:00'),
+        initiateTime: asText(row.initiateTime, nowText()),
+        completeTime: asText(row.completeTime, ''),
+        location: asText(row.location, '待补充'),
+        note: asText(row.note, ''),
+        hasPhoto: Boolean(row.hasPhoto),
+        reviewStatus: asText(row.reviewStatus, '审批中'),
+      };
+    })
+    .filter((row) => asRawText(row.empId));
+  setStoredRows('clockFieldRecords', normalizedRows);
+  const linkedRows = filterRowsToOnboardedEmployees(normalizedRows);
+  return res.json({
+    ok: true,
+    sourceFile: '员工主数据 + 小程序移动端 API',
+    sheetName: 'clockFieldRecords',
+    total: linkedRows.length,
+    rows: linkedRows,
     linkedOnly: true,
   });
 });

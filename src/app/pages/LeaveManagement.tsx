@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
-import { fetchLeaveBalances, fetchLeaveDetails, fetchLeaveRecords, fetchLeaveSchemes, fetchLeaveTypes, saveLeaveDetails, saveLeaveRecords, saveLeaveSchemes, saveLeaveTypes } from '../api/realData';
+import { fetchLeaveBalances, fetchLeaveDetails, fetchLeaveRecords, fetchLeaveSchemes, fetchLeaveTypes, fetchSettingsPeople, saveLeaveDetails, saveLeaveRecords, saveLeaveSchemes, saveLeaveTypes } from '../api/realData';
 import { monthRange } from '../utils/date';
 import {
   AlertCircle,
@@ -20,6 +20,56 @@ type MenuItem = { label: string; hint?: string };
 type TabConfig = { key: LeaveView; label: string; path: string };
 type SortConfig = { index: number; direction: 'asc' | 'desc' };
 type PlainRow = Array<string | number | boolean>;
+type EmployeeOption = { name: string; employeeNo: string; department: string; deptFullPath: string };
+type LeaveRecordDraft = {
+  recordStatus: string;
+  applicantKey: string;
+  initiatorKey: string;
+  startType: string;
+  leaveType: string;
+  startTime: string;
+  endTime: string;
+  duration: string;
+  reason: string;
+  flowStatus: string;
+};
+type LeaveDetailDraft = {
+  employeeKey: string;
+  hireDate: string;
+  cycle: string;
+  leaveType: string;
+  totalQuota: string;
+  issuedQuota: string;
+  activeQuota: string;
+  adjustQuota: string;
+  frozenQuota: string;
+  usedQuota: string;
+  remainQuota: string;
+  cycleStart: string;
+  cycleEnd: string;
+  validStart: string;
+};
+type LeaveTypeDraft = {
+  name: string;
+  short: string;
+  enabled: boolean;
+  unit: string;
+  paid: string;
+  negative: string;
+  before: string;
+  note: string;
+  reason: string;
+  attachment: string;
+  attachmentNote: string;
+};
+type LeaveSchemeDraft = {
+  name: string;
+  leaveType: string;
+  leaveControl: string;
+  quotaControl: string;
+  scope: string;
+  priority: string;
+};
 
 const ROUTE_TABS: TabConfig[] = [
   { key: 'record', label: '请假记录', path: '/attendance/leave' },
@@ -59,6 +109,297 @@ const LEAVE_BALANCE_ROWS: Array<Array<React.ReactNode>> = [];
 
 function plainRows(rows: Array<Array<React.ReactNode>>): PlainRow[] {
   return rows.map(row => row.map(cell => typeof cell === 'string' || typeof cell === 'number' || typeof cell === 'boolean' ? cell : String(cell ?? '')));
+}
+
+function currentDateText() {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function currentDateTimeText() {
+  const date = new Date();
+  return `${currentDateText()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function toInputDateTime(value: unknown) {
+  const text = String(value ?? '');
+  if (!text) return `${currentDateText()}T09:00`;
+  return text.replace(' ', 'T').slice(0, 16);
+}
+
+function displayDateTime(value: string) {
+  return value ? value.replace('T', ' ') : '';
+}
+
+function employeeKey(employee: EmployeeOption) {
+  return `${employee.employeeNo}|${employee.name}`;
+}
+
+function employeeFromKey(employees: EmployeeOption[], key: string) {
+  return employees.find(employee => employeeKey(employee) === key) || employees[0] || {
+    name: '新增员工',
+    employeeNo: 'LV0001',
+    department: '产品运营部',
+    deptFullPath: '产品研发中心/产品运营部',
+  };
+}
+
+function employeeMatches(employee: EmployeeOption, keyword: string) {
+  const query = keyword.trim().toLowerCase();
+  if (!query) return true;
+  const searchable = `${employee.name} ${employee.employeeNo} ${employee.name} / ${employee.employeeNo} ${employee.department} ${employee.deptFullPath}`.toLowerCase();
+  return searchable.includes(query);
+}
+
+function peopleRowsToOptions(rows: Array<Array<unknown>>): EmployeeOption[] {
+  return rows
+    .map(row => ({
+      name: String(row[0] ?? '').trim(),
+      employeeNo: String(row[1] ?? '').trim(),
+      department: String(row[2] ?? '').trim() || '-',
+      deptFullPath: String(row[2] ?? '').trim() || '-',
+    }))
+    .filter(employee => employee.name && employee.employeeNo);
+}
+
+function leaveTypeNames(rows: Array<Record<string, unknown>>) {
+  const names = rows
+    .filter(row => row.enabled !== false)
+    .map(row => String(row.name ?? '').trim())
+    .filter(Boolean);
+  return names.length ? names : TYPE_ROWS.filter(row => row.enabled).map(row => row.name);
+}
+
+function calculateLeaveDuration(startTime: string, endTime: string) {
+  const start = new Date(startTime);
+  const end = new Date(endTime);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end < start) return '1天';
+  const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
+  const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
+  const days = Math.max(1, Math.round((endDay - startDay) / 86400000) + 1);
+  return `${days}天`;
+}
+
+function defaultLeaveRecordDraft(employees: EmployeeOption[], leaveTypes: string[], startType = '管理员发起'): LeaveRecordDraft {
+  const employee = employees[0];
+  const today = currentDateText();
+  return {
+    recordStatus: startType === '员工发起' ? '审批中' : '已通过',
+    applicantKey: employee ? employeeKey(employee) : '',
+    initiatorKey: employee ? employeeKey(employee) : '',
+    startType,
+    leaveType: leaveTypes[0] || '年假',
+    startTime: `${today}T09:00`,
+    endTime: `${today}T18:00`,
+    duration: '1天',
+    reason: startType === '员工发起' ? '前端发起请假流程' : '后台添加请假记录',
+    flowStatus: startType === '员工发起' ? '审批中' : '已通过',
+  };
+}
+
+function leaveDraftFromRow(row: Array<React.ReactNode>, employees: EmployeeOption[], leaveTypes: string[]): LeaveRecordDraft {
+  const applicantNo = String(row[2] ?? '');
+  const initiatorNo = String(row[6] ?? applicantNo);
+  const applicant = employees.find(employee => employee.employeeNo === applicantNo);
+  const initiator = employees.find(employee => employee.employeeNo === initiatorNo) || applicant;
+  return {
+    recordStatus: String(row[0] ?? '审批中'),
+    applicantKey: applicant ? employeeKey(applicant) : '',
+    initiatorKey: initiator ? employeeKey(initiator) : '',
+    startType: String(row[7] ?? '管理员发起') || '管理员发起',
+    leaveType: String(row[8] ?? leaveTypes[0] ?? '年假') || leaveTypes[0] || '年假',
+    startTime: toInputDateTime(row[9]),
+    endTime: toInputDateTime(row[10]),
+    duration: String(row[11] ?? '1天') || '1天',
+    reason: String(row[12] ?? ''),
+    flowStatus: String(row[15] ?? '审批中') || '审批中',
+  };
+}
+
+function leaveRowFromDraft(draft: LeaveRecordDraft, employees: EmployeeOption[], previousRow?: Array<React.ReactNode>) {
+  const applicant = employeeFromKey(employees, draft.applicantKey);
+  const initiator = employeeFromKey(employees, draft.initiatorKey || draft.applicantKey);
+  const now = currentDateTimeText();
+  const flowStatus = draft.flowStatus || draft.recordStatus || '审批中';
+  return [
+    draft.recordStatus || flowStatus,
+    applicant.name,
+    applicant.employeeNo,
+    applicant.department,
+    applicant.deptFullPath,
+    initiator.name,
+    initiator.employeeNo,
+    draft.startType || '管理员发起',
+    draft.leaveType || '年假',
+    displayDateTime(draft.startTime),
+    displayDateTime(draft.endTime),
+    draft.duration || calculateLeaveDuration(draft.startTime, draft.endTime),
+    draft.reason || '-',
+    String(previousRow?.[13] ?? now),
+    flowStatus === '审批中' ? '' : now,
+    flowStatus,
+    '查看',
+  ];
+}
+
+function defaultLeaveDetailDraft(employees: EmployeeOption[], leaveTypes: string[], source = '新增额度记录'): LeaveDetailDraft {
+  const employee = employees[0];
+  const today = currentDateText();
+  return {
+    employeeKey: employee ? employeeKey(employee) : '',
+    hireDate: today,
+    cycle: String(new Date().getFullYear()),
+    leaveType: leaveTypes[0] || '年假',
+    totalQuota: '1',
+    issuedQuota: '1',
+    activeQuota: '1',
+    adjustQuota: '0',
+    frozenQuota: source.includes('冻结') ? '1' : '0',
+    usedQuota: '0',
+    remainQuota: source.includes('冻结') ? '0' : '1',
+    cycleStart: today,
+    cycleEnd: `${new Date().getFullYear()}-12-31`,
+    validStart: today,
+  };
+}
+
+function leaveDetailDraftFromRow(row: Array<React.ReactNode>, employees: EmployeeOption[], leaveTypes: string[]): LeaveDetailDraft {
+  const employeeNo = String(row[1] ?? '');
+  const employee = employees.find(item => item.employeeNo === employeeNo);
+  const fallback = defaultLeaveDetailDraft(employees, leaveTypes);
+  return {
+    employeeKey: employee ? employeeKey(employee) : fallback.employeeKey,
+    hireDate: String(row[4] ?? fallback.hireDate),
+    cycle: String(row[5] ?? fallback.cycle),
+    leaveType: String(row[6] ?? fallback.leaveType),
+    totalQuota: String(row[7] ?? fallback.totalQuota),
+    issuedQuota: String(row[8] ?? fallback.issuedQuota),
+    activeQuota: String(row[9] ?? fallback.activeQuota),
+    adjustQuota: String(row[10] ?? fallback.adjustQuota),
+    frozenQuota: String(row[11] ?? fallback.frozenQuota),
+    usedQuota: String(row[12] ?? fallback.usedQuota),
+    remainQuota: String(row[13] ?? fallback.remainQuota),
+    cycleStart: String(row[14] ?? fallback.cycleStart),
+    cycleEnd: String(row[15] ?? fallback.cycleEnd),
+    validStart: String(row[16] ?? fallback.validStart),
+  };
+}
+
+function leaveDetailRowFromDraft(draft: LeaveDetailDraft, employees: EmployeeOption[]) {
+  const employee = employeeFromKey(employees, draft.employeeKey);
+  return [
+    employee.name,
+    employee.employeeNo,
+    employee.department,
+    employee.deptFullPath,
+    draft.hireDate,
+    draft.cycle,
+    draft.leaveType,
+    draft.totalQuota || '0',
+    draft.issuedQuota || '0',
+    draft.activeQuota || '0',
+    draft.adjustQuota || '0',
+    draft.frozenQuota || '0',
+    draft.usedQuota || '0',
+    draft.remainQuota || '0',
+    draft.cycleStart,
+    draft.cycleEnd,
+    draft.validStart,
+    '查看',
+  ];
+}
+
+function defaultLeaveTypeDraft(): LeaveTypeDraft {
+  return {
+    name: '',
+    short: '',
+    enabled: true,
+    unit: '按天请假',
+    paid: '否',
+    negative: '否',
+    before: '否',
+    note: '',
+    reason: '否',
+    attachment: '否',
+    attachmentNote: '-',
+  };
+}
+
+function leaveTypeDraftFromRow(row: LeaveTypeRow): LeaveTypeDraft {
+  return {
+    name: row.name,
+    short: row.short,
+    enabled: row.enabled,
+    unit: row.unit,
+    paid: row.paid,
+    negative: row.negative,
+    before: row.before,
+    note: row.note,
+    reason: row.reason,
+    attachment: row.attachment,
+    attachmentNote: row.attachmentNote,
+  };
+}
+
+function leaveTypeRowFromDraft(draft: LeaveTypeDraft, previous?: LeaveTypeRow): LeaveTypeRow {
+  const now = currentDateTimeText();
+  const name = draft.name.trim();
+  return {
+    name,
+    short: draft.short.trim() || name.slice(0, 1),
+    enabled: draft.enabled,
+    unit: draft.unit || '按天请假',
+    paid: draft.paid || '否',
+    negative: draft.negative || '否',
+    before: draft.before || '否',
+    note: draft.note.trim() || '-',
+    reason: draft.reason || '否',
+    attachment: draft.attachment || '否',
+    attachmentNote: draft.attachmentNote.trim() || '-',
+    creator: previous?.creator || '后台维护',
+    createdAt: previous?.createdAt || now,
+    editor: '后台维护',
+    editedAt: now,
+  };
+}
+
+function defaultLeaveSchemeDraft(leaveTypes: string[], nextPriority = 1): LeaveSchemeDraft {
+  return {
+    name: '',
+    leaveType: leaveTypes[0] || '年假',
+    leaveControl: '按规则控制',
+    quotaControl: '启用额度控制',
+    scope: '全部员工',
+    priority: String(nextPriority),
+  };
+}
+
+function leaveSchemeDraftFromRow(row: Array<React.ReactNode>): LeaveSchemeDraft {
+  return {
+    name: String(row[0] ?? ''),
+    leaveType: String(row[1] ?? '年假'),
+    leaveControl: String(row[2] ?? '按规则控制'),
+    quotaControl: String(row[3] ?? '启用额度控制'),
+    scope: String(row[4] ?? '全部员工'),
+    priority: String(row[5] ?? '1'),
+  };
+}
+
+function leaveSchemeRowFromDraft(draft: LeaveSchemeDraft, previous?: Array<React.ReactNode>) {
+  const now = currentDateTimeText();
+  return [
+    draft.name.trim(),
+    draft.leaveType,
+    draft.leaveControl || '按规则控制',
+    draft.quotaControl || '启用额度控制',
+    draft.scope.trim() || '全部员工',
+    draft.priority || '1',
+    String(previous?.[6] ?? '后台维护'),
+    String(previous?.[7] ?? now),
+    '后台维护',
+    now,
+    '查看',
+  ];
 }
 
 const TYPE_ROWS = [
@@ -183,15 +524,29 @@ function LeaveRecordView({
   const [recordStatusFilter, setRecordStatusFilter] = useState('');
   const [flowStatusFilter, setFlowStatusFilter] = useState('');
   const [sortConfig, setSortConfig] = useState<{ index: number; direction: 'asc' | 'desc' } | null>(null);
+  const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
+  const [leaveTypeOptions, setLeaveTypeOptions] = useState<string[]>(TYPE_ROWS.filter(row => row.enabled).map(row => row.name));
+  const [showRecordModal, setShowRecordModal] = useState(false);
+  const [editingRow, setEditingRow] = useState<Array<React.ReactNode> | null>(null);
+  const [recordDraft, setRecordDraft] = useState<LeaveRecordDraft>(() => defaultLeaveRecordDraft([], TYPE_ROWS.filter(row => row.enabled).map(row => row.name)));
 
   useEffect(() => {
     let cancelled = false;
-    fetchLeaveRecords()
-      .then((res) => {
-        if (!cancelled) setTableRows(res.rows as Array<Array<React.ReactNode>>);
+    Promise.all([fetchLeaveRecords(), fetchSettingsPeople(), fetchLeaveTypes()])
+      .then(([records, people, types]) => {
+        if (cancelled) return;
+        setTableRows(records.rows as Array<Array<React.ReactNode>>);
+        const employees = peopleRowsToOptions(people.rows as Array<Array<unknown>>);
+        const nextTypes = leaveTypeNames(types.rows as Array<Record<string, unknown>>);
+        setEmployeeOptions(employees);
+        setLeaveTypeOptions(nextTypes);
+        setRecordDraft(current => current.applicantKey ? current : defaultLeaveRecordDraft(employees, nextTypes));
       })
       .catch(() => {
-        if (!cancelled) setTableRows([]);
+        if (!cancelled) {
+          setTableRows([]);
+          setEmployeeOptions([]);
+        }
       });
     return () => {
       cancelled = true;
@@ -256,28 +611,48 @@ function LeaveRecordView({
     window.URL.revokeObjectURL(url);
   };
   const deleteRows = () => commitLeaveRecords(current => current.filter(row => !rows.includes(row)));
-  const addLeaveRecord = (label = '添加请假记录') => {
-    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    commitLeaveRecords(current => [[label.includes('批量') ? '审批中' : '已通过', '新增员工', `LV${String(current.length + 1).padStart(4, '0')}`, '产品运营部', '产品研发中心/产品运营部', '新增员工', `LV${String(current.length + 1).padStart(4, '0')}`, label.includes('管理员') ? '管理员发起' : '员工发起', '年假', `${new Date().toISOString().slice(0, 10)} 09:00`, `${new Date().toISOString().slice(0, 10)} 18:00`, '1天', label, now, label.includes('发起') ? '' : now, label.includes('发起') ? '审批中' : '已通过', '查看'], ...current]);
+  const openAddLeaveRecord = (label = '添加请假记录') => {
+    const startType = label.includes('发起') || label.includes('批量') ? '员工发起' : '管理员发起';
+    setEditingRow(null);
+    setRecordDraft({
+      ...defaultLeaveRecordDraft(employeeOptions, leaveTypeOptions, startType),
+      reason: label,
+      recordStatus: startType === '员工发起' ? '审批中' : '已通过',
+      flowStatus: startType === '员工发起' ? '审批中' : '已通过',
+    });
+    setShowRecordModal(true);
   };
   const clearLeaveRecords = () => {
     if (!window.confirm('确认清空当前筛选出的请假记录？')) return;
     commitLeaveRecords(current => current.filter(row => !rows.includes(row)));
   };
   const editLeaveRecord = (row: Array<React.ReactNode>) => {
-    const nextReason = window.prompt('修改请假事由', String(row[12] ?? ''));
-    if (nextReason === null) return;
-    const nextStatus = window.prompt('修改流程状态（已通过/审批中/已拒绝）', String(row[15] ?? '')) || String(row[15] ?? '审批中');
-    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    commitLeaveRecords(current => current.map(item => item === row ? [
-      nextStatus,
-      ...item.slice(1, 12),
-      nextReason.trim() || String(item[12] ?? ''),
-      item[13],
-      nextStatus === '审批中' ? '' : now,
-      nextStatus,
-      '查看',
-    ] : item));
+    setEditingRow(row);
+    setRecordDraft(leaveDraftFromRow(row, employeeOptions, leaveTypeOptions));
+    setShowRecordModal(true);
+  };
+  const updateRecordDraft = (key: keyof LeaveRecordDraft, value: string) => {
+    setRecordDraft(current => {
+      const next = { ...current, [key]: value };
+      if (key === 'startTime' || key === 'endTime') {
+        next.duration = calculateLeaveDuration(key === 'startTime' ? value : current.startTime, key === 'endTime' ? value : current.endTime);
+      }
+      if (key === 'flowStatus') next.recordStatus = value;
+      return next;
+    });
+  };
+  const saveRecordDraft = () => {
+    if (!recordDraft.applicantKey || !recordDraft.leaveType || !recordDraft.startTime || !recordDraft.endTime) {
+      window.alert('请选择申请人、假期类型、开始时间和结束时间');
+      return;
+    }
+    commitLeaveRecords(current => {
+      const nextRow = leaveRowFromDraft(recordDraft, employeeOptions, editingRow || undefined);
+      if (!editingRow) return [nextRow, ...current];
+      return current.map(row => row === editingRow ? nextRow : row);
+    });
+    setShowRecordModal(false);
+    setEditingRow(null);
   };
   const viewLeaveRecord = (row: Array<React.ReactNode>) => {
     window.alert(`请假记录详情\n申请人：${row[1]}\n员工号：${row[2]}\n假期类型：${row[8]}\n开始时间：${row[9]}\n结束时间：${row[10]}\n请假时长：${row[11]}\n流程状态：${row[15]}`);
@@ -327,8 +702,8 @@ function LeaveRecordView({
       <StatusFilterBar items={statusItems} activeKey={statusFilter} onChange={setStatusFilter} colors={colors} />
 
       <div style={toolbarStyle(colors)}>
-        <button onClick={() => addLeaveRecord()} style={primaryBtn(colors)}>添加请假记录</button>
-        <DropdownButton label="发起请假流程" items={START_LEAVE_ITEMS} open={menuOpen} onToggle={onToggleMenu} onClose={onCloseMenu} onSelect={(item) => addLeaveRecord(item.label)} colors={colors} />
+        <button onClick={() => openAddLeaveRecord()} style={primaryBtn(colors)}>添加请假记录</button>
+        <DropdownButton label="发起请假流程" items={START_LEAVE_ITEMS} open={menuOpen} onToggle={onToggleMenu} onClose={onCloseMenu} onSelect={(item) => openAddLeaveRecord(item.label)} colors={colors} />
         <button onClick={exportRows} style={outlineBtn(colors)}>导出</button>
         <button onClick={deleteRows} style={outlineBtn(colors)}>删除</button>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -353,8 +728,181 @@ function LeaveRecordView({
         }}
       />
 
+      {showRecordModal ? (
+        <LeaveRecordModal
+          colors={colors}
+          title={editingRow ? '编辑请假记录' : '添加请假记录'}
+          draft={recordDraft}
+          employees={employeeOptions}
+          leaveTypes={leaveTypeOptions}
+          onChange={updateRecordDraft}
+          onCancel={() => setShowRecordModal(false)}
+          onSave={saveRecordDraft}
+        />
+      ) : null}
 
     </>
+  );
+}
+
+function LeaveRecordModal({
+  colors,
+  title,
+  draft,
+  employees,
+  leaveTypes,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  colors: any;
+  title: string;
+  draft: LeaveRecordDraft;
+  employees: EmployeeOption[];
+  leaveTypes: string[];
+  onChange: (key: keyof LeaveRecordDraft, value: string) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const selectedApplicant = employeeFromKey(employees, draft.applicantKey);
+  const deptOptions = Array.from(new Set(employees.map(employee => employee.department).filter(Boolean)));
+  return (
+    <div style={modalOverlay}>
+      <div style={modalPanel(colors, 760)}>
+        <div style={modalHeader(colors)}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{title}</div>
+            <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>请按表头字段选择人员、假期类型和请假时间，保存后写入请假记录接口</div>
+          </div>
+          <button onClick={onCancel} style={iconBtn(colors)}>×</button>
+        </div>
+        <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+          <ModalField label="申请人" required colors={colors}>
+            <EmployeeSearchSelect value={draft.applicantKey} employees={employees} colors={colors} onChange={value => onChange('applicantKey', value)} />
+          </ModalField>
+          <ModalField label="申请人部门" colors={colors}>
+            <select value={selectedApplicant.department} onChange={() => undefined} style={{ ...modalInput(colors), color: colors.textMuted }}>
+              {deptOptions.includes(selectedApplicant.department) ? null : <option value={selectedApplicant.department}>{selectedApplicant.department}</option>}
+              {deptOptions.map(dept => <option key={dept} value={dept}>{dept}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="发起人" required colors={colors}>
+            <EmployeeSearchSelect value={draft.initiatorKey || draft.applicantKey} employees={employees} colors={colors} placeholder="输入发起人姓名或工号" onChange={value => onChange('initiatorKey', value)} />
+          </ModalField>
+          <ModalField label="发起类型" required colors={colors}>
+            <select value={draft.startType} onChange={event => onChange('startType', event.target.value)} style={modalInput(colors)}>
+              {['员工发起', '管理员发起'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="假期类型" required colors={colors}>
+            <select value={draft.leaveType} onChange={event => onChange('leaveType', event.target.value)} style={modalInput(colors)}>
+              {leaveTypes.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="当前流程状态" required colors={colors}>
+            <select value={draft.flowStatus} onChange={event => onChange('flowStatus', event.target.value)} style={modalInput(colors)}>
+              {['已通过', '审批中', '已拒绝'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="开始时间" required colors={colors}>
+            <input type="datetime-local" value={draft.startTime} onChange={event => onChange('startTime', event.target.value)} style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label="结束时间" required colors={colors}>
+            <input type="datetime-local" value={draft.endTime} onChange={event => onChange('endTime', event.target.value)} style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label="请假时长" required colors={colors}>
+            <input value={draft.duration} onChange={event => onChange('duration', event.target.value)} placeholder="例如：1天" style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label="记录状态" required colors={colors}>
+            <select value={draft.recordStatus} onChange={event => onChange('recordStatus', event.target.value)} style={modalInput(colors)}>
+              {['已通过', '审批中', '已拒绝'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="请假事由" colors={colors} full>
+            <textarea value={draft.reason} onChange={event => onChange('reason', event.target.value)} placeholder="请输入请假事由" style={{ ...modalInput(colors), height: 82, resize: 'vertical', paddingTop: 8 }} />
+          </ModalField>
+        </div>
+        <div style={modalFooter(colors)}>
+          <button onClick={onCancel} style={outlineBtn(colors)}>取消</button>
+          <button onClick={onSave} disabled={!draft.applicantKey || !draft.leaveType || !draft.startTime || !draft.endTime} style={!draft.applicantKey || !draft.leaveType || !draft.startTime || !draft.endTime ? disabledBtn(colors) : primaryBtn(colors)}>
+            保存记录
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmployeeSearchSelect({
+  value,
+  employees,
+  colors,
+  placeholder = '输入姓名或工号选择人员',
+  onChange,
+}: {
+  value: string;
+  employees: EmployeeOption[];
+  colors: any;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
+  const selected = employees.find(employee => employeeKey(employee) === value);
+  const [query, setQuery] = useState(selected ? `${selected.name} / ${selected.employeeNo}` : '');
+  const [open, setOpen] = useState(false);
+  const filtered = employees.filter(employee => employeeMatches(employee, query)).slice(0, 8);
+
+  useEffect(() => {
+    const nextSelected = employees.find(employee => employeeKey(employee) === value);
+    setQuery(nextSelected ? `${nextSelected.name} / ${nextSelected.employeeNo}` : '');
+  }, [employees, value]);
+
+  const selectEmployee = (employee: EmployeeOption) => {
+    onChange(employeeKey(employee));
+    setQuery(`${employee.name} / ${employee.employeeNo}`);
+    setOpen(false);
+  };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <div style={{ ...modalInput(colors), display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px' }}>
+        <input
+          value={query}
+          onFocus={() => setOpen(true)}
+          onChange={event => {
+            const nextQuery = event.target.value;
+            setQuery(nextQuery);
+            setOpen(true);
+            const exact = employees.find(employee => employee.name === nextQuery || employee.employeeNo === nextQuery || `${employee.name} / ${employee.employeeNo}` === nextQuery);
+            onChange(exact ? employeeKey(exact) : '');
+          }}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && filtered[0]) selectEmployee(filtered[0]);
+            if (event.key === 'Escape') setOpen(false);
+          }}
+          placeholder={placeholder}
+          style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', color: colors.text, fontSize: 13 }}
+        />
+        <Search size={13} style={{ color: colors.textMuted, flexShrink: 0 }} />
+      </div>
+      {open && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 940, backgroundColor: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 6, boxShadow: '0 12px 28px rgba(34, 48, 78, 0.16)', overflow: 'hidden', maxHeight: 230, overflowY: 'auto' }}>
+          {filtered.length ? filtered.map(employee => (
+            <button
+              key={employeeKey(employee)}
+              type="button"
+              onMouseDown={event => event.preventDefault()}
+              onClick={() => selectEmployee(employee)}
+              style={{ width: '100%', border: 'none', background: employeeKey(employee) === value ? colors.badgeBlueBg : 'transparent', color: colors.text, cursor: 'pointer', padding: '8px 10px', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2 }}
+            >
+              <span style={{ fontSize: 13 }}>{employee.name} / {employee.employeeNo}</span>
+              <span style={{ fontSize: 11, color: colors.textMuted }}>{employee.department}</span>
+            </button>
+          )) : (
+            <div style={{ padding: '10px 12px', fontSize: 12, color: colors.textMuted }}>未找到匹配人员</div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -496,14 +1044,32 @@ function LeaveDetailView({
 }) {
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [detailRows, setDetailRows] = useState<Array<Array<React.ReactNode>>>([]);
+  const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
+  const [leaveTypeOptions, setLeaveTypeOptions] = useState<string[]>(TYPE_ROWS.filter(row => row.enabled).map(row => row.name));
+  const [employeeQuery, setEmployeeQuery] = useState('');
+  const [leaveTypeFilter, setLeaveTypeFilter] = useState('');
+  const [cycleFilter, setCycleFilter] = useState('');
+  const [deptFilter, setDeptFilter] = useState('');
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [editingDetailRow, setEditingDetailRow] = useState<Array<React.ReactNode> | null>(null);
+  const [detailDraft, setDetailDraft] = useState<LeaveDetailDraft>(() => defaultLeaveDetailDraft([], TYPE_ROWS.filter(row => row.enabled).map(row => row.name)));
   useEffect(() => {
     let cancelled = false;
-    fetchLeaveDetails()
-      .then((res) => {
-        if (!cancelled) setDetailRows(res.rows as Array<Array<React.ReactNode>>);
+    Promise.all([fetchLeaveDetails(), fetchSettingsPeople(), fetchLeaveTypes()])
+      .then(([details, people, types]) => {
+        if (cancelled) return;
+        const employees = peopleRowsToOptions(people.rows as Array<Array<unknown>>);
+        const nextTypes = leaveTypeNames(types.rows as Array<Record<string, unknown>>);
+        setDetailRows(details.rows as Array<Array<React.ReactNode>>);
+        setEmployeeOptions(employees);
+        setLeaveTypeOptions(nextTypes);
+        setDetailDraft(current => current.employeeKey ? current : defaultLeaveDetailDraft(employees, nextTypes));
       })
       .catch(() => {
-        if (!cancelled) setDetailRows([]);
+        if (!cancelled) {
+          setDetailRows([]);
+          setEmployeeOptions([]);
+        }
       });
     return () => {
       cancelled = true;
@@ -517,11 +1083,22 @@ function LeaveDetailView({
     });
   };
   const addDetailRow = (source = '新增额度记录') => {
-    const today = new Date().toISOString().slice(0, 10);
-    commitLeaveDetails(current => [['新增员工', `LD${String(current.length + 1).padStart(4, '0')}`, '产品运营部', '产品研发中心/产品运营部', today, '2026', '年假', '1', '1', '1', '0', source.includes('冻结') ? '1' : '0', '0', '1', `${today}`, '2026-12-31', today, '查看'], ...current]);
+    setEditingDetailRow(null);
+    setDetailDraft(defaultLeaveDetailDraft(employeeOptions, leaveTypeOptions, source));
+    setShowDetailModal(true);
   };
+  const filteredDetailRows = detailRows.filter(row => {
+    const keyword = employeeQuery.trim().toLowerCase();
+    return (!keyword || String(row[0] ?? '').toLowerCase().includes(keyword) || String(row[1] ?? '').toLowerCase().includes(keyword))
+      && (!leaveTypeFilter || row[6] === leaveTypeFilter)
+      && (!cycleFilter || row[5] === cycleFilter)
+      && (!deptFilter || row[2] === deptFilter);
+  });
+  const sortedDetailRows = !sortConfig
+    ? filteredDetailRows
+    : [...filteredDetailRows].sort((left, right) => compareSortableValues(left[sortConfig.index], right[sortConfig.index], sortConfig.direction));
   const exportDetailRows = () => {
-    const csv = [LEAVE_DETAIL_COLUMNS, ...detailRows].map(row => row.map(cell => String(cell ?? '')).join(',')).join('\n');
+    const csv = [LEAVE_DETAIL_COLUMNS, ...filteredDetailRows].map(row => row.map(cell => String(cell ?? '')).join(',')).join('\n');
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -538,18 +1115,48 @@ function LeaveDetailView({
     addDetailRow(item.label);
   };
   const editDetailRow = (row: Array<React.ReactNode>) => {
-    const nextRemain = window.prompt('修改剩余额度', String(row[13] ?? ''));
-    if (nextRemain === null) return;
-    const nextAdjust = window.prompt('修改调整额度', String(row[10] ?? '')) ?? String(row[10] ?? '0');
-    commitLeaveDetails(current => current.map(item => item === row ? item.map((cell, index) => {
-      if (index === 10) return nextAdjust.trim() || '0';
-      if (index === 13) return nextRemain.trim() || String(cell ?? '');
-      return cell;
-    }) : item));
+    setEditingDetailRow(row);
+    setDetailDraft(leaveDetailDraftFromRow(row, employeeOptions, leaveTypeOptions));
+    setShowDetailModal(true);
   };
-  const displayDetailRows = detailRows.map(row => [
+  const updateDetailDraft = (key: keyof LeaveDetailDraft, value: string) => {
+    setDetailDraft(current => {
+      const next = { ...current, [key]: value };
+      if (['totalQuota', 'adjustQuota', 'frozenQuota', 'usedQuota'].includes(key)) {
+        const total = Number(key === 'totalQuota' ? value : current.totalQuota) || 0;
+        const adjust = Number(key === 'adjustQuota' ? value : current.adjustQuota) || 0;
+        const frozen = Number(key === 'frozenQuota' ? value : current.frozenQuota) || 0;
+        const used = Number(key === 'usedQuota' ? value : current.usedQuota) || 0;
+        next.issuedQuota = String(total + adjust);
+        next.activeQuota = String(Math.max(0, total + adjust - frozen));
+        next.remainQuota = String(Math.max(0, total + adjust - frozen - used));
+      }
+      return next;
+    });
+  };
+  const saveDetailDraft = () => {
+    if (!detailDraft.employeeKey || !detailDraft.leaveType || !detailDraft.cycle) {
+      window.alert('请选择人员、周期和假期类型');
+      return;
+    }
+    commitLeaveDetails(current => {
+      const nextRow = leaveDetailRowFromDraft(detailDraft, employeeOptions);
+      if (!editingDetailRow) return [nextRow, ...current];
+      return current.map(row => row === editingDetailRow ? nextRow : row);
+    });
+    setShowDetailModal(false);
+    setEditingDetailRow(null);
+  };
+  const resetDetailFilters = () => {
+    setEmployeeQuery('');
+    setLeaveTypeFilter('');
+    setCycleFilter('');
+    setDeptFilter('');
+    setSortConfig(null);
+  };
+  const displayDetailRows = sortedDetailRows.map(row => [
     ...row.slice(0, LEAVE_DETAIL_COLUMNS.length - 1),
-    <RowActions key={`detail-${String(row[1])}-${String(row[6])}`} colors={colors} actions={[
+    <RowActions key={`detail-${String(row[1])}-${String(row[6])}-${String(row[14])}`} colors={colors} actions={[
       { label: '查看', onClick: () => window.alert(`额度明细\n姓名：${row[0]}\n员工号：${row[1]}\n假期类型：${row[6]}\n剩余额度：${row[13]}`) },
       { label: '编辑', onClick: () => editDetailRow(row) },
     ]} />,
@@ -567,13 +1174,13 @@ function LeaveDetailView({
 
       <div style={filterBar(colors)}>
         <div style={filterRowStyle}>
-          <SelectField label="假期类型" placeholder="请选择" colors={colors} width={154} />
-          <SelectField label="周期" placeholder="请选择周期" colors={colors} width={154} />
-          <SearchField label="员工" placeholder="请输入或选择人员" colors={colors} width={182} showUserIcon />
-          <SelectField label="部门" placeholder="请选择" colors={colors} width={154} />
+          <SelectField label="假期类型" placeholder="请选择" colors={colors} width={154} options={leaveTypeOptions} value={leaveTypeFilter} onChange={setLeaveTypeFilter} />
+          <SelectField label="周期" placeholder="请选择周期" colors={colors} width={154} options={Array.from(new Set(detailRows.map(row => String(row[5] ?? '')).filter(Boolean)))} value={cycleFilter} onChange={setCycleFilter} />
+          <SearchField label="员工" placeholder="请输入姓名或工号" colors={colors} width={182} showUserIcon value={employeeQuery} onChange={setEmployeeQuery} />
+          <SelectField label="部门" placeholder="请选择" colors={colors} width={154} options={Array.from(new Set(employeeOptions.map(employee => employee.department).filter(Boolean)))} value={deptFilter} onChange={setDeptFilter} />
           <CheckboxGroup label="员工状态" items={['在职', '离职', '冻结员工']} colors={colors} />
           <div style={actionRightStyle}>
-            <button style={outlineBtn(colors)}>重置</button>
+            <button onClick={resetDetailFilters} style={outlineBtn(colors)}>重置</button>
             <button style={primaryBtn(colors)}>查询</button>
             <button onClick={onToggleMore} style={toggleBtn(colors, showMore)}>
               更多筛选
@@ -600,8 +1207,8 @@ function LeaveDetailView({
           <span style={{ fontSize: '12px', color: colors.text }}>只看有效数据</span>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button onClick={() => window.alert(`休假过账记录\n当前筛选下共有 ${detailRows.length} 条额度记录参与过账。`)} style={linkBtn(colors)}>休假过账记录</button>
-          <button onClick={() => window.alert(`额度调整记录\n已记录 ${detailRows.filter(row => String(row[10] ?? '') !== '0').length} 条调整额度。`)} style={linkBtn(colors)}>额度调整记录</button>
+          <button onClick={() => window.alert(`休假过账记录\n当前筛选下共有 ${filteredDetailRows.length} 条额度记录参与过账。`)} style={linkBtn(colors)}>休假过账记录</button>
+          <button onClick={() => window.alert(`额度调整记录\n已记录 ${filteredDetailRows.filter(row => String(row[10] ?? '') !== '0').length} 条调整额度。`)} style={linkBtn(colors)}>额度调整记录</button>
           <button onClick={() => setSortConfig(null)} style={iconBtn(colors)} title="恢复默认表头排序"><Settings2 size={12} /></button>
         </div>
       </div>
@@ -615,7 +1222,102 @@ function LeaveDetailView({
         nonSortableColumnIndices={[LEAVE_DETAIL_COLUMNS.length - 1]}
         onSortChange={(index) => setSortConfig(current => getNextSortConfig(current, index))}
       />
+      {showDetailModal ? (
+        <LeaveDetailModal
+          colors={colors}
+          title={editingDetailRow ? '编辑额度记录' : '新增额度记录'}
+          draft={detailDraft}
+          employees={employeeOptions}
+          leaveTypes={leaveTypeOptions}
+          onChange={updateDetailDraft}
+          onCancel={() => setShowDetailModal(false)}
+          onSave={saveDetailDraft}
+        />
+      ) : null}
     </>
+  );
+}
+
+function LeaveDetailModal({
+  colors,
+  title,
+  draft,
+  employees,
+  leaveTypes,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  colors: any;
+  title: string;
+  draft: LeaveDetailDraft;
+  employees: EmployeeOption[];
+  leaveTypes: string[];
+  onChange: (key: keyof LeaveDetailDraft, value: string) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const selectedEmployee = employeeFromKey(employees, draft.employeeKey);
+  const quotaInput = (key: keyof LeaveDetailDraft, placeholder = '0') => (
+    <input value={String(draft[key] ?? '')} onChange={event => onChange(key, event.target.value.replace(/[^\d.-]/g, ''))} placeholder={placeholder} style={modalInput(colors)} />
+  );
+
+  return (
+    <div style={modalOverlay}>
+      <div style={modalPanel(colors, 820)}>
+        <div style={modalHeader(colors)}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{title}</div>
+            <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>可输入姓名或工号选择真实员工，保存后写入假期额度明细接口</div>
+          </div>
+          <button onClick={onCancel} style={iconBtn(colors)}>×</button>
+        </div>
+        <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px 16px' }}>
+          <ModalField label="员工" required colors={colors}>
+            <EmployeeSearchSelect value={draft.employeeKey} employees={employees} colors={colors} onChange={value => onChange('employeeKey', value)} />
+          </ModalField>
+          <ModalField label="员工号" colors={colors}>
+            <input value={selectedEmployee.employeeNo} readOnly style={{ ...modalInput(colors), color: colors.textMuted }} />
+          </ModalField>
+          <ModalField label="部门" colors={colors}>
+            <input value={selectedEmployee.department} readOnly style={{ ...modalInput(colors), color: colors.textMuted }} />
+          </ModalField>
+          <ModalField label="入职日期" required colors={colors}>
+            <input type="date" value={draft.hireDate} onChange={event => onChange('hireDate', event.target.value)} style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label="周期" required colors={colors}>
+            <input value={draft.cycle} onChange={event => onChange('cycle', event.target.value)} placeholder="例如：2026" style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label="假期类型" required colors={colors}>
+            <select value={draft.leaveType} onChange={event => onChange('leaveType', event.target.value)} style={modalInput(colors)}>
+              {leaveTypes.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="应休额度" required colors={colors}>{quotaInput('totalQuota', '1')}</ModalField>
+          <ModalField label="已发额度" colors={colors}>{quotaInput('issuedQuota', '1')}</ModalField>
+          <ModalField label="已激活额度" colors={colors}>{quotaInput('activeQuota', '1')}</ModalField>
+          <ModalField label="调整额度" colors={colors}>{quotaInput('adjustQuota')}</ModalField>
+          <ModalField label="冻结额度" colors={colors}>{quotaInput('frozenQuota')}</ModalField>
+          <ModalField label="已用额度" colors={colors}>{quotaInput('usedQuota')}</ModalField>
+          <ModalField label="剩余额度" required colors={colors}>{quotaInput('remainQuota', '1')}</ModalField>
+          <ModalField label="周期开始日期" required colors={colors}>
+            <input type="date" value={draft.cycleStart} onChange={event => onChange('cycleStart', event.target.value)} style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label="周期截止日期" required colors={colors}>
+            <input type="date" value={draft.cycleEnd} onChange={event => onChange('cycleEnd', event.target.value)} style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label="有效期开启日期" required colors={colors}>
+            <input type="date" value={draft.validStart} onChange={event => onChange('validStart', event.target.value)} style={modalInput(colors)} />
+          </ModalField>
+        </div>
+        <div style={modalFooter(colors)}>
+          <button onClick={onCancel} style={outlineBtn(colors)}>取消</button>
+          <button onClick={onSave} disabled={!draft.employeeKey || !draft.leaveType || !draft.cycle} style={!draft.employeeKey || !draft.leaveType || !draft.cycle ? disabledBtn(colors) : primaryBtn(colors)}>
+            保存记录
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -630,6 +1332,13 @@ function LeaveTypeView({
 }) {
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [typeRows, setTypeRows] = useState<Array<LeaveTypeRow>>(TYPE_ROWS);
+  const [typeNameFilter, setTypeNameFilter] = useState('');
+  const [enabledFilter, setEnabledFilter] = useState('');
+  const [unitFilter, setUnitFilter] = useState('');
+  const [paidFilter, setPaidFilter] = useState('');
+  const [showTypeModal, setShowTypeModal] = useState(false);
+  const [editingTypeRow, setEditingTypeRow] = useState<LeaveTypeRow | null>(null);
+  const [typeDraft, setTypeDraft] = useState<LeaveTypeDraft>(() => defaultLeaveTypeDraft());
   useEffect(() => {
     let cancelled = false;
     fetchLeaveTypes()
@@ -650,8 +1359,15 @@ function LeaveTypeView({
       return next;
     });
   };
+  const filteredTypeRows = typeRows.filter(row => {
+    const keyword = typeNameFilter.trim().toLowerCase();
+    return (!keyword || row.name.toLowerCase().includes(keyword) || row.short.toLowerCase().includes(keyword))
+      && (!enabledFilter || (enabledFilter === '是' ? row.enabled : !row.enabled))
+      && (!unitFilter || row.unit === unitFilter)
+      && (!paidFilter || row.paid === paidFilter);
+  });
   const sortedTypeRows = useMemo(() => {
-    const rows = typeRows.map((row, order) => ({ row, order }));
+    const rows = filteredTypeRows.map((row, order) => ({ row, order }));
     if (!sortConfig) return rows;
 
     return [...rows].sort((left, right) => compareSortableValues(
@@ -659,47 +1375,52 @@ function LeaveTypeView({
       getTypeSortValue(right.row, right.order, sortConfig.index),
       sortConfig.direction,
     ));
-  }, [sortConfig, typeRows]);
+  }, [filteredTypeRows, sortConfig]);
   const addLeaveType = () => {
-    const name = window.prompt('请输入假期类型名称', `新增假期${typeRows.length + 1}`);
-    if (name === null) return;
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      window.alert('假期类型名称不能为空');
-      return;
-    }
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    commitLeaveTypes(current => [{
-      name: trimmedName,
-      short: trimmedName.slice(0, 1),
-      enabled: true,
-      unit: '按天请假',
-      paid: '否',
-      negative: '否',
-      before: '否',
-      note: '管理员新增假期类型，可继续修改规则说明。',
-      reason: '否',
-      attachment: '否',
-      attachmentNote: '-',
-      creator: '当前用户',
-      createdAt: now,
-      editor: '当前用户',
-      editedAt: now,
-    }, ...current]);
+    setEditingTypeRow(null);
+    setTypeDraft(defaultLeaveTypeDraft());
+    setShowTypeModal(true);
   };
   const editLeaveType = (row: LeaveTypeRow) => {
-    const nextName = window.prompt('修改假期类型名称', row.name);
-    if (nextName === null) return;
-    const trimmedName = nextName.trim();
-    if (!trimmedName) {
-      window.alert('假期类型名称不能为空');
-      return;
-    }
-    commitLeaveTypes(current => current.map(item => item.name === row.name ? { ...item, name: trimmedName, short: trimmedName.slice(0, 1), editor: '当前用户', editedAt: new Date().toISOString().slice(0, 19).replace('T', ' ') } : item));
+    setEditingTypeRow(row);
+    setTypeDraft(leaveTypeDraftFromRow(row));
+    setShowTypeModal(true);
   };
   const deleteLeaveType = (row: LeaveTypeRow) => {
     if (!window.confirm(`确认删除假期类型「${row.name}」？`)) return;
     commitLeaveTypes(current => current.filter(item => item.name !== row.name));
+  };
+  const updateTypeDraft = (key: keyof LeaveTypeDraft, value: string | boolean) => {
+    setTypeDraft(current => {
+      const next = { ...current, [key]: value };
+      if (key === 'name' && !current.short.trim() && typeof value === 'string') next.short = value.trim().slice(0, 1);
+      return next;
+    });
+  };
+  const saveTypeDraft = () => {
+    const name = typeDraft.name.trim();
+    if (!name) {
+      window.alert('假期类型名称不能为空');
+      return;
+    }
+    if (!editingTypeRow && typeRows.some(row => row.name === name)) {
+      window.alert('假期类型名称已存在');
+      return;
+    }
+    commitLeaveTypes(current => {
+      const nextRow = leaveTypeRowFromDraft(typeDraft, editingTypeRow || undefined);
+      if (!editingTypeRow) return [nextRow, ...current];
+      return current.map(row => row === editingTypeRow ? nextRow : row);
+    });
+    setShowTypeModal(false);
+    setEditingTypeRow(null);
+  };
+  const resetTypeFilters = () => {
+    setTypeNameFilter('');
+    setEnabledFilter('');
+    setUnitFilter('');
+    setPaidFilter('');
+    setSortConfig(null);
   };
 
   return (
@@ -713,12 +1434,12 @@ function LeaveTypeView({
 
       <div style={filterBar(colors)}>
         <div style={filterRowStyle}>
-          <SearchField label="假期类型名称" placeholder="请输入" colors={colors} width={200} />
-          <SelectField label="是否启用" placeholder="请选择" colors={colors} width={138} />
-          <SelectField label="计假单位" placeholder="请选择" colors={colors} width={138} />
-          <SelectField label="是否带薪" placeholder="请选择" colors={colors} width={138} />
+          <SearchField label="假期类型名称" placeholder="请输入" colors={colors} width={200} value={typeNameFilter} onChange={setTypeNameFilter} />
+          <SelectField label="是否启用" placeholder="请选择" colors={colors} width={138} options={['是', '否']} value={enabledFilter} onChange={setEnabledFilter} />
+          <SelectField label="计假单位" placeholder="请选择" colors={colors} width={138} options={['按天请假', '按小时请假']} value={unitFilter} onChange={setUnitFilter} />
+          <SelectField label="是否带薪" placeholder="请选择" colors={colors} width={138} options={['是', '否']} value={paidFilter} onChange={setPaidFilter} />
           <div style={actionRightStyle}>
-            <button style={outlineBtn(colors)}>重置</button>
+            <button onClick={resetTypeFilters} style={outlineBtn(colors)}>重置</button>
             <button style={primaryBtn(colors)}>查询</button>
             <button onClick={onToggleMore} style={toggleBtn(colors, showMore)}>
               更多筛选
@@ -799,7 +1520,100 @@ function LeaveTypeView({
           </tbody>
         </table>
       </div>
+      {showTypeModal ? (
+        <LeaveTypeModal
+          colors={colors}
+          title={editingTypeRow ? '编辑假期类型' : '新增假期类型'}
+          draft={typeDraft}
+          onChange={updateTypeDraft}
+          onCancel={() => setShowTypeModal(false)}
+          onSave={saveTypeDraft}
+        />
+      ) : null}
     </>
+  );
+}
+
+function LeaveTypeModal({
+  colors,
+  title,
+  draft,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  colors: any;
+  title: string;
+  draft: LeaveTypeDraft;
+  onChange: (key: keyof LeaveTypeDraft, value: string | boolean) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div style={modalOverlay}>
+      <div style={modalPanel(colors, 780)}>
+        <div style={modalHeader(colors)}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{title}</div>
+            <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>按表头字段维护假期类型，保存后写入假期类型接口并可被假期方案选择</div>
+          </div>
+          <button onClick={onCancel} style={iconBtn(colors)}>×</button>
+        </div>
+        <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+          <ModalField label="假期类型名称" required colors={colors}>
+            <input value={draft.name} onChange={event => onChange('name', event.target.value)} placeholder="例如：年假" style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label="假期类型简称" required colors={colors}>
+            <input value={draft.short} onChange={event => onChange('short', event.target.value)} placeholder="例如：年" style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label="假期启用" colors={colors}>
+            <select value={draft.enabled ? '是' : '否'} onChange={event => onChange('enabled', event.target.value === '是')} style={modalInput(colors)}>
+              {['是', '否'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="请假单位" colors={colors}>
+            <select value={draft.unit} onChange={event => onChange('unit', event.target.value)} style={modalInput(colors)}>
+              {['按天请假', '按小时请假'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="是否带薪" colors={colors}>
+            <select value={draft.paid} onChange={event => onChange('paid', event.target.value)} style={modalInput(colors)}>
+              {['是', '否'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="余额可为负" colors={colors}>
+            <select value={draft.negative} onChange={event => onChange('negative', event.target.value)} style={modalInput(colors)}>
+              {['是', '否'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="显示假期说明" colors={colors}>
+            <select value={draft.before} onChange={event => onChange('before', event.target.value)} style={modalInput(colors)}>
+              {['是', '否'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="每假事由必填" colors={colors}>
+            <select value={draft.reason} onChange={event => onChange('reason', event.target.value)} style={modalInput(colors)}>
+              {['是', '否'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="附件必传" colors={colors}>
+            <select value={draft.attachment} onChange={event => onChange('attachment', event.target.value)} style={modalInput(colors)}>
+              {['是', '否'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="附件说明" colors={colors}>
+            <input value={draft.attachmentNote} onChange={event => onChange('attachmentNote', event.target.value)} placeholder="例如：需上传证明材料" style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label="休假前额说明" colors={colors} full>
+            <textarea value={draft.note} onChange={event => onChange('note', event.target.value)} placeholder="请输入假期说明" style={{ ...modalInput(colors), height: 82, resize: 'vertical', paddingTop: 8 }} />
+          </ModalField>
+        </div>
+        <div style={modalFooter(colors)}>
+          <button onClick={onCancel} style={outlineBtn(colors)}>取消</button>
+          <button onClick={onSave} disabled={!draft.name.trim() || !draft.short.trim()} style={!draft.name.trim() || !draft.short.trim() ? disabledBtn(colors) : primaryBtn(colors)}>保存记录</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -814,11 +1628,22 @@ function LeaveSchemeView({
 }) {
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [schemeRows, setSchemeRows] = useState<Array<Array<React.ReactNode>>>([]);
+  const [leaveTypeOptions, setLeaveTypeOptions] = useState<string[]>(TYPE_ROWS.filter(row => row.enabled).map(row => row.name));
+  const [schemeNameFilter, setSchemeNameFilter] = useState('');
+  const [leaveTypeFilter, setLeaveTypeFilter] = useState('');
+  const [scopeFilter, setScopeFilter] = useState('');
+  const [showSchemeModal, setShowSchemeModal] = useState(false);
+  const [editingSchemeRow, setEditingSchemeRow] = useState<Array<React.ReactNode> | null>(null);
+  const [schemeDraft, setSchemeDraft] = useState<LeaveSchemeDraft>(() => defaultLeaveSchemeDraft(TYPE_ROWS.filter(row => row.enabled).map(row => row.name)));
   useEffect(() => {
     let cancelled = false;
-    fetchLeaveSchemes()
-      .then((res) => {
-        if (!cancelled) setSchemeRows(res.rows as Array<Array<React.ReactNode>>);
+    Promise.all([fetchLeaveSchemes(), fetchLeaveTypes()])
+      .then(([schemes, types]) => {
+        if (cancelled) return;
+        const nextTypes = leaveTypeNames(types.rows as Array<Record<string, unknown>>);
+        setSchemeRows(schemes.rows as Array<Array<React.ReactNode>>);
+        setLeaveTypeOptions(nextTypes);
+        setSchemeDraft(current => current.leaveType ? current : defaultLeaveSchemeDraft(nextTypes));
       })
       .catch(() => {
         if (!cancelled) setSchemeRows([]);
@@ -835,32 +1660,51 @@ function LeaveSchemeView({
     });
   };
   const addScheme = () => {
-    const name = window.prompt('请输入假期方案名称', `新增假期方案${schemeRows.length + 1}`);
-    if (name === null) return;
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      window.alert('方案名称不能为空');
-      return;
-    }
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    commitLeaveSchemes(current => [[trimmedName, '年假', '按规则控制', '启用额度控制', '全部员工', String(current.length + 1), '当前用户', now, '当前用户', now, '查看'], ...current]);
+    setEditingSchemeRow(null);
+    setSchemeDraft(defaultLeaveSchemeDraft(leaveTypeOptions, schemeRows.length + 1));
+    setShowSchemeModal(true);
   };
   const editScheme = (row: Array<React.ReactNode>) => {
-    const name = window.prompt('修改假期方案名称', String(row[0] ?? ''));
-    if (name === null) return;
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      window.alert('方案名称不能为空');
-      return;
-    }
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    commitLeaveSchemes(current => current.map(item => item === row ? [trimmedName, ...item.slice(1, 8), '当前用户', now, item[10] ?? '查看'] : item));
+    setEditingSchemeRow(row);
+    setSchemeDraft(leaveSchemeDraftFromRow(row));
+    setShowSchemeModal(true);
   };
   const deleteScheme = (row: Array<React.ReactNode>) => {
     if (!window.confirm(`确认删除假期方案「${row[0]}」？`)) return;
     commitLeaveSchemes(current => current.filter(item => item !== row));
   };
-  const displaySchemeRows = schemeRows.map(row => [
+  const filteredSchemeRows = schemeRows.filter(row => {
+    const keyword = schemeNameFilter.trim().toLowerCase();
+    return (!keyword || String(row[0] ?? '').toLowerCase().includes(keyword))
+      && (!leaveTypeFilter || row[1] === leaveTypeFilter)
+      && (!scopeFilter || String(row[4] ?? '').includes(scopeFilter));
+  });
+  const sortedSchemeRows = !sortConfig
+    ? filteredSchemeRows
+    : [...filteredSchemeRows].sort((left, right) => compareSortableValues(left[sortConfig.index], right[sortConfig.index], sortConfig.direction));
+  const updateSchemeDraft = (key: keyof LeaveSchemeDraft, value: string) => {
+    setSchemeDraft(current => ({ ...current, [key]: value }));
+  };
+  const saveSchemeDraft = () => {
+    if (!schemeDraft.name.trim() || !schemeDraft.leaveType) {
+      window.alert('请填写方案名称并选择假期类型');
+      return;
+    }
+    commitLeaveSchemes(current => {
+      const nextRow = leaveSchemeRowFromDraft(schemeDraft, editingSchemeRow || undefined);
+      if (!editingSchemeRow) return [nextRow, ...current];
+      return current.map(row => row === editingSchemeRow ? nextRow : row);
+    });
+    setShowSchemeModal(false);
+    setEditingSchemeRow(null);
+  };
+  const resetSchemeFilters = () => {
+    setSchemeNameFilter('');
+    setLeaveTypeFilter('');
+    setScopeFilter('');
+    setSortConfig(null);
+  };
+  const displaySchemeRows = sortedSchemeRows.map(row => [
     ...row.slice(0, LEAVE_SCHEME_COLUMNS.length - 1),
     <RowActions key={`scheme-${String(row[0])}`} colors={colors} actions={[
       { label: '查看', onClick: () => window.alert(`假期方案\n方案名称：${row[0]}\n假期类型：${row[1]}\n适用范围：${row[4]}`) },
@@ -873,10 +1717,10 @@ function LeaveSchemeView({
     <>
       <div style={filterBar(colors)}>
         <div style={filterRowStyle}>
-          <SearchField label="方案名称" placeholder="请输入" colors={colors} width={200} />
-          <SelectField label="假期类型" placeholder="请选择" colors={colors} width={160} />
+          <SearchField label="方案名称" placeholder="请输入" colors={colors} width={200} value={schemeNameFilter} onChange={setSchemeNameFilter} />
+          <SelectField label="假期类型" placeholder="请选择" colors={colors} width={160} options={leaveTypeOptions} value={leaveTypeFilter} onChange={setLeaveTypeFilter} />
           <div style={actionRightStyle}>
-            <button style={outlineBtn(colors)}>重置</button>
+            <button onClick={resetSchemeFilters} style={outlineBtn(colors)}>重置</button>
             <button style={primaryBtn(colors)}>查询</button>
             <button onClick={onToggleMore} style={toggleBtn(colors, showMore)}>
               更多筛选
@@ -886,7 +1730,7 @@ function LeaveSchemeView({
         </div>
         {showMore && (
           <div style={moreRowStyle(colors)}>
-            <SelectField label="适用范围" placeholder="全部" colors={colors} width={148} />
+            <SelectField label="适用范围" placeholder="全部" colors={colors} width={148} options={['全部员工', '在职员工', '指定部门']} value={scopeFilter} onChange={setScopeFilter} />
             <SelectField label="优先级" placeholder="全部" colors={colors} width={148} />
           </div>
         )}
@@ -911,7 +1755,80 @@ function LeaveSchemeView({
         nonSortableColumnIndices={[LEAVE_SCHEME_COLUMNS.length - 1]}
         onSortChange={(index) => setSortConfig(current => getNextSortConfig(current, index))}
       />
+      {showSchemeModal ? (
+        <LeaveSchemeModal
+          colors={colors}
+          title={editingSchemeRow ? '编辑假期方案' : '新增假期方案'}
+          draft={schemeDraft}
+          leaveTypes={leaveTypeOptions}
+          onChange={updateSchemeDraft}
+          onCancel={() => setShowSchemeModal(false)}
+          onSave={saveSchemeDraft}
+        />
+      ) : null}
     </>
+  );
+}
+
+function LeaveSchemeModal({
+  colors,
+  title,
+  draft,
+  leaveTypes,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  colors: any;
+  title: string;
+  draft: LeaveSchemeDraft;
+  leaveTypes: string[];
+  onChange: (key: keyof LeaveSchemeDraft, value: string) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div style={modalOverlay}>
+      <div style={modalPanel(colors, 720)}>
+        <div style={modalHeader(colors)}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{title}</div>
+            <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>方案会关联假期类型设置中的真实假期类型，保存后写入假期方案接口</div>
+          </div>
+          <button onClick={onCancel} style={iconBtn(colors)}>×</button>
+        </div>
+        <div style={{ padding: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 16px' }}>
+          <ModalField label="方案名称" required colors={colors}>
+            <input value={draft.name} onChange={event => onChange('name', event.target.value)} placeholder="请输入方案名称" style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label="假期类型" required colors={colors}>
+            <select value={draft.leaveType} onChange={event => onChange('leaveType', event.target.value)} style={modalInput(colors)}>
+              {leaveTypes.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="请假控制规则" colors={colors}>
+            <select value={draft.leaveControl} onChange={event => onChange('leaveControl', event.target.value)} style={modalInput(colors)}>
+              {['按规则控制', '无需审批', '仅工作日可申请', '限制提前申请'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="额度控制" colors={colors}>
+            <select value={draft.quotaControl} onChange={event => onChange('quotaControl', event.target.value)} style={modalInput(colors)}>
+              {['启用额度控制', '不限制额度', '允许负额度', '仅发放后可用'].map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </ModalField>
+          <ModalField label="适用范围" colors={colors}>
+            <input value={draft.scope} onChange={event => onChange('scope', event.target.value)} placeholder="例如：全部员工 / 产品运营部" style={modalInput(colors)} />
+          </ModalField>
+          <ModalField label="假期优先级" colors={colors}>
+            <input value={draft.priority} onChange={event => onChange('priority', event.target.value.replace(/[^\d]/g, ''))} placeholder="数字越小优先级越高" style={modalInput(colors)} />
+          </ModalField>
+        </div>
+        <div style={modalFooter(colors)}>
+          <button onClick={onCancel} style={outlineBtn(colors)}>取消</button>
+          <button onClick={onSave} disabled={!draft.name.trim() || !draft.leaveType} style={!draft.name.trim() || !draft.leaveType ? disabledBtn(colors) : primaryBtn(colors)}>保存记录</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1286,6 +2203,94 @@ function primaryBtn(colors: any): React.CSSProperties {
 
 function outlineBtn(colors: any): React.CSSProperties {
   return { height: 30, padding: '0 14px', border: `1px solid ${colors.inputBorder}`, borderRadius: 4, backgroundColor: 'transparent', color: colors.text, fontSize: '12px', cursor: 'pointer' };
+}
+
+function disabledBtn(colors: any): React.CSSProperties {
+  return { ...outlineBtn(colors), color: colors.textMuted, cursor: 'not-allowed', opacity: 0.55 };
+}
+
+const modalOverlay: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 900,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 24,
+  backgroundColor: 'rgba(15, 23, 42, 0.38)',
+};
+
+function modalPanel(colors: any, width = 720): React.CSSProperties {
+  return {
+    width,
+    maxWidth: 'calc(100vw - 48px)',
+    backgroundColor: colors.cardBg,
+    border: `1px solid ${colors.cardBorder}`,
+    borderRadius: 8,
+    boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)',
+    overflow: 'hidden',
+  };
+}
+
+function modalHeader(colors: any): React.CSSProperties {
+  return {
+    minHeight: 52,
+    padding: '10px 18px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottom: `1px solid ${colors.cardBorder}`,
+    boxSizing: 'border-box',
+  };
+}
+
+function modalFooter(colors: any): React.CSSProperties {
+  return {
+    padding: '12px 18px 16px',
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: 10,
+    borderTop: `1px solid ${colors.cardBorder}`,
+  };
+}
+
+function modalInput(colors: any): React.CSSProperties {
+  return {
+    width: '100%',
+    minHeight: 34,
+    border: `1px solid ${colors.inputBorder}`,
+    borderRadius: 4,
+    backgroundColor: colors.inputBg,
+    color: colors.text,
+    fontSize: 13,
+    outline: 'none',
+    padding: '0 10px',
+    boxSizing: 'border-box',
+  };
+}
+
+function ModalField({
+  label,
+  required,
+  colors,
+  children,
+  full = false,
+}: {
+  label: string;
+  required?: boolean;
+  colors: any;
+  children: React.ReactNode;
+  full?: boolean;
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6, gridColumn: full ? '1 / -1' : undefined }}>
+      <span style={{ fontSize: 12, color: colors.textMuted }}>
+        {required ? <span style={{ color: colors.primary, marginRight: 2 }}>*</span> : null}
+        {label}
+      </span>
+      {children}
+    </label>
+  );
 }
 
 function toggleBtn(colors: any, active: boolean): React.CSSProperties {

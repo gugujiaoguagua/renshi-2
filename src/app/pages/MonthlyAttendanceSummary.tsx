@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from '../context/ThemeContext';
-import { fetchMonthlySummaryEmployees, saveMonthlySummaryEmployees, type MonthlySummaryEmployee as RealMonthEmployee } from '../api/realData';
+import { fetchMonthlySummaryEmployees, fetchStatItems, saveMonthlySummaryEmployees, type MonthlySummaryEmployee as RealMonthEmployee, type StatItemRecord } from '../api/realData';
 
 import {
   Calendar,
@@ -28,13 +28,14 @@ type SortDir = 'asc' | 'desc' | null;
 type ConfirmType = 'lock' | 'unlock' | 'delete' | 'confirm' | null;
 type SummaryKey = 'total' | 'full' | 'absent' | 'late' | 'hire';
 
-type MonthEmployee = RealMonthEmployee;
+type MonthEmployee = RealMonthEmployee & { customMetrics?: Record<string, string | number> };
 
 type ColDef = {
-  key: keyof MonthEmployee;
+  key: string;
   label: string;
   width: number;
   sortable?: boolean;
+  customMetric?: boolean;
 };
 
 type SelectOption = {
@@ -86,6 +87,7 @@ const CONFIRM_OPTIONS: SelectOption[] = [
 ];
 const BIZ_GROUP_OPTIONS = ['全部', '电商运营组', '直营技术组', '工艺开发组', '产品支持组'];
 const HIRE_STATUS_OPTIONS = ['全部', '本月入职', '在职', '已离职'];
+const REQUIRED_SUMMARY_LABELS = new Set(['姓名', '锁定状态', '员工号', '部门', '岗位', '入职日期', '离职日期', '部门全路径', '业务分组', '考勤组', '确认状态']);
 
 const ALL_COLS: ColDef[] = [
   { key: 'name', label: '姓名', width: 96, sortable: true },
@@ -782,7 +784,7 @@ export default function MonthlyAttendanceSummary() {
   const [month, setMonth] = useState(now.getMonth());
   const [rows, setRows] = useState<MonthEmployee[]>([]);
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
-  const [sortKey, setSortKey] = useState<keyof MonthEmployee | null>(null);
+  const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>(null);
   const [summaryTab, setSummaryTab] = useState<SummaryKey>('total');
   const [employeeSearch, setEmployeeSearch] = useState('');
@@ -810,6 +812,7 @@ export default function MonthlyAttendanceSummary() {
   const [sourceFile, setSourceFile] = useState('');
   const [loadError, setLoadError] = useState('');
   const [operationLogs, setOperationLogs] = useState<OperationLog[]>([]);
+  const [statItems, setStatItems] = useState<StatItemRecord[]>([]);
 
 
   const loadMonthlySummary = useCallback(async () => {
@@ -828,6 +831,12 @@ export default function MonthlyAttendanceSummary() {
   useEffect(() => {
     loadMonthlySummary();
   }, [loadMonthlySummary]);
+
+  useEffect(() => {
+    fetchStatItems()
+      .then(res => setStatItems(res.rows || []))
+      .catch(() => setStatItems([]));
+  }, []);
 
   const monthPickerRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -880,11 +889,37 @@ export default function MonthlyAttendanceSummary() {
   const monthStart = `${year}-${String(month + 1).padStart(2, '0')}-01`;
   const monthEnd = `${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
+  const monthlyStatItems = useMemo(() => {
+    return statItems.filter(item => {
+      const scope = item.scope || '日考勤统计与月汇总';
+      return item.enabled !== false && (scope === '日考勤统计与月汇总' || scope === '月考勤汇总');
+    });
+  }, [statItems]);
+
+  const availableCols = useMemo(() => {
+    const enabledNames = new Set(monthlyStatItems.map(item => item.name));
+    const staticCols = ALL_COLS.filter(col => REQUIRED_SUMMARY_LABELS.has(col.label) || !enabledNames.size || enabledNames.has(col.label));
+    const customCols: ColDef[] = monthlyStatItems
+      .filter(item => item.isCustom || item.externalEnabled)
+      .map(item => ({
+        key: `custom:${item.name}`,
+        label: item.unit ? `${item.name}(${item.unit})` : item.name,
+        width: Math.max(110, Math.min(180, item.name.length * 14 + 52)),
+        sortable: true,
+        customMetric: true,
+      }));
+    return [...staticCols, ...customCols];
+  }, [monthlyStatItems]);
+
   const orderedCols = useMemo(
-    () => columnOrder
-      .map(key => ALL_COLS.find(item => item.key === key))
-      .filter(Boolean) as ColDef[],
-    [columnOrder],
+    () => {
+      const existing = columnOrder
+        .map(key => availableCols.find(item => item.key === key))
+        .filter(Boolean) as ColDef[];
+      const missing = availableCols.filter(col => !columnOrder.includes(col.key));
+      return [...existing, ...missing];
+    },
+    [availableCols, columnOrder],
   );
 
   const filteredRows = useMemo(() => {
@@ -911,8 +946,8 @@ export default function MonthlyAttendanceSummary() {
     const list = [...filteredRows];
     if (!sortKey || !sortDir) return list;
     return list.sort((a, b) => {
-      const av = a[sortKey];
-      const bv = b[sortKey];
+      const av = sortKey.startsWith('custom:') ? a.customMetrics?.[sortKey.slice(7)] : (a as any)[sortKey];
+      const bv = sortKey.startsWith('custom:') ? b.customMetrics?.[sortKey.slice(7)] : (b as any)[sortKey];
       if (av === bv) return 0;
       if (av === '' || av === null) return 1;
       if (bv === '' || bv === null) return -1;
@@ -946,7 +981,7 @@ export default function MonthlyAttendanceSummary() {
     setSummaryTab('total');
   };
 
-  const handleSort = (key: keyof MonthEmployee) => {
+  const handleSort = (key: string) => {
     if (sortKey === key) {
       setSortDir(current => (current === 'asc' ? 'desc' : current === 'desc' ? null : 'asc'));
       if (sortDir === 'desc') setSortKey(null);
@@ -1068,7 +1103,7 @@ export default function MonthlyAttendanceSummary() {
 
     const headers = orderedCols.map(col => col.label);
     const dataRows = exportRows.map(row => orderedCols.map(col => {
-      const value = row[col.key];
+      const value = col.customMetric ? row.customMetrics?.[col.key.slice(7)] : (row as any)[col.key];
       return value === null || value === undefined || value === '' ? '-' : String(value);
     }));
 
@@ -1095,7 +1130,7 @@ export default function MonthlyAttendanceSummary() {
   const renderCell = (row: MonthEmployee, col: ColDef): React.ReactNode => {
 
 
-    const value = row[col.key];
+    const value = col.customMetric ? row.customMetrics?.[col.key.slice(7)] : (row as any)[col.key];
 
     if (col.key === 'name') {
       return <span style={{ color: colors.primary, fontWeight: 500, cursor: 'pointer' }}>{value}</span>;

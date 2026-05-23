@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
-import { deleteOnboardedEmployees, fetchSettingsCalendar, fetchSettingsCardRules, fetchSettingsFace, fetchSettingsFieldRules, fetchSettingsGroups, fetchSettingsHoliday, fetchSettingsLocation, fetchSettingsMobileClock, fetchSettingsOvertimeRules, fetchSettingsPeople, fetchSettingsShifts, fetchSettingsStatSchemes, onboardEmployee, saveSettingsCalendar, saveSettingsCardRules, saveSettingsFieldRules, saveSettingsGroups, saveSettingsHoliday, saveSettingsLocation, saveSettingsMobileClock, saveSettingsOvertimeRules, saveSettingsShifts, saveSettingsStatSchemes } from '../api/realData';
+import { deleteOnboardedEmployees, fetchHrCoreLookups, fetchSettingsCalendar, fetchSettingsCardRules, fetchSettingsFace, fetchSettingsFieldRules, fetchSettingsGroups, fetchSettingsHoliday, fetchSettingsLocation, fetchSettingsMobileClock, fetchSettingsOvertimeRules, fetchSettingsPeople, fetchSettingsShifts, fetchSettingsStatSchemes, onboardEmployee, saveSettingsCalendar, saveSettingsCardRules, saveSettingsFieldRules, saveSettingsGroups, saveSettingsHoliday, saveSettingsLocation, saveSettingsMobileClock, saveSettingsOvertimeRules, saveSettingsShifts, saveSettingsStatSchemes } from '../api/realData';
 import { monthEndISO, monthStartISO, todayISO } from '../utils/date';
 import {
   AlertCircle,
@@ -730,6 +730,15 @@ const DEPT_FULL_PATH_BY_NAME: Record<string, string> = {
   技术支持部: '上海拉迷家具有限公司/产品研发中心/技术支持部',
   直营样品组: '上海拉迷家具有限公司/产品研发中心/直营样品组',
   综合人员: '上海拉迷家具有限公司/综合人员',
+};
+
+type HrLookupOption = {
+  code: string;
+  name: string;
+  fullPath?: string;
+  status?: string;
+  sequence?: string;
+  subSequence?: string;
 };
 
 const LEGACY_ALIAS: Record<string, SettingView> = {
@@ -1579,10 +1588,33 @@ function PeopleView({ colors, showMore, onToggleMore, peopleRows, sourceInfo, lo
   const [peopleMode, setPeopleMode] = useState<'all' | 'scheduled'>('all');
   const [hideDeparted, setHideDeparted] = useState(false);
   const [syncVisible, setSyncVisible] = useState(false);
+  const [lookupOrganizations, setLookupOrganizations] = useState<HrLookupOption[]>([]);
 
   useEffect(() => {
     setRowsData(peopleRows);
   }, [peopleRows]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchHrCoreLookups()
+      .then((res) => {
+        if (cancelled) return;
+        setLookupOrganizations((res.organizations || []).filter(row => row.name && !/停用|失效|删除/.test(row.status || '')));
+      })
+      .catch(() => {
+        if (!cancelled) setLookupOrganizations([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const deptOptions = useMemo(() => Array.from(new Set([
+    ...lookupOrganizations.map(row => row.name),
+    ...uniqueOptions(rowsData, 2),
+  ].filter(Boolean))), [lookupOrganizations, rowsData]);
+  const groupOptions = useMemo(() => uniqueOptions(rowsData, 12), [rowsData]);
+  const schemeOptions = useMemo(() => uniqueOptions(rowsData, 13), [rowsData]);
 
   const filteredRows = useMemo(() => {
     const keyword = appliedFilters.keyword.trim().toLowerCase();
@@ -1604,9 +1636,6 @@ function PeopleView({ colors, showMore, onToggleMore, peopleRows, sourceInfo, lo
   };
 
   const rows = filteredRows.map(row => [...row, rowActionLinks(colors, ['详情', '...'], label => window.alert(`${label}\n姓名：${row[0] ?? '-'}\n考勤组：${row[12] ?? '-'}`))]);
-  const deptOptions = uniqueOptions(rowsData, 2);
-  const groupOptions = uniqueOptions(rowsData, 12);
-  const schemeOptions = uniqueOptions(rowsData, 13);
 
   return (
     <ListPage colors={colors}>
@@ -2225,6 +2254,8 @@ function FaceView({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [savingEmployee, setSavingEmployee] = useState(false);
   const [deletingEmployee, setDeletingEmployee] = useState(false);
+  const [lookupOrganizations, setLookupOrganizations] = useState<HrLookupOption[]>([]);
+  const [lookupPositions, setLookupPositions] = useState<HrLookupOption[]>([]);
   const [employeeDraft, setEmployeeDraft] = useState({
     name: '',
     employeeNo: '',
@@ -2240,6 +2271,25 @@ function FaceView({
   });
   const effectiveShiftOptions = shiftOptions.length ? shiftOptions : [{ id: 'shift_0900_1800', name: '早九晚六', time: '09:00-18:00' }];
   const effectiveGroupOptions = Array.from(new Set([...groupOptions, ...ONBOARD_ATTEND_GROUPS, employeeDraft.attendanceGroupName].filter(Boolean)));
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchHrCoreLookups()
+      .then((res) => {
+        if (cancelled) return;
+        setLookupOrganizations((res.organizations || []).filter(row => row.name && !/停用|失效|删除/.test(row.status || '')));
+        setLookupPositions((res.positions || []).filter(row => row.name && !/停用|失效|删除/.test(row.status || '')));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLookupOrganizations([]);
+          setLookupPositions([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     setRowsData(faceRows);
@@ -2303,6 +2353,7 @@ function FaceView({
     try {
       setSavingEmployee(true);
       const department = employeeDraft.department.trim() || '未分配部门';
+      const selectedOrg = lookupOrganizations.find(row => row.name === department);
       const managerNo = employeeDraft.managerNo.trim();
       const managerRow = rowsData.find(row => String(row[1] ?? '').trim() === managerNo);
       const managerName = managerNo ? String(managerRow?.[0] ?? employeeDraft.managerName).trim() : '';
@@ -2310,7 +2361,7 @@ function FaceView({
         name: trimmedName,
         employeeNo: trimmedNo,
         department,
-        deptFullPath: DEPT_FULL_PATH_BY_NAME[department] || `上海拉迷家具有限公司/${department}`,
+        deptFullPath: selectedOrg?.fullPath || DEPT_FULL_PATH_BY_NAME[department] || `上海拉迷家具有限公司/${department}`,
         managerNo,
         managerName,
         position: employeeDraft.position.trim() || '员工',
@@ -2382,6 +2433,17 @@ function FaceView({
     window.alert(`人脸详情\n姓名：${row[0] ?? '-'}\n录入状态：${row[6] ?? '-'}`);
   })]);
   const deptOptions = uniqueOptions(rowsData, 2);
+  const managedDeptOptions = Array.from(new Set([
+    ...lookupOrganizations.map(row => row.name),
+    ...deptOptions,
+    ...ONBOARD_DEPARTMENTS,
+    employeeDraft.department,
+  ].filter(Boolean)));
+  const managedPositionOptions = Array.from(new Set([
+    ...lookupPositions.map(row => row.name),
+    employeeDraft.position,
+    '员工',
+  ].filter(Boolean)));
   const managerOptions = rowsData
     .map(row => ({ employeeNo: String(row[1] ?? '').trim(), name: String(row[0] ?? '').trim() }))
     .filter(item => item.employeeNo && item.employeeNo !== employeeDraft.employeeNo.trim());
@@ -2476,7 +2538,7 @@ function FaceView({
               </FormField>
               <FormField label="部门" required colors={colors}>
                 <select value={employeeDraft.department} onChange={event => updateEmployeeDraft('department', event.target.value)} style={modalInput(colors)}>
-                  {ONBOARD_DEPARTMENTS.map(dept => <option key={dept} value={dept}>{dept}</option>)}
+                  {managedDeptOptions.map(dept => <option key={dept} value={dept}>{dept}</option>)}
                 </select>
               </FormField>
               <FormField label="归属管理者" colors={colors}>
@@ -2490,7 +2552,9 @@ function FaceView({
                 </select>
               </FormField>
               <FormField label="岗位" colors={colors}>
-                <input value={employeeDraft.position} onChange={event => updateEmployeeDraft('position', event.target.value)} placeholder="员工" style={modalInput(colors)} />
+                <select value={employeeDraft.position} onChange={event => updateEmployeeDraft('position', event.target.value)} style={modalInput(colors)}>
+                  {managedPositionOptions.map(position => <option key={position} value={position}>{position}</option>)}
+                </select>
               </FormField>
               <FormField label="入职日期" colors={colors}>
                 <input type="date" value={employeeDraft.hireDate} onChange={event => updateEmployeeDraft('hireDate', event.target.value)} style={modalInput(colors)} />

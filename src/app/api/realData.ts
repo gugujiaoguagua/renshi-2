@@ -445,6 +445,31 @@ export type OrganizationSettingRecord = {
   linkedModule: string;
 };
 
+export type HrCoreLookupResponse = {
+  ok: boolean;
+  generatedAt: string;
+  organizations: Array<{
+    code: string;
+    name: string;
+    fullPath: string;
+    orgType: string;
+    status: string;
+    linkedEmployeeCount: number;
+  }>;
+  positions: Array<{
+    code: string;
+    name: string;
+    sequence: string;
+    subSequence: string;
+    status: string;
+    linkedEmployeeCount: number;
+  }>;
+};
+
+export async function fetchHrCoreLookups() {
+  return requestJson<HrCoreLookupResponse>('/api/hr-core/lookups');
+}
+
 export async function fetchAttendanceEmployees() {
   return limitDataResponse(await requestJson<DataResponse<AttendanceEmployee>>('/api/attendance-stats'));
 }

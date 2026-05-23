@@ -77,7 +77,7 @@ export const TopNav: React.FC = () => {
           return (
             <button
               key={tab.path}
-              onClick={() => navigate(tab.path === '/attendance' ? '/attendance/stats' : tab.path)}
+              onClick={() => navigate(tab.path === '/attendance' ? '/attendance/home' : tab.path)}
               style={{
                 height: '100%',
                 padding: '0 14px',

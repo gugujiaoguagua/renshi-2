@@ -46,6 +46,7 @@ import {
   fetchEmployeeServices,
   fetchEmployeeSettings,
   fetchEmployeeThirdParty,
+  fetchHrCoreLookups,
   onboardEmployee,
   type EmployeeGenericRecord,
   type EmployeeManagementSummary,
@@ -3780,15 +3781,51 @@ function FilterInput({
   );
 }
 
-function SelectBox({ label, placeholder = '请选择', width = 210 }: { label: string; placeholder?: string; width?: number }) {
+type SelectOption = string | { value: string; label: string };
+
+function getSelectOptionValue(option: SelectOption) {
+  return typeof option === 'string' ? option : option.value;
+}
+
+function getSelectOptionLabel(option: SelectOption) {
+  return typeof option === 'string' ? option : option.label;
+}
+
+function SelectBox({
+  label,
+  placeholder = '请选择',
+  width = 210,
+  options = [],
+  value = '',
+  onChange,
+}: {
+  label: string;
+  placeholder?: string;
+  width?: number;
+  options?: SelectOption[];
+  value?: string;
+  onChange?: (value: string) => void;
+}) {
   const { colors } = useTheme();
+  const optionValues = new Set(options.map(getSelectOptionValue));
   return (
     <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: colors.text }}>
       <span style={{ whiteSpace: 'nowrap' }}>{label}</span>
-      <div style={{ width, height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 5, padding: '0 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: colors.textMuted, backgroundColor: colors.cardBg }}>
-        <span>{placeholder}</span>
-        <ChevronRight size={12} style={{ transform: 'rotate(90deg)' }} />
-      </div>
+      {onChange ? (
+        <select value={value} onChange={event => onChange(event.target.value)} style={{ width, height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 5, padding: '0 10px', color: value ? colors.text : colors.textMuted, backgroundColor: colors.cardBg, fontSize: 12, outline: 'none' }}>
+          <option value="">{placeholder}</option>
+          {value && !optionValues.has(value) ? <option value={value}>{value}</option> : null}
+          {options.map(option => {
+            const optionValue = getSelectOptionValue(option);
+            return <option key={optionValue} value={optionValue}>{getSelectOptionLabel(option)}</option>;
+          })}
+        </select>
+      ) : (
+        <div style={{ width, height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 5, padding: '0 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: colors.textMuted, backgroundColor: colors.cardBg }}>
+          <span>{placeholder}</span>
+          <ChevronRight size={12} style={{ transform: 'rotate(90deg)' }} />
+        </div>
+      )}
     </label>
   );
 }
@@ -4191,13 +4228,105 @@ function generateEmployeeNo() {
   return `ZZ${String(Date.now()).slice(-6)}`;
 }
 
+type HrLookupOrganization = {
+  code?: string;
+  name: string;
+  fullPath: string;
+  status?: string;
+};
+
+type HrLookupPosition = {
+  code?: string;
+  name: string;
+  sequence?: string;
+  subSequence?: string;
+  status?: string;
+};
+
+function isActiveLookupStatus(status?: string) {
+  return !/停用|失效|删除/.test(status || '');
+}
+
+function uniqueSelectOptions(options: SelectOption[]) {
+  const seen = new Set<string>();
+  return options.filter(option => {
+    const value = getSelectOptionValue(option);
+    if (!value || seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
+}
+
+function departmentSelectOptions(organizations: HrLookupOrganization[]) {
+  return uniqueSelectOptions(organizations
+    .filter(row => row.name && isActiveLookupStatus(row.status))
+    .map(row => {
+      const value = row.fullPath || row.name;
+      return { value, label: row.fullPath || row.name };
+    }));
+}
+
+function positionSelectOptions(positions: HrLookupPosition[]) {
+  return uniqueSelectOptions(positions
+    .filter(row => row.name && isActiveLookupStatus(row.status))
+    .map(row => {
+      const labelMeta = [row.sequence, row.subSequence].filter(Boolean).join(' / ');
+      return { value: row.name, label: labelMeta ? `${row.name}｜${labelMeta}` : row.name };
+    }));
+}
+
+function useHrCoreLookupOptions() {
+  const [organizations, setOrganizations] = useState<HrLookupOrganization[]>([]);
+  const [positions, setPositions] = useState<HrLookupPosition[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchHrCoreLookups()
+      .then(res => {
+        if (cancelled) return;
+        setOrganizations((res.organizations || []).filter(row => row.name && isActiveLookupStatus(row.status)));
+        setPositions((res.positions || []).filter(row => row.name && isActiveLookupStatus(row.status)));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOrganizations([]);
+          setPositions([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { organizations, positions };
+}
+
 function EmployeeAddPage({ onBack, onSaved }: { onBack: () => void; onSaved: () => void }) {
   const { colors } = useTheme();
   const [form, setForm] = useState<EmployeeFormState>(() => employeeFormInitialState());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [activeSection, setActiveSection] = useState('basic');
+  const { organizations, positions } = useHrCoreLookupOptions();
+  const departmentOptions = useMemo(() => departmentSelectOptions(organizations), [organizations]);
+  const positionOptions = useMemo(() => positionSelectOptions(positions), [positions]);
   const update = (key: keyof EmployeeFormState, value: string) => setForm(prev => ({ ...prev, [key]: value }));
+  const selectDepartment = (value: string) => {
+    const selected = organizations.find(row => (row.fullPath || row.name) === value || row.name === value);
+    setForm(prev => ({
+      ...prev,
+      department: selected?.name || value.split('/').filter(Boolean).pop() || value,
+      deptFullPath: selected?.fullPath || value,
+    }));
+  };
+  const selectDeptFullPath = (value: string) => {
+    const selected = organizations.find(row => (row.fullPath || row.name) === value || row.name === value);
+    setForm(prev => ({
+      ...prev,
+      department: selected?.name || prev.department || value.split('/').filter(Boolean).pop() || value,
+      deptFullPath: selected?.fullPath || value,
+    }));
+  };
   const sectionRefs = useMemo(() => [
     { key: 'basic', label: '基本信息' },
     { key: 'employment', label: '在职信息' },
@@ -4233,14 +4362,17 @@ function EmployeeAddPage({ onBack, onSaved }: { onBack: () => void; onSaved: () 
     setSaving(true);
     setError('');
     const employeeNo = form.employeeNo.trim() || generateEmployeeNo();
+    const selectedOrg = organizations.find(row => row.name === form.department.trim() || row.fullPath === form.deptFullPath.trim());
+    const departmentName = selectedOrg?.name || form.department.trim();
+    const departmentFullPath = selectedOrg?.fullPath || form.deptFullPath.trim() || `上海拉迷家具有限公司/${departmentName}`;
     try {
       await onboardEmployee({
         ...(form as unknown as Record<string, string>),
         employeeNo,
         name: form.name.trim(),
         phone: form.phone.trim(),
-        department: form.department.trim(),
-        deptFullPath: form.deptFullPath.trim() || `上海拉迷家具有限公司/${form.department.trim()}`,
+        department: departmentName,
+        deptFullPath: departmentFullPath,
         position: form.position.trim(),
         hireDate: form.hireDate,
         employeeType: form.employeeType,
@@ -4309,12 +4441,12 @@ function EmployeeAddPage({ onBack, onSaved }: { onBack: () => void; onSaved: () 
               <EmployeeInput label="手机号" value={form.phone} onChange={value => update('phone', value)} />
               <EmployeeInput label="邮箱" value={form.email} onChange={value => update('email', value)} />
               <EmployeeInput label="员工号" value={form.employeeNo} onChange={value => update('employeeNo', value)} placeholder="系统自动生成" />
-              <EmployeeSelect label="部门" required value={form.department} onChange={value => update('department', value)} options={['制造供应中心', '售后组', '清洁组', '包装组', '封边组', '喷涂组', '人事部']} />
-              <EmployeeSelect label="岗位" value={form.position} onChange={value => update('position', value)} options={['普工', '售后', '保洁', '包装', '封边操作工', '仓管员', '人事专员']} />
+              <EmployeeSelect label="部门" required value={form.deptFullPath || form.department} onChange={selectDepartment} options={departmentOptions} />
+              <EmployeeSelect label="岗位" value={form.position} onChange={value => update('position', value)} options={positionOptions} />
               <EmployeeInput label="花名" value={form.rosterName} onChange={value => update('rosterName', value)} />
               <EmployeeSelect label="职级" value={form.salaryLevel} onChange={value => update('salaryLevel', value)} options={['P1', 'P2', 'P3', '主管', '经理']} />
               <EmployeeInput label="汇报上级" value={form.managerName} onChange={value => update('managerName', value)} />
-              <EmployeeSelect label="所属" value={form.deptFullPath} onChange={value => update('deptFullPath', value)} options={['上海拉迷家具有限公司/制造供应中心', '制造供应中心/生产制造中心/水晶板厂', '制造供应中心/供应链中心/仓储管理部']} />
+              <EmployeeSelect label="所属" value={form.deptFullPath} onChange={selectDeptFullPath} options={departmentOptions} />
               <div />
               <EmployeeTextArea label="备注" value={form.deptFullPath} onChange={value => update('deptFullPath', value)} maxLength={256} />
             </EmployeeFormGrid>
@@ -4518,13 +4650,18 @@ function EmployeeInput({ label, value, onChange, placeholder = '请输入', type
   );
 }
 
-function EmployeeSelect({ label, value, onChange, options, required = false }: { label: string; value: string; onChange: (value: string) => void; options: string[]; required?: boolean }) {
+function EmployeeSelect({ label, value, onChange, options, required = false }: { label: string; value: string; onChange: (value: string) => void; options: SelectOption[]; required?: boolean }) {
   const { colors } = useTheme();
+  const optionValues = new Set(options.map(getSelectOptionValue));
   return (
     <EmployeeFieldShell label={label} required={required}>
       <select value={value} onChange={event => onChange(event.target.value)} style={employeeInputStyle(colors)}>
         <option value="">请选择</option>
-        {options.map(option => <option key={option} value={option}>{option}</option>)}
+        {value && !optionValues.has(value) ? <option value={value}>{value}</option> : null}
+        {options.map(option => {
+          const optionValue = getSelectOptionValue(option);
+          return <option key={optionValue} value={optionValue}>{getSelectOptionLabel(option)}</option>;
+        })}
       </select>
     </EmployeeFieldShell>
   );
@@ -4785,6 +4922,11 @@ function EmployeeRosterView() {
   const [showImportMenu, setShowImportMenu] = useState(false);
   const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [showFieldSettings, setShowFieldSettings] = useState(false);
+  const [departmentFilter, setDepartmentFilter] = useState('');
+  const [positionFilter, setPositionFilter] = useState('');
+  const { organizations, positions } = useHrCoreLookupOptions();
+  const departmentOptions = useMemo(() => departmentSelectOptions(organizations), [organizations]);
+  const positionOptions = useMemo(() => positionSelectOptions(positions), [positions]);
 
   const loadRoster = () => {
     fetchEmployeeRoster().then(res => {
@@ -4818,8 +4960,19 @@ function EmployeeRosterView() {
     return true;
   };
   const filteredRows = useMemo(
-    () => rows.filter(row => matchesStatFilter(row, activeStatFilter)),
-    [activeStatFilter, rows],
+    () => rows.filter(row => {
+      const rowDept = String(row.dept || '');
+      const rowDeptPath = String(row.deptFullPath || '');
+      const rowPosition = String(row.position || '');
+      const matchesDepartment = !departmentFilter
+        || rowDeptPath === departmentFilter
+        || rowDept === departmentFilter
+        || rowDeptPath.includes(departmentFilter)
+        || (rowDept && departmentFilter.endsWith(`/${rowDept}`));
+      const matchesPosition = !positionFilter || rowPosition === positionFilter;
+      return matchesStatFilter(row, activeStatFilter) && matchesDepartment && matchesPosition;
+    }),
+    [activeStatFilter, departmentFilter, positionFilter, rows],
   );
   const stats = useMemo(() => {
     const count = (tester: (row: EmployeeGenericRecord) => boolean) => rows.filter(tester).length;
@@ -4841,6 +4994,12 @@ function EmployeeRosterView() {
     setActiveStatFilter(key);
     setPage(1);
   };
+  const resetFilters = () => {
+    setActiveStatFilter('all');
+    setDepartmentFilter('');
+    setPositionFilter('');
+    setPage(1);
+  };
 
   if (showAddEmployee) {
     return <EmployeeAddPage onBack={() => setShowAddEmployee(false)} onSaved={loadRoster} />;
@@ -4852,7 +5011,7 @@ function EmployeeRosterView() {
 
   return (
     <Surface style={{ minHeight: 'calc(100vh - 92px)', padding: 0, overflow: 'hidden' }}>
-      <EmployeeFilterBar right={<><ToolbarButton><Settings size={13} /></ToolbarButton><ToolbarButton>重置</ToolbarButton><ToolbarButton primary>查询</ToolbarButton><ToolbarButton onClick={() => setShowMoreFilters(prev => !prev)}>{showMoreFilters ? '收起选项' : '更多筛选'} {showMoreFilters ? '▴' : '▾'}</ToolbarButton></>}>
+      <EmployeeFilterBar right={<><ToolbarButton><Settings size={13} /></ToolbarButton><ToolbarButton onClick={resetFilters}>重置</ToolbarButton><ToolbarButton primary>查询</ToolbarButton><ToolbarButton onClick={() => setShowMoreFilters(prev => !prev)}>{showMoreFilters ? '收起选项' : '更多筛选'} {showMoreFilters ? '▴' : '▾'}</ToolbarButton></>}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: colors.text }}>
           员工状态
           <input type="checkbox" defaultChecked /> 在职
@@ -4860,12 +5019,12 @@ function EmployeeRosterView() {
           <input type="checkbox" defaultChecked /> 未填写
         </label>
         <FilterInput label="姓名" />
-        <SelectBox label="部门" />
+        <SelectBox label="部门" value={departmentFilter} onChange={value => { setDepartmentFilter(value); setPage(1); }} options={departmentOptions} />
         <FilterInput label="员工号" />
         <FilterInput label="手机号" />
         {showMoreFilters ? (
           <>
-            <SelectBox label="岗位" />
+            <SelectBox label="岗位" value={positionFilter} onChange={value => { setPositionFilter(value); setPage(1); }} options={positionOptions} />
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: colors.text }}>
               入职日期
               <input value="开始日期      →      结束日期" readOnly style={{ width: 260, height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 5, padding: '0 10px', color: colors.textMuted, backgroundColor: colors.cardBg }} />

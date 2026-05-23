@@ -33,10 +33,29 @@ app.use(express.json({ limit: '2mb' }));
 app.use('/uploads', express.static(UPLOAD_DIR));
 app.use('/exports', express.static(EXPORT_DIR));
 
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/')) return next();
+  const startedAt = Date.now();
+  res.on('finish', () => {
+    const durationMs = Date.now() - startedAt;
+    if (durationMs >= 300 || req.query?.debug === 'perf') {
+      console.log(`[api] ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms`);
+    }
+  });
+  return next();
+});
+
+let storeCache = null;
+let storeCacheMtimeMs = 0;
+
 function readStore() {
   try {
     if (!fs.existsSync(STORE_FILE)) return {};
-    return JSON.parse(fs.readFileSync(STORE_FILE, 'utf-8'));
+    const stat = fs.statSync(STORE_FILE);
+    if (storeCache && storeCacheMtimeMs === stat.mtimeMs) return storeCache;
+    storeCache = JSON.parse(fs.readFileSync(STORE_FILE, 'utf-8'));
+    storeCacheMtimeMs = stat.mtimeMs;
+    return storeCache;
   } catch (_error) {
     return {};
   }
@@ -45,6 +64,10 @@ function readStore() {
 function writeStore(store) {
   fs.mkdirSync(path.dirname(STORE_FILE), { recursive: true });
   fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2), 'utf-8');
+  const stat = fs.statSync(STORE_FILE);
+  storeCache = store;
+  storeCacheMtimeMs = stat.mtimeMs;
+  hrCoreCache = null;
 }
 
 function publicUrl(req, relativePath) {
@@ -176,20 +199,36 @@ function pickAttendanceSupplementFile(...keywords) {
   return files.find((file) => keywords.every((keyword) => file.name.includes(keyword))) || null;
 }
 
-function readSheetRows(filePath, sheetMatcher) {
+const sheetRowsCache = new Map();
+
+function readWorkbookRows(filePath, sheetMatcher, options = {}) {
+  const stat = fs.statSync(filePath);
+  const headerRowIndex = options.headerRowIndex ?? 0;
+  const cacheKey = `${filePath}|${stat.mtimeMs}|${headerRowIndex}|${options.byHeader ? 'header' : 'normal'}`;
+  const cached = sheetRowsCache.get(cacheKey);
+  if (cached) return cached;
   const wb = xlsx.readFile(filePath, { cellDates: true });
   const sheetName = sheetMatcher ? (wb.SheetNames.find(sheetMatcher) || wb.SheetNames[0]) : wb.SheetNames[0];
   const sheet = wb.Sheets[sheetName];
-  const rows = xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false });
-  return { rows, sheetName };
+  const rows = xlsx.utils.sheet_to_json(sheet, {
+    defval: '',
+    raw: false,
+    ...(options.byHeader ? { range: headerRowIndex } : {}),
+  });
+  const result = { rows, sheetName };
+  sheetRowsCache.set(cacheKey, result);
+  if (sheetRowsCache.size > 80) {
+    sheetRowsCache.delete(sheetRowsCache.keys().next().value);
+  }
+  return result;
+}
+
+function readSheetRows(filePath, sheetMatcher) {
+  return readWorkbookRows(filePath, sheetMatcher);
 }
 
 function readSheetRowsByHeader(filePath, sheetMatcher, headerRowIndex = 0) {
-  const wb = xlsx.readFile(filePath, { cellDates: true });
-  const sheetName = sheetMatcher ? (wb.SheetNames.find(sheetMatcher) || wb.SheetNames[0]) : wb.SheetNames[0];
-  const sheet = wb.Sheets[sheetName];
-  const rows = xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false, range: headerRowIndex });
-  return { rows, sheetName };
+  return readWorkbookRows(filePath, sheetMatcher, { byHeader: true, headerRowIndex });
 }
 
 function normalizeKey(input) {
@@ -777,7 +816,7 @@ function normalizeOnboardedEmployee(input = {}) {
     name,
     employeeNo,
     department: asText(input.department || input.dept, '未分配部门'),
-    deptFullPath: asText(input.deptFullPath || input.department, input.department ? `上海拉达家具有限公司/${input.department}` : '上海拉达家具有限公司/未分配部门'),
+    deptFullPath: asText(input.deptFullPath || input.department, input.department ? `上海拉迷家具有限公司/${input.department}` : '上海拉迷家具有限公司/未分配部门'),
     position: asText(input.position, '-'),
     hireDate: asText(input.hireDate, currentDateText()),
     employeeType: asText(input.employeeType, '全职'),
@@ -1066,13 +1105,18 @@ function mobileSchemeDisabled(employee) {
 }
 
 function buildLinkedAttendanceStatsRows() {
-  return linkedDemoEmployees().map((employee) => {
-    const base = onboardedEmployeeToAttendanceStatsRow(employee);
-    const todayRows = clockRowsForEmployeeDate(employee);
+  const context = getHrCoreContext();
+  return context.employees.map((employee) => {
+    const todayRows = context.indexes.todayClockRowsByEmployee.get(asRawText(employee.employeeNo)) || [];
     const hasClock = todayRows.length > 0;
     const hasAnomaly = clockRowsHaveAnomaly(todayRows);
     return {
-      ...base,
+      name: employee.name,
+      empId: employee.employeeNo,
+      attendGroup: employee.attendanceGroupName,
+      dept: employee.organizationName,
+      deptFull: employee.organizationFullPath,
+      shift: employee.shiftName,
       type: '移动端打卡',
       attendance: hasClock ? '已出勤' : '未出勤',
       status: !hasClock ? '未打卡' : (hasAnomaly ? '异常' : '正常'),
@@ -1081,6 +1125,10 @@ function buildLinkedAttendanceStatsRows() {
       fieldTrip: '-',
       cin1: clockInText(employee, todayRows),
       cout1: clockOutText(employee, todayRows),
+      cin2: '-',
+      cout2: '-',
+      cin3: '-',
+      cout3: '-',
     };
   });
 }
@@ -1089,15 +1137,8 @@ function buildLinkedDailyRows() {
   const context = getHrCoreContext();
   const dateText = currentDateText();
   const dateType = isDefaultWeekday(dateText) ? '工作日' : '休息日';
-  const clockRowsByEmployee = new Map();
-  for (const row of context.rawClockRows.filter((item) => asText(item.date, '') === dateText)) {
-    const employeeNo = asRawText(row.employeeNo);
-    const current = clockRowsByEmployee.get(employeeNo) || [];
-    current.push(row);
-    clockRowsByEmployee.set(employeeNo, current);
-  }
   return context.employees.map((employee) => {
-    const todayRows = clockRowsByEmployee.get(asRawText(employee.employeeNo)) || [];
+    const todayRows = context.indexes.todayClockRowsByEmployee.get(asRawText(employee.employeeNo)) || [];
     const hasClock = todayRows.length > 0;
     const hasAnomaly = clockRowsHaveAnomaly(todayRows);
     const clockIn = asText(todayRows.find((item) => item.type === 'clockIn')?.time, '-');
@@ -1129,29 +1170,16 @@ function buildLinkedDailyRows() {
 function buildLinkedMonthlyRows() {
   const period = currentDateText().slice(0, 7);
   const context = getHrCoreContext();
-  const scheduleRowsByEmployee = new Map();
-  for (const row of context.schedules.filter((item) => asText(item.date, '').startsWith(period))) {
-    const employeeNo = asRawText(row.employeeNo);
-    const current = scheduleRowsByEmployee.get(employeeNo) || [];
-    current.push(row);
-    scheduleRowsByEmployee.set(employeeNo, current);
-  }
-  const clockRowsByEmployee = new Map();
-  for (const row of context.rawClockRows.filter((item) => asText(item.date, '').startsWith(period))) {
-    const employeeNo = asRawText(row.employeeNo);
-    const current = clockRowsByEmployee.get(employeeNo) || [];
-    current.push(row);
-    clockRowsByEmployee.set(employeeNo, current);
-  }
   return context.employees.map((employee) => {
+    const employeeNo = asRawText(employee.employeeNo);
     const dayResults = {};
-    for (const row of scheduleRowsByEmployee.get(asRawText(employee.employeeNo)) || []) {
+    for (const row of context.indexes.schedulesByEmployeeMonth.get(`${employeeNo}|${period}`) || []) {
       const day = String(Number(asText(row.date, '').slice(8, 10)));
       if (!day || day === 'NaN') continue;
       const shiftName = asText(row.shiftName, '');
       dayResults[day] = shiftName === '休息' ? '休' : shiftName || '已排班';
     }
-    for (const row of clockRowsByEmployee.get(asRawText(employee.employeeNo)) || []) {
+    for (const row of context.indexes.clockRowsByEmployeeMonth.get(`${employeeNo}|${period}`) || []) {
       const day = String(Number(asText(row.date, '').slice(8, 10)));
       if (!day || day === 'NaN') continue;
       const previous = dayResults[day];
@@ -1175,25 +1203,12 @@ function buildLinkedMonthlySummaryRows() {
   const period = currentDateText().slice(0, 7);
   const externalValues = externalMetricValuesByEmployee(period);
   const context = getHrCoreContext();
-  const scheduleRowsByEmployee = new Map();
-  for (const row of context.schedules.filter((item) => asText(item.date, '').startsWith(period))) {
-    const employeeNo = asRawText(row.employeeNo);
-    const current = scheduleRowsByEmployee.get(employeeNo) || [];
-    current.push(row);
-    scheduleRowsByEmployee.set(employeeNo, current);
-  }
-  const clockRowsByEmployee = new Map();
-  for (const row of context.rawClockRows.filter((item) => asText(item.date, '').startsWith(period))) {
-    const employeeNo = asRawText(row.employeeNo);
-    const current = clockRowsByEmployee.get(employeeNo) || [];
-    current.push(row);
-    clockRowsByEmployee.set(employeeNo, current);
-  }
   const defaultShouldWorkDays = currentMonthWorkdayCount(null);
 
   return context.employees.map((employee, index) => {
-    const monthRows = clockRowsByEmployee.get(asRawText(employee.employeeNo)) || [];
-    const scheduledRows = scheduleRowsByEmployee.get(asRawText(employee.employeeNo)) || [];
+    const employeeNo = asRawText(employee.employeeNo);
+    const monthRows = context.indexes.clockRowsByEmployeeMonth.get(`${employeeNo}|${period}`) || [];
+    const scheduledRows = context.indexes.schedulesByEmployeeMonth.get(`${employeeNo}|${period}`) || [];
     const scheduleDays = scheduledRows.length
       ? scheduledRows.filter((row) => asText(row.shiftName, '') !== '休息').length
       : defaultShouldWorkDays;
@@ -1788,6 +1803,8 @@ function sendLinkedRows(res, sheetName, rows, extra = {}) {
 }
 
 function getOnboardedEmployeeNoSet() {
+  const cachedSet = hrCoreCache?.context?.indexes?.employeeNoSet;
+  if (cachedSet) return cachedSet;
   return new Set(employeeMasterRows().map((employee) => asRawText(employee.employeeNo)).filter(Boolean));
 }
 
@@ -2330,11 +2347,23 @@ function organizationSummary() {
 
 let hrCoreCache = null;
 
+function pushIndexedRow(map, key, row) {
+  if (!key) return;
+  const current = map.get(key);
+  if (current) {
+    current.push(row);
+  } else {
+    map.set(key, [row]);
+  }
+}
+
 function getHrCoreContext() {
   const storeUpdatedAt = asText(readStore().updatedAt, '');
   const cacheKey = `${storeUpdatedAt}|${currentDateText()}`;
   if (hrCoreCache?.cacheKey === cacheKey) return hrCoreCache.context;
 
+  const startedAt = Date.now();
+  const todayText = currentDateText();
   const masterEmployees = employeeMasterRows();
   const rawOrganizations = organizationRows().rows;
   const rawPositions = positionRows().rows;
@@ -2344,13 +2373,34 @@ function getHrCoreContext() {
   const positionByName = new Map(rawPositions.map((row) => [asRawText(row.name), row]));
   const schedules = getStoredRows('employeeSchedules') || [];
   const rawClockRows = getMobileRows('mobileClockRecords', []);
+  const schedulesByEmployee = new Map();
+  const schedulesByEmployeeMonth = new Map();
+  const todayScheduleByEmployee = new Map();
+  for (const row of schedules) {
+    const employeeNo = asRawText(row.employeeNo);
+    const dateText = asText(row.date, '');
+    pushIndexedRow(schedulesByEmployee, employeeNo, row);
+    if (dateText.length >= 7) pushIndexedRow(schedulesByEmployeeMonth, `${employeeNo}|${dateText.slice(0, 7)}`, row);
+    if (dateText === todayText && !todayScheduleByEmployee.has(employeeNo)) todayScheduleByEmployee.set(employeeNo, row);
+  }
+  const clockRowsByEmployee = new Map();
+  const clockRowsByEmployeeMonth = new Map();
+  const todayClockRowsByEmployee = new Map();
+  for (const row of rawClockRows) {
+    const employeeNo = asRawText(row.employeeNo);
+    const dateText = asText(row.date, '');
+    pushIndexedRow(clockRowsByEmployee, employeeNo, row);
+    if (dateText.length >= 7) pushIndexedRow(clockRowsByEmployeeMonth, `${employeeNo}|${dateText.slice(0, 7)}`, row);
+    if (dateText === todayText) pushIndexedRow(todayClockRowsByEmployee, employeeNo, row);
+  }
 
   const employees = masterEmployees.map((employee, index) => {
     const org = orgByPath.get(asRawText(employee.deptFullPath)) || orgByName.get(asRawText(employee.department)) || null;
     const position = positionByName.get(asRawText(employee.position)) || null;
     const shift = getEmployeeDefaultShift(employee);
-    const todaySchedule = getEmployeeSchedule(employee, currentDateText());
-    const todayClockRows = clockRowsForEmployeeDate(employee, currentDateText());
+    const employeeNo = asRawText(employee.employeeNo);
+    const todaySchedule = todayScheduleByEmployee.get(employeeNo);
+    const todayClockRows = todayClockRowsByEmployee.get(employeeNo) || [];
     return {
       id: index + 1,
       employeeId: employee.id,
@@ -2379,12 +2429,28 @@ function getHrCoreContext() {
     };
   });
 
+  const employeesByOrgPath = new Map();
+  const employeesByOrgName = new Map();
+  const employeesByPositionName = new Map();
+  const employeesByAttendanceGroup = new Map();
+  for (const employee of employees) {
+    pushIndexedRow(employeesByOrgPath, asRawText(employee.organizationFullPath), employee);
+    pushIndexedRow(employeesByOrgName, asRawText(employee.organizationName), employee);
+    pushIndexedRow(employeesByPositionName, asRawText(employee.positionName), employee);
+    pushIndexedRow(employeesByAttendanceGroup, asText(employee.attendanceGroupName, ''), employee);
+  }
+
   const organizations = rawOrganizations.map((org) => {
-    const linkedEmployees = employees.filter((employee) => (
-      asRawText(employee.organizationFullPath) === asRawText(org.fullPath)
-      || asRawText(employee.organizationFullPath).startsWith(`${asRawText(org.fullPath)}/`)
-      || asRawText(employee.organizationName) === asRawText(org.name)
-    ));
+    const fullPath = asRawText(org.fullPath);
+    const name = asRawText(org.name);
+    const linkedByKey = new Map();
+    for (const employee of employeesByOrgPath.get(fullPath) || []) linkedByKey.set(asRawText(employee.employeeNo), employee);
+    for (const employee of employeesByOrgName.get(name) || []) linkedByKey.set(asRawText(employee.employeeNo), employee);
+    for (const employee of employees) {
+      const employeePath = asRawText(employee.organizationFullPath);
+      if (fullPath && employeePath.startsWith(`${fullPath}/`)) linkedByKey.set(asRawText(employee.employeeNo), employee);
+    }
+    const linkedEmployees = Array.from(linkedByKey.values());
     const attendanceGroups = Array.from(new Set(linkedEmployees.map((employee) => employee.attendanceGroupName).filter(Boolean)));
     return {
       ...org,
@@ -2396,7 +2462,7 @@ function getHrCoreContext() {
   });
 
   const positions = rawPositions.map((position) => {
-    const linkedEmployees = employees.filter((employee) => asRawText(employee.positionName) === asRawText(position.name));
+    const linkedEmployees = employeesByPositionName.get(asRawText(position.name)) || [];
     return {
       ...position,
       employeeNos: linkedEmployees.map((employee) => employee.employeeNo),
@@ -2409,10 +2475,9 @@ function getHrCoreContext() {
     ...employees.map((employee) => asText(employee.attendanceGroupName, '')).filter(Boolean),
   ]);
   const attendanceGroups = Array.from(groupNames).map((groupName, index) => {
-    const groupEmployees = employees.filter((employee) => asText(employee.attendanceGroupName, '') === groupName);
-    const employeeNoSet = new Set(groupEmployees.map((employee) => asRawText(employee.employeeNo)));
-    const scheduleCount = schedules.filter((row) => employeeNoSet.has(asRawText(row.employeeNo))).length;
-    const clockCount = rawClockRows.filter((row) => employeeNoSet.has(asRawText(row.employeeNo))).length;
+    const groupEmployees = employeesByAttendanceGroup.get(groupName) || [];
+    const scheduleCount = groupEmployees.reduce((sum, employee) => sum + (schedulesByEmployee.get(asRawText(employee.employeeNo)) || []).length, 0);
+    const clockCount = groupEmployees.reduce((sum, employee) => sum + (clockRowsByEmployee.get(asRawText(employee.employeeNo)) || []).length, 0);
     return {
       id: index + 1,
       name: groupName,
@@ -2546,8 +2611,26 @@ function getHrCoreContext() {
     issues,
   };
 
-  const context = { employees, organizations, positions, ranks, attendanceGroups, schedules, rawClockRows, clockRecords, relations, integrity };
+  const indexes = {
+    employeeNoSet,
+    schedulesByEmployee,
+    schedulesByEmployeeMonth,
+    todayScheduleByEmployee,
+    clockRowsByEmployee,
+    clockRowsByEmployeeMonth,
+    todayClockRowsByEmployee,
+    employeesByOrgPath,
+    employeesByOrgName,
+    employeesByPositionName,
+    employeesByAttendanceGroup,
+  };
+
+  const context = { employees, organizations, positions, ranks, attendanceGroups, schedules, rawClockRows, clockRecords, relations, integrity, indexes };
   hrCoreCache = { cacheKey, context };
+  const durationMs = Date.now() - startedAt;
+  if (durationMs >= 300) {
+    console.log(`[hr-core] rebuilt shared context in ${durationMs}ms employees=${employees.length} schedules=${schedules.length} clocks=${rawClockRows.length}`);
+  }
   return context;
 }
 
@@ -2929,6 +3012,30 @@ app.get('/api/hr-core/library', (_req, res) => {
 
 app.get('/api/hr-core/linkage-report', (_req, res) => {
   res.json(hrCoreIntegrityReport());
+});
+
+app.get('/api/hr-core/lookups', (_req, res) => {
+  const context = getHrCoreContext();
+  res.json({
+    ok: true,
+    generatedAt: nowText(),
+    organizations: context.organizations.map((row) => ({
+      code: asText(row.code, ''),
+      name: asText(row.name, ''),
+      fullPath: asText(row.fullPath, ''),
+      orgType: asText(row.orgType, ''),
+      status: asText(row.status, ''),
+      linkedEmployeeCount: Number(row.linkedEmployeeCount || 0),
+    })),
+    positions: context.positions.map((row) => ({
+      code: asText(row.code, ''),
+      name: asText(row.name, ''),
+      sequence: asText(row.sequence, ''),
+      subSequence: asText(row.subSequence, ''),
+      status: asText(row.status, ''),
+      linkedEmployeeCount: Number(row.linkedEmployeeCount || 0),
+    })),
+  });
 });
 
 app.get('/api/hr-core/migration-bundle', (_req, res) => {
@@ -3378,8 +3485,7 @@ app.get('/api/clock-records', (req, res) => {
     const clockRecords = readSupplementMappedRows(['原始打卡记录日报'], (name) => name.includes('明细'), mapClockRows);
     if (clockRecords) return sendFileRows(res, clockRecords.file, clockRecords.sheetName, clockRecords.rows);
   }
-  const mobileRows = mapMobileClockRowsToAdmin(filterRowsToOnboardedEmployees(getMobileRows('mobileClockRecords', [])));
-  return sendLinkedRows(res, 'mobileClockRecords', mobileRows);
+  return sendLinkedRows(res, 'mobileClockRecords', getHrCoreContext().clockRecords);
 });
 
 app.put('/api/clock-records', (req, res) => {
@@ -3514,9 +3620,11 @@ app.put('/api/field-trip-records', (req, res) => {
 
 app.get('/api/schedules/month', (req, res) => {
   const monthText = asText(req.query?.month, currentDateText().slice(0, 7));
-  const rows = linkedDemoEmployees().map((employee) => {
+  const context = getHrCoreContext();
+  const rows = context.employees.map((employee) => {
+    const employeeNo = asRawText(employee.employeeNo);
     const dayResults = {};
-    for (const row of scheduleRowsForEmployee(employee, monthText)) {
+    for (const row of context.indexes.schedulesByEmployeeMonth.get(`${employeeNo}|${monthText}`) || []) {
       const day = String(Number(asText(row.date, '').slice(8, 10)));
       if (!day || day === 'NaN') continue;
       dayResults[day] = asText(row.shiftName, '');
@@ -3524,8 +3632,8 @@ app.get('/api/schedules/month', (req, res) => {
     return {
       name: employee.name,
       employeeNo: employee.employeeNo,
-      dept: employee.department,
-      position: employee.position,
+      dept: employee.organizationName,
+      position: employee.positionName,
       attendGroup: employee.attendanceGroupName,
       employeeType: employee.employeeType,
       dayResults,

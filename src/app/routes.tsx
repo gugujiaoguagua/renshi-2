@@ -29,7 +29,7 @@ export const router = createBrowserRouter([
     path: '/',
     Component: Layout,
     children: [
-      { index: true, Component: UnderDevelopment },
+      { index: true, element: <Navigate to="/attendance/home" replace /> },
       { path: 'tender', Component: UnderDevelopment },
       { path: 'organization', Component: OrganizationManagementPage },
       { path: 'organization/:section', Component: OrganizationManagementPage },
@@ -38,7 +38,7 @@ export const router = createBrowserRouter([
       { path: 'employee/:section', Component: EmployeeManagementPage },
       { path: 'payroll', Component: PayrollPage },
       { path: 'apps', Component: UnderDevelopment },
-      { path: 'attendance', element: <Navigate to="/attendance/stats" replace /> },
+      { path: 'attendance', element: <Navigate to="/attendance/home" replace /> },
       { path: 'attendance/home', Component: Home },
       { path: 'attendance/stats', Component: AttendanceStats },
       { path: 'attendance/daily-stats', Component: DailyAttendanceStats },

@@ -29,6 +29,7 @@ type ActiveCell = { row: ScheduleRow; day: number } | null;
 
 const CALENDAR_DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 const CALENDAR_WEEK_DAYS = ['五', '六', '日', '一', '二', '三', '四', '五', '六', '日', '一', '二', '三', '四', '五', '六', '日', '一', '二', '三', '四', '五', '六', '日', '一', '二', '三', '四', '五', '六', '日'];
+const SCHEDULE_TABLE_PAGE_SIZE = 80;
 
 const ADJUST_TABS: AdjustTabConfig[] = [
   {
@@ -142,6 +143,7 @@ function ScheduleTableView({
   const [positionFilter, setPositionFilter] = useState('');
   const [employeeTypeFilter, setEmployeeTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [tablePage, setTablePage] = useState(1);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [joining, setJoining] = useState(false);
   const [joinSelected, setJoinSelected] = useState<Set<string>>(new Set());
@@ -151,6 +153,10 @@ function ScheduleTableView({
   useEffect(() => {
     setGroupFilter(linkedGroup);
   }, [linkedGroup]);
+
+  useEffect(() => {
+    setTablePage(1);
+  }, [employeeFilter, groupFilter, deptFilter, positionFilter, employeeTypeFilter, statusFilter, month]);
 
   useEffect(() => {
     let cancelled = false;
@@ -186,6 +192,12 @@ function ScheduleTableView({
   const deptOptions = Array.from(new Set(rows.map(row => row.dept).filter(Boolean)));
   const positionOptions = Array.from(new Set(rows.map(row => row.position).filter(Boolean)));
   const employeeTypeOptions = Array.from(new Set(rows.map(row => row.employeeType).filter(Boolean))) as string[];
+  const tableTotalPages = Math.max(1, Math.ceil(filteredRows.length / SCHEDULE_TABLE_PAGE_SIZE));
+  const currentTablePage = Math.min(tablePage, tableTotalPages);
+  const visibleScheduleRows = filteredRows.slice(
+    (currentTablePage - 1) * SCHEDULE_TABLE_PAGE_SIZE,
+    currentTablePage * SCHEDULE_TABLE_PAGE_SIZE,
+  );
   const shiftOptions = shifts.length ? shifts : [{ id: 'shift_0900_1800', name: '早九晚六', time: '09:00-18:00' }];
   const monthLabel = `${month.slice(0, 4)}年${Number(month.slice(5, 7))}月`;
   const cycleStart = `${month}-01`;
@@ -333,7 +345,7 @@ function ScheduleTableView({
             </tr>
           </thead>
           <tbody>
-            {filteredRows.length ? filteredRows.map(row => (
+            {filteredRows.length ? visibleScheduleRows.map(row => (
               <tr key={row.employeeNo} style={{ borderBottom: `1px solid ${colors.tableBorder}` }}>
                 <td style={{ ...td(colors), width: 92, position: 'sticky', left: 0, zIndex: 2, backgroundColor: colors.cardBg }}>{row.name}</td>
                 <td style={{ ...td(colors), width: 98, position: 'sticky', left: 92, zIndex: 2, backgroundColor: colors.cardBg }}>{row.employeeNo}</td>
@@ -357,6 +369,30 @@ function ScheduleTableView({
             )}
           </tbody>
         </table>
+      </div>
+      <div style={{ minHeight: 40, padding: '7px 16px', borderTop: `1px solid ${colors.cardBorder}`, backgroundColor: colors.cardBg, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <span style={{ fontSize: 12, color: colors.textMuted }}>
+          共 {filteredRows.length} 人，当前显示 {visibleScheduleRows.length} 人
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            onClick={() => setTablePage(page => Math.max(1, page - 1))}
+            disabled={currentTablePage <= 1}
+            style={currentTablePage <= 1 ? disabledBtn(colors) : outlineBtn(colors)}
+          >
+            上一页
+          </button>
+          <span style={{ fontSize: 12, color: colors.textMuted }}>
+            {currentTablePage} / {tableTotalPages}
+          </span>
+          <button
+            onClick={() => setTablePage(page => Math.min(tableTotalPages, page + 1))}
+            disabled={currentTablePage >= tableTotalPages}
+            style={currentTablePage >= tableTotalPages ? disabledBtn(colors) : outlineBtn(colors)}
+          >
+            下一页
+          </button>
+        </div>
       </div>
       {showJoinModal ? (
         <div style={modalBackdropStyle}>

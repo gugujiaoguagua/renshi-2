@@ -50,7 +50,7 @@ export default function Home() {
         </div>
         <div>
           <div style={{ color: '#F1E6D8', fontSize: '12px', marginBottom: '6px', opacity: 0.8 }}>欢迎使用 · 人事薪税</div>
-          <div style={{ color: '#fff', fontSize: '22px', fontWeight: 600, marginBottom: '4px' }}>上海拉达家具有限公司</div>
+          <div style={{ color: '#fff', fontSize: '22px', fontWeight: 600, marginBottom: '4px' }}>上海拉迷家具有限公司</div>
           <div style={{ color: '#D0C5B5', fontSize: '13px' }}>今天是 {currentDateLabel()} {currentWeekdayLabel()} · 考勤管理中心</div>
         </div>
         <div style={{ flexShrink: 0, textAlign: 'right' }}>

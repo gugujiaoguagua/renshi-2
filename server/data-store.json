@@ -101,7 +101,7 @@
       "lateMinutes": 0
     }
   ],
-  "updatedAt": "2026-05-23T06:40:41.970Z",
+  "updatedAt": "2026-05-23T07:32:43.354Z",
   "mobileClockRecords": [
     {
       "id": "clock_1778915059636",
@@ -1263,6 +1263,42 @@
     }
   ],
   "employeeSchedules": [
+    {
+      "id": "2026-05-03:ZZ25329",
+      "date": "2026-05-03",
+      "employeeNo": "ZZ25329",
+      "employeeName": "王建设",
+      "dept": "清洁组",
+      "managerNo": "",
+      "managerName": "",
+      "shiftId": "shift_1000_1800_cv91u3",
+      "shiftName": "早9晚5",
+      "updatedAt": "2026-05-23 15:32:43"
+    },
+    {
+      "id": "2026-05-03:ZZ25307",
+      "date": "2026-05-03",
+      "employeeNo": "ZZ25307",
+      "employeeName": "胡建玲",
+      "dept": "打磨组",
+      "managerNo": "",
+      "managerName": "",
+      "shiftId": "shift_1000_1800_cv91u3",
+      "shiftName": "早9晚5",
+      "updatedAt": "2026-05-23 15:06:44"
+    },
+    {
+      "id": "2026-05-02:ZZ25305",
+      "date": "2026-05-02",
+      "employeeNo": "ZZ25305",
+      "employeeName": "廖家运",
+      "dept": "包装组",
+      "managerNo": "",
+      "managerName": "",
+      "shiftId": "shift_0900_1800_1iwmhjr",
+      "shiftName": "新建班次5",
+      "updatedAt": "2026-05-23 15:06:42"
+    },
     {
       "id": "2026-05-11:ZY26612",
       "date": "2026-05-11",

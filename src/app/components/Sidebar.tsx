@@ -110,7 +110,6 @@ export const Sidebar: React.FC = () => {
         if (hasActive) expanded[item.key] = true;
       }
     });
-    if (Object.keys(expanded).length === 0) expanded['stats'] = true;
     return expanded;
   };
 

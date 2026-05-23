@@ -18,6 +18,7 @@ import WorkData from './pages/WorkData';
 import ExternalDataManagement from './pages/ExternalDataManagement';
 import StatItemsManagement from './pages/StatItemsManagement';
 import OrganizationManagementPage from './pages/OrganizationManagement';
+import SalaryCalculation from './pages/SalaryCalculation';
 import {
   EmployeeManagementPage,
   PayrollPage,
@@ -37,6 +38,7 @@ export const router = createBrowserRouter([
       { path: 'employee', Component: EmployeeManagementPage },
       { path: 'employee/:section', Component: EmployeeManagementPage },
       { path: 'payroll', Component: PayrollPage },
+      { path: 'salary-calculation', Component: SalaryCalculation },
       { path: 'apps', Component: UnderDevelopment },
       { path: 'attendance', element: <Navigate to="/attendance/home" replace /> },
       { path: 'attendance/home', Component: Home },

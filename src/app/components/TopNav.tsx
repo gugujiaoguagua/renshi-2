@@ -9,6 +9,7 @@ const topTabs = [
   { label: '员工管理', path: '/employee' },
   { label: '考勤管理', path: '/attendance' },
   { label: '电子工资单', path: '/payroll' },
+  { label: '薪酬核算', path: '/salary-calculation' },
 ];
 
 export const TopNav: React.FC = () => {

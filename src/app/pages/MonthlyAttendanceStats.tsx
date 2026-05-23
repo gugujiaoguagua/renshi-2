@@ -401,6 +401,11 @@ export default function MonthlyAttendanceStats() {
   };
 
   const getCellClock = (emp: Employee, day: number, isWeekend: boolean): React.ReactNode => {
+    const realClock = emp.dayClocks?.[String(day)]?.trim();
+    if (realClock) {
+      const clean = realClock.replace(/\n/g, ' / ');
+      return <span style={{ fontSize: '11px', color: clean.includes('异常') ? '#D97706' : colors.text, fontWeight: 500 }}>{clean}</span>;
+    }
     if (isWeekend) return <span style={{ fontSize: '11px', color: colors.textMuted }}>—</span>;
     const state = getPastFuture(year, month, day);
     if (state === 'future') return <span style={{ fontSize: '11px', color: colors.textMuted }}>—</span>;
@@ -438,6 +443,8 @@ export default function MonthlyAttendanceStats() {
           return '未排班';
         }
 
+        const realClock = emp.dayClocks?.[String(day.day)]?.trim();
+        if (realClock) return realClock.replace(/\n/g, ' / ');
         if (day.isWeekend) return '—';
         const state = getPastFuture(year, month, day.day);
         if (state === 'future') return '—';

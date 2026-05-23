@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
 import {
   AlertCircle,
   BarChart3,
@@ -38,16 +39,21 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import {
   deleteOrganization,
+  deleteOrganizationPosition,
+  deleteOrganizationRank,
   fetchOrganizations,
   fetchOrganizationPositions,
+  fetchOrganizationRanks,
   saveOrganization,
   saveOrganizationPosition,
+  saveOrganizationRank,
   type OrganizationRecord,
   type OrganizationPositionRecord,
+  type OrganizationRankRecord,
 } from '../api/realData';
 
-type ModalMode = 'add' | 'edit' | 'detail' | 'importOrg' | 'exportOrg' | 'batchEdit' | 'changeDetail' | 'fieldDrawer' | 'orgTypeEdit' | 'orgTypeDelete' | 'orgTypeSort' | 'positionEdit' | 'servicePanel' | 'staffingApply' | 'expandLevel' | 'collapseLevel' | null;
-type PageMode = 'organizations' | 'orgTypes' | 'changeRecords' | 'snapshots' | 'disabledOrgs' | 'settings' | 'architecture' | 'architectureSort' | 'positions' | 'positionImport' | 'staffing';
+type ModalMode = 'add' | 'edit' | 'detail' | 'importOrg' | 'exportOrg' | 'batchEdit' | 'changeDetail' | 'fieldDrawer' | 'orgTypeEdit' | 'orgTypeDelete' | 'orgTypeSort' | 'positionEdit' | 'positionDelete' | 'rankEdit' | 'rankDelete' | 'servicePanel' | 'staffingApply' | 'expandLevel' | 'collapseLevel' | null;
+type PageMode = 'organizations' | 'orgTypes' | 'changeRecords' | 'snapshots' | 'disabledOrgs' | 'settings' | 'architecture' | 'architectureSort' | 'positions' | 'positionImport' | 'ranks' | 'jobTitles' | 'staffing';
 
 type OrganizationTypeRow = {
   id: string;
@@ -121,7 +127,21 @@ type PositionFormState = {
   companyText: string;
   sequence: string;
   subSequence: string;
+  sortNo: string;
   status: string;
+  desc: string;
+  remark: string;
+};
+
+type RankFormState = {
+  sequence: string;
+  subSequence: string;
+  company: string;
+  code: string;
+  name: string;
+  grade: string;
+  status: string;
+  desc: string;
 };
 
 type PositionColumnKey = 'code' | 'name' | 'parentName' | 'companyText' | 'orgText' | 'sequence' | 'subSequence' | 'sortNo' | 'status' | 'desc' | 'remark' | 'actions';
@@ -290,6 +310,37 @@ function moveItem<T>(items: T[], from: number, to: number) {
   return next;
 }
 
+function initialOrganizationPageMode(): PageMode {
+  if (typeof window === 'undefined') return 'organizations';
+  const section = window.location.pathname.split('/').filter(Boolean)[1];
+  if (section === 'architecture') return 'architecture';
+  if (section === 'positions') return 'positions';
+  if (section === 'position-import') return 'positionImport';
+  if (section === 'ranks') return 'ranks';
+  if (section === 'job-titles') return 'jobTitles';
+  if (section === 'staffing') return 'staffing';
+  if (section === 'settings') return 'settings';
+  const tab = new URLSearchParams(window.location.search).get('tab');
+  const allowed: PageMode[] = ['organizations', 'architecture', 'positions', 'positionImport', 'ranks', 'jobTitles', 'staffing', 'settings'];
+  return allowed.includes(tab as PageMode) ? (tab as PageMode) : 'organizations';
+}
+
+function organizationPathForMode(mode: PageMode) {
+  const pathByMode: Partial<Record<PageMode, string>> = {
+    organizations: '/organization',
+    architecture: '/organization/architecture',
+    architectureSort: '/organization/architecture',
+    positions: '/organization/positions',
+    positionImport: '/organization/position-import',
+    ranks: '/organization/ranks',
+    jobTitles: '/organization/job-titles',
+    staffing: '/organization/staffing',
+    settings: '/organization/settings',
+    orgTypes: '/organization/settings',
+  };
+  return pathByMode[mode] || '/organization';
+}
+
 export default function OrganizationManagementPage() {
   const { colors } = useTheme();
   const [rows, setRows] = useState<OrganizationRecord[]>([]);
@@ -298,13 +349,17 @@ export default function OrganizationManagementPage() {
   const [positionRows, setPositionRows] = useState<OrganizationPositionRecord[]>([]);
   const [positionsLoading, setPositionsLoading] = useState(true);
   const [positionsError, setPositionsError] = useState('');
-  const [positionDraft, setPositionDraft] = useState<PositionFormState>({ code: '', name: '', parentName: '', orgText: '', companyText: '上海拉迷家具有限公司', sequence: '', subSequence: '', status: '已启用' });
+  const [positionDraft, setPositionDraft] = useState<PositionFormState>({ code: '', name: '', parentName: '', orgText: '', companyText: '上海拉迷家具有限公司', sequence: '', subSequence: '', sortNo: '', status: '已启用', desc: '', remark: '' });
+  const [rankRows, setRankRows] = useState<OrganizationRankRecord[]>([]);
+  const [ranksLoading, setRanksLoading] = useState(true);
+  const [ranksError, setRanksError] = useState('');
+  const [rankDraft, setRankDraft] = useState<RankFormState>({ sequence: '', subSequence: '', company: '', code: '', name: '', grade: '', status: '已启用', desc: '' });
   const [notice, setNotice] = useState('');
   const [query, setQuery] = useState('');
   const [selectedCodes, setSelectedCodes] = useState<string[]>([]);
   const [expandedCodes, setExpandedCodes] = useState<Record<string, boolean>>({});
   const [modalMode, setModalMode] = useState<ModalMode>(null);
-  const [pageMode, setPageMode] = useState<PageMode>('organizations');
+  const [pageMode, setPageMode] = useState<PageMode>(() => initialOrganizationPageMode());
   const [activeOrg, setActiveOrg] = useState<OrganizationRecord | null>(null);
   const [activeChange, setActiveChange] = useState<ChangeRecord | null>(null);
   const [form, setForm] = useState<OrgFormState>(FORM_INITIAL);
@@ -317,6 +372,8 @@ export default function OrganizationManagementPage() {
   const [orgTypes, setOrgTypes] = useState<OrganizationTypeRow[]>(INITIAL_ORG_TYPES);
   const [orgTypeDraft, setOrgTypeDraft] = useState<OrganizationTypeRow | null>(null);
   const [orgTypeDeleteTarget, setOrgTypeDeleteTarget] = useState<OrganizationTypeRow | null>(null);
+  const [positionDeleteTarget, setPositionDeleteTarget] = useState<OrganizationPositionRecord | null>(null);
+  const [rankDeleteTarget, setRankDeleteTarget] = useState<OrganizationRankRecord | null>(null);
   const [snapshots, setSnapshots] = useState<SnapshotRecord[]>([]);
   const [fieldSettings, setFieldSettings] = useState<FieldSetting[]>(INITIAL_FIELDS);
   const [fieldDraft, setFieldDraft] = useState<FieldSetting>(EMPTY_FIELD);
@@ -355,9 +412,23 @@ export default function OrganizationManagementPage() {
     }
   };
 
+  const loadRanks = async () => {
+    setRanksLoading(true);
+    setRanksError('');
+    try {
+      const result = await fetchOrganizationRanks();
+      setRankRows(result.rows);
+    } catch (err: any) {
+      setRanksError(String(err?.message || err));
+    } finally {
+      setRanksLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadRows();
     loadPositions();
+    loadRanks();
   }, []);
 
   useEffect(() => {
@@ -510,6 +581,9 @@ export default function OrganizationManagementPage() {
     setToolbarMenuOpen(false);
     setMoreMenuOpen(false);
     setRowMenuCode('');
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', organizationPathForMode(mode));
+    }
     setPageMode(mode);
   };
 
@@ -598,7 +672,10 @@ export default function OrganizationManagementPage() {
       companyText: position?.companyText === '-' ? '上海拉迷家具有限公司' : position?.companyText || '上海拉迷家具有限公司',
       sequence: position?.sequence || '',
       subSequence: position?.subSequence || '',
+      sortNo: String((position as any)?.sortNo || ''),
       status: position?.status || '已启用',
+      desc: String((position as any)?.desc || ''),
+      remark: String((position as any)?.remark || ''),
     });
     setModalMode('positionEdit');
   };
@@ -608,7 +685,11 @@ export default function OrganizationManagementPage() {
       setNotice('请先填写岗位名称');
       return;
     }
-    await saveOrganizationPosition(positionDraft);
+    await saveOrganizationPosition({
+      ...positionDraft,
+      orgs: splitValueList(positionDraft.orgText),
+      companies: splitValueList(positionDraft.companyText),
+    } as Partial<OrganizationPositionRecord>);
     setModalMode(null);
     setNotice('岗位已保存，并重新读取岗位真实数据');
     await loadPositions();
@@ -621,6 +702,77 @@ export default function OrganizationManagementPage() {
     await loadPositions();
   };
 
+  const openPositionDelete = (position: OrganizationPositionRecord) => {
+    setPositionDeleteTarget(position);
+    setModalMode('positionDelete');
+  };
+
+  const confirmPositionDelete = async () => {
+    if (!positionDeleteTarget) return;
+    await deleteOrganizationPosition(positionDeleteTarget.code || positionDeleteTarget.name);
+    setNotice(`已删除 ${positionDeleteTarget.code ? `${positionDeleteTarget.code}-` : ''}${positionDeleteTarget.name}，岗位列表已重新加载`);
+    setPositionDeleteTarget(null);
+    setModalMode(null);
+    await loadPositions();
+  };
+
+  const importPositions = async (importRows: Partial<OrganizationPositionRecord>[]) => {
+    let saved = 0;
+    for (const row of importRows) {
+      if (!row.name) continue;
+      await saveOrganizationPosition(row);
+      saved += 1;
+    }
+    await loadPositions();
+    return saved;
+  };
+
+  const openRankEditor = (rank?: OrganizationRankRecord) => {
+    setRankDraft({
+      sequence: rank?.sequence || '',
+      subSequence: rank?.subSequence || '',
+      company: rank?.company === '-' ? '' : rank?.company || '',
+      code: rank?.code || '',
+      name: rank?.name || '',
+      grade: rank?.grade === '-' ? '' : rank?.grade || '',
+      status: rank?.status || '已启用',
+      desc: rank?.desc === '-' ? '' : rank?.desc || '',
+    });
+    setModalMode('rankEdit');
+  };
+
+  const saveRankDraft = async () => {
+    if (!rankDraft.code.trim() || !rankDraft.name.trim()) {
+      setNotice('请先填写职级代码和职级名称');
+      return;
+    }
+    await saveOrganizationRank(rankDraft);
+    setModalMode(null);
+    setNotice('职级已保存，并重新读取职级真实数据');
+    await loadRanks();
+  };
+
+  const disableRank = async (rank: OrganizationRankRecord) => {
+    const nextStatus = /停用/.test(rank.status) ? '已启用' : '已停用';
+    await saveOrganizationRank({ ...rank, status: nextStatus });
+    setNotice(`${rank.name} 已${nextStatus === '已启用' ? '启用' : '停用'}`);
+    await loadRanks();
+  };
+
+  const openRankDelete = (rank: OrganizationRankRecord) => {
+    setRankDeleteTarget(rank);
+    setModalMode('rankDelete');
+  };
+
+  const confirmRankDelete = async () => {
+    if (!rankDeleteTarget) return;
+    await deleteOrganizationRank(rankDeleteTarget.code || rankDeleteTarget.name);
+    setNotice(`已删除 ${rankDeleteTarget.code ? `${rankDeleteTarget.code}-` : ''}${rankDeleteTarget.name}，职级列表已重新加载`);
+    setRankDeleteTarget(null);
+    setModalMode(null);
+    await loadRanks();
+  };
+
   return (
     <div style={{ flex: 1, minHeight: '100%', background: colors.appBg, display: 'grid', gridTemplateColumns: '146px minmax(0,1fr)', overflow: 'hidden' }}>
       <aside style={{ background: colors.sidebarBg, borderRight: `1px solid ${colors.sidebarBorder}`, color: colors.sidebarText, overflowY: 'auto' }}>
@@ -629,8 +781,8 @@ export default function OrganizationManagementPage() {
         <SideItem active={pageMode === 'architecture' || pageMode === 'architectureSort'} label="架构图" onClick={() => openSubPage('architecture')} />
         <SideGroup active={pageMode === 'staffing'} icon={<Columns3 size={17} />} label="编制管理" onClick={() => openSubPage('staffing')} />
         <SideGroup active={pageMode === 'positions' || pageMode === 'positionImport'} icon={<Building2 size={17} />} label="岗位管理" onClick={() => openSubPage('positions')} />
-        <SideGroup icon={<ListTree size={17} />} label="职级管理" />
-        <SideGroup icon={<Settings size={17} />} label="职位管理" />
+        <SideGroup active={pageMode === 'ranks'} icon={<ListTree size={17} />} label="职级管理" onClick={() => openSubPage('ranks')} />
+        <SideGroup active={pageMode === 'jobTitles'} icon={<BriefcaseBusiness size={17} />} label="职位管理" onClick={() => openSubPage('jobTitles')} />
         <SideGroup active={pageMode === 'settings'} icon={<Settings size={17} />} label="组织管理设置" onClick={() => openSubPage('settings')} />
       </aside>
 
@@ -769,9 +921,13 @@ export default function OrganizationManagementPage() {
           ) : pageMode === 'architectureSort' ? (
             <ArchitectureSortPage rows={rows} loading={loading} error={error} onBack={() => openSubPage('architecture')} onSave={() => { setNotice('架构图排序已保存到当前会话'); openSubPage('architecture'); }} />
           ) : pageMode === 'positions' ? (
-            <PositionManagementPage rows={positionRows} loading={positionsLoading} error={positionsError} onReload={loadPositions} onCreate={() => openPositionEditor()} onImport={() => openSubPage('positionImport')} onEdit={openPositionEditor} onDisable={disablePosition} onNotice={setNotice} />
+            <PositionManagementPage rows={positionRows} loading={positionsLoading} error={positionsError} onReload={loadPositions} onCreate={() => openPositionEditor()} onImport={() => openSubPage('positionImport')} onEdit={openPositionEditor} onDisable={disablePosition} onDelete={openPositionDelete} onNotice={setNotice} />
           ) : pageMode === 'positionImport' ? (
-            <PositionImportPage rows={positionRows} onBack={() => openSubPage('positions')} onDone={(message) => { setNotice(message); openSubPage('positions'); loadPositions(); }} />
+            <PositionImportPage rows={positionRows} onBack={() => openSubPage('positions')} onImportRows={importPositions} onDone={(message) => { setNotice(message); openSubPage('positions'); loadPositions(); }} />
+          ) : pageMode === 'ranks' ? (
+            <RankManagementPage rows={rankRows} loading={ranksLoading} error={ranksError} onReload={loadRanks} onCreate={() => openRankEditor()} onEdit={openRankEditor} onDisable={disableRank} onDelete={openRankDelete} onNotice={setNotice} />
+          ) : pageMode === 'jobTitles' ? (
+            <JobTitleManagementPage />
           ) : pageMode === 'staffing' ? (
             <StaffingManagementPage orgRows={rows} positionRows={positionRows} onApply={() => setModalMode('staffingApply')} onContact={() => setModalMode('servicePanel')} />
           ) : pageMode === 'orgTypes' ? (
@@ -825,7 +981,10 @@ export default function OrganizationManagementPage() {
       {modalMode === 'orgTypeEdit' && orgTypeDraft ? <OrganizationTypeEditModal type={orgTypeDraft} onChange={setOrgTypeDraft} onClose={() => setModalMode(null)} onSave={saveOrgTypeDraft} /> : null}
       {modalMode === 'orgTypeDelete' && orgTypeDeleteTarget ? <OrganizationTypeDeleteConfirm type={orgTypeDeleteTarget} onClose={() => setModalMode(null)} onConfirm={confirmOrgTypeDelete} /> : null}
       {modalMode === 'orgTypeSort' ? <OrganizationTypeSortModal types={orgTypes} onClose={() => setModalMode(null)} onMove={(from, to) => setOrgTypes(current => moveItem(current, from, to))} onSave={() => { setModalMode(null); setNotice('组织类型排序已保存'); }} /> : null}
-      {modalMode === 'positionEdit' ? <PositionEditModal draft={positionDraft} onChange={setPositionDraft} onClose={() => setModalMode(null)} onSave={savePositionDraft} /> : null}
+      {modalMode === 'positionEdit' ? <PositionEditModal draft={positionDraft} positions={positionRows} orgRows={rows} onChange={setPositionDraft} onClose={() => setModalMode(null)} onSave={savePositionDraft} /> : null}
+      {modalMode === 'positionDelete' && positionDeleteTarget ? <PositionDeleteConfirm position={positionDeleteTarget} onClose={() => setModalMode(null)} onConfirm={confirmPositionDelete} /> : null}
+      {modalMode === 'rankEdit' ? <RankEditModal draft={rankDraft} ranks={rankRows} onChange={setRankDraft} onClose={() => setModalMode(null)} onSave={saveRankDraft} /> : null}
+      {modalMode === 'rankDelete' && rankDeleteTarget ? <RankDeleteConfirm rank={rankDeleteTarget} onClose={() => setModalMode(null)} onConfirm={confirmRankDelete} /> : null}
       {modalMode === 'servicePanel' ? <ServicePanel onClose={() => setModalMode(null)} /> : null}
       {modalMode === 'staffingApply' ? <StaffingApplyModal orgCount={rows.length} positionCount={positionRows.length} onClose={() => setModalMode(null)} onConfirm={() => { setModalMode(null); setNotice('编制管理开通申请已提交，当前组织与岗位数据将作为初始化范围'); }} /> : null}
       {modalMode === 'expandLevel' ? <LevelControlModal title="展开指定层级" actionText="展开" onClose={() => setModalMode(null)} onConfirm={(level) => { setModalMode(null); setNotice(`已展开到第 ${level} 层级，架构图根据当前真实组织层级刷新`); }} /> : null}
@@ -894,6 +1053,11 @@ function Header({ children, width }: { children?: React.ReactNode; width: number
   return <th style={{ width, height: 38, padding: '0 12px', textAlign: 'left', color: colors.text, fontSize: 13, fontWeight: 600, borderRight: `1px solid ${colors.tableBorder}` }}>{children}</th>;
 }
 
+function StickyHeader({ children, width }: { children?: React.ReactNode; width: number }) {
+  const { colors } = useTheme();
+  return <th style={{ width, height: 38, padding: '0 12px', textAlign: 'left', color: colors.text, fontSize: 13, fontWeight: 600, borderLeft: `1px solid ${colors.tableBorder}`, position: 'sticky', right: 0, zIndex: 4, background: colors.tableHeaderBg, boxShadow: '-8px 0 14px rgba(31,43,69,0.08)' }}>{children}</th>;
+}
+
 function Cell({ children, center, wrap }: { children?: React.ReactNode; center?: boolean; wrap?: boolean }) {
   const { colors } = useTheme();
   return (
@@ -912,6 +1076,15 @@ function Cell({ children, center, wrap }: { children?: React.ReactNode; center?:
         verticalAlign: wrap ? 'top' : 'middle',
       }}
     >
+      {children}
+    </td>
+  );
+}
+
+function StickyActionCell({ children }: { children?: React.ReactNode }) {
+  const { colors } = useTheme();
+  return (
+    <td style={{ width: 170, padding: '0 12px', color: colors.text, fontSize: 13, borderLeft: `1px solid ${colors.tableBorder}`, background: colors.cardBg, position: 'sticky', right: 0, zIndex: 3, boxShadow: '-8px 0 14px rgba(31,43,69,0.08)', whiteSpace: 'nowrap' }}>
       {children}
     </td>
   );
@@ -1266,11 +1439,255 @@ function OrganizationTypesPage({ types, onBack, onAdd, onReorder, onEdit, onTogg
   );
 }
 
-function PositionManagementPage({ rows, loading, error, onReload, onCreate, onImport, onEdit, onDisable, onNotice }: { rows: OrganizationPositionRecord[]; loading: boolean; error: string; onReload: () => void; onCreate: () => void; onImport: () => void; onEdit: (row: OrganizationPositionRecord) => void; onDisable: (row: OrganizationPositionRecord) => void; onNotice: (message: string) => void }) {
+function RankManagementPage({ rows, loading, error, onReload, onCreate, onEdit, onDisable, onDelete, onNotice }: { rows: OrganizationRankRecord[]; loading: boolean; error: string; onReload: () => void; onCreate: () => void; onEdit: (row: OrganizationRankRecord) => void; onDisable: (row: OrganizationRankRecord) => void; onDelete: (row: OrganizationRankRecord) => void; onNotice: (message: string) => void }) {
   const { colors } = useTheme();
-  const [filters, setFilters] = useState({ code: '', name: '', statuses: ['已启用'] as string[], parentNames: [] as string[], companies: [] as string[], blankCode: false });
+  const [filters, setFilters] = useState({ code: '', name: '', statuses: ['已启用'] as string[], companies: [] as string[], grade: '', desc: '', minPeople: '', maxPeople: '', blankCode: false, blankName: false, blankGrade: false });
   const [selected, setSelected] = useState<number[]>([]);
-  const [openDropdown, setOpenDropdown] = useState<'code' | 'status' | 'parent' | null>(null);
+  const [openDropdown, setOpenDropdown] = useState<'code' | 'name' | 'status' | 'grade' | null>(null);
+  const [showMore, setShowMore] = useState(false);
+  const [showCompanyModal, setShowCompanyModal] = useState(false);
+  const [sequenceQuery, setSequenceQuery] = useState('');
+  const [activeSequence, setActiveSequence] = useState('全部');
+  const codeTokens = useMemo(() => filters.code.split(/[;；,\s]+/).map(item => item.trim()).filter(Boolean), [filters.code]);
+  const nameTokens = useMemo(() => filters.name.split(/[;；,\s]+/).map(item => item.trim()).filter(Boolean), [filters.name]);
+  const statusOptions = useMemo(() => uniqueValues(rows.map(row => row.status || '已启用'), ['已启用', '已停用']), [rows]);
+  const companyOptions = useMemo(() => uniqueValues(rows.flatMap(row => splitValueList(row.company)), ['上海拉迷家具有限公司']), [rows]);
+  const gradeOptions = useMemo(() => uniqueValues(rows.map(row => row.grade || '未填写'), ['未填写']), [rows]);
+  const sequenceOptions = useMemo(() => uniqueValues(rows.map(row => row.sequence || '未填写'), ['全部', '专业通道', '管理通道', '未填写']), [rows]);
+  const filtered = useMemo(() => rows.filter(row => {
+    const sequence = row.sequence || '未填写';
+    const grade = row.grade || '未填写';
+    const count = Number(row.employeeCount ?? row.linkedEmployeeCount ?? 0);
+    if (filters.blankCode && row.code) return false;
+    if (filters.blankName && row.name) return false;
+    if (filters.blankGrade && row.grade) return false;
+    if (codeTokens.length && !codeTokens.some(token => row.code.includes(token))) return false;
+    if (nameTokens.length && !nameTokens.some(token => row.name.includes(token))) return false;
+    if (filters.statuses.length && !filters.statuses.includes(row.status || '已启用')) return false;
+    if (filters.companies.length) {
+      const companies = splitValueList(row.company);
+      if (!companies.some(company => filters.companies.includes(company))) return false;
+    }
+    if (filters.grade && grade !== filters.grade) return false;
+    if (filters.desc && !String(row.desc || '').includes(filters.desc)) return false;
+    if (filters.minPeople && count < Number(filters.minPeople)) return false;
+    if (filters.maxPeople && count > Number(filters.maxPeople)) return false;
+    if (activeSequence !== '全部' && sequence !== activeSequence) return false;
+    return true;
+  }), [activeSequence, codeTokens, filters, nameTokens, rows]);
+  const pageRows = filtered.slice(0, 20);
+  const sequenceList = sequenceOptions.filter(item => !sequenceQuery.trim() || item.includes(sequenceQuery.trim()));
+  const toggleSelected = (id: number) => setSelected(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
+  const toggleCurrentPage = (checked: boolean) => {
+    const pageIds = pageRows.map(row => row.id);
+    setSelected(current => checked ? uniqueNumberValues([...current, ...pageIds]) : current.filter(id => !pageIds.includes(id)));
+  };
+  const toggleFilterList = (value: string) => {
+    setFilters(current => ({ ...current, statuses: current.statuses.includes(value) ? current.statuses.filter(item => item !== value) : [...current.statuses, value] }));
+  };
+  const reset = () => {
+    setFilters({ code: '', name: '', statuses: ['已启用'], companies: [], grade: '', desc: '', minPeople: '', maxPeople: '', blankCode: false, blankName: false, blankGrade: false });
+    setActiveSequence('全部');
+  };
+  const setValue = (key: keyof typeof filters, value: string | boolean | string[]) => setFilters(current => ({ ...current, [key]: value }));
+
+  return (
+    <div style={{ height: '100%', background: colors.cardBg, borderRadius: 8, border: `1px solid ${colors.cardBorder}`, padding: '12px 14px 0', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ height: 40, border: `1px solid ${colors.primary}`, background: colors.badgeBlueBg, color: colors.text, borderRadius: 4, display: 'flex', alignItems: 'center', padding: '0 12px', marginBottom: 12, gap: 8, flexShrink: 0 }}>
+        <InfoIcon size={15} color={colors.primary} />
+        <span style={{ flex: 1 }}>职级是将岗位划分为不同级别的一种分类方式，反映岗位在组织中的重要性和复杂性，通常用于确定员工的晋升路径和薪酬水平。</span>
+        <button type="button" onClick={() => onNotice('已关闭职级说明提示')} style={plainIconButton(colors.textMuted)}><X size={14} /></button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '72px 240px 72px 240px 72px 240px 72px 240px 72px 240px auto', gap: 10, alignItems: 'center', marginBottom: 10, color: colors.text, fontSize: 13, flexShrink: 0 }}>
+        <span style={{ textAlign: 'right' }}>职级代码</span>
+        <div style={{ position: 'relative' }}>
+          <input value={filters.code} onFocus={() => setOpenDropdown('code')} onChange={event => setValue('code', event.target.value)} placeholder="多个用；号隔开，支持Excel复制" style={filterInput(colors)} />
+          {openDropdown === 'code' ? <BlankOption checked={filters.blankCode} onChange={(checked) => setValue('blankCode', checked)} /> : null}
+        </div>
+        <span style={{ textAlign: 'right' }}>职级名称</span>
+        <div style={{ position: 'relative' }}>
+          <input value={filters.name} onFocus={() => setOpenDropdown('name')} onChange={event => setValue('name', event.target.value)} placeholder="多个用；号隔开，支持Excel复制" style={filterInput(colors)} />
+          {openDropdown === 'name' ? <BlankOption checked={filters.blankName} onChange={(checked) => setValue('blankName', checked)} /> : null}
+        </div>
+        <span style={{ textAlign: 'right' }}>职级状态</span>
+        <FilterPicker label={filters.statuses.length ? filters.statuses.join('、') : '全部'} open={openDropdown === 'status'} onOpen={() => setOpenDropdown(openDropdown === 'status' ? null : 'status')}>
+          {statusOptions.map(option => <CheckOption key={option} label={option} checked={filters.statuses.includes(option)} onChange={() => toggleFilterList(option)} />)}
+        </FilterPicker>
+        <span style={{ textAlign: 'right' }}>适用公司</span>
+        <button type="button" onClick={() => setShowCompanyModal(true)} style={{ ...filterInput(colors), textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: filters.companies.length ? colors.inputText : colors.textMuted }}>{filters.companies.length ? `${filters.companies.length} 个公司` : '请选择'}</span>
+          <ChevronDown size={13} color={colors.textMuted} />
+        </button>
+        <span style={{ textAlign: 'right' }}>职等</span>
+        <FilterPicker label={filters.grade || '请输入职等代码/职等名称'} open={openDropdown === 'grade'} onOpen={() => setOpenDropdown(openDropdown === 'grade' ? null : 'grade')}>
+          <CheckOption label="未填写" checked={filters.blankGrade} onChange={() => setValue('blankGrade', !filters.blankGrade)} />
+          {gradeOptions.map(option => <CheckOption key={option} label={option} checked={filters.grade === option} onChange={() => setValue('grade', filters.grade === option ? '' : option)} />)}
+        </FilterPicker>
+        <div style={{ display: 'flex', gap: 8 }}><Button onClick={reset}>重置</Button><Button primary onClick={onReload}>查询</Button><Button onClick={() => setShowMore(value => !value)}>{showMore ? '收起选项' : '更多筛选'} <ChevronDown size={13} /></Button></div>
+      </div>
+      {showMore ? (
+        <div style={{ display: 'grid', gridTemplateColumns: '72px 240px 96px 118px 12px 118px minmax(0,1fr)', gap: 10, alignItems: 'center', marginBottom: 10, color: colors.text, fontSize: 13, flexShrink: 0 }}>
+          <span style={{ textAlign: 'right' }}>职级描述</span>
+          <input value={filters.desc} onChange={event => setValue('desc', event.target.value)} placeholder="多个用；号隔开，支持Excel复制" style={filterInput(colors)} />
+          <span style={{ textAlign: 'right' }}>在职人数统计</span>
+          <input value={filters.minPeople} onChange={event => setValue('minPeople', event.target.value.replace(/[^\d]/g, ''))} placeholder="最小值" style={filterInput(colors)} />
+          <span style={{ color: colors.textMuted, textAlign: 'center' }}>-</span>
+          <input value={filters.maxPeople} onChange={event => setValue('maxPeople', event.target.value.replace(/[^\d]/g, ''))} placeholder="最大值" style={filterInput(colors)} />
+          <span style={{ color: colors.textMuted, display: 'flex', alignItems: 'center', gap: 8 }}><Filter size={14} />已接入职级 Excel、岗位序列和在职人数统计字段。</span>
+        </div>
+      ) : null}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexShrink: 0 }}>
+        <Button primary onClick={onCreate}><Plus size={15} />新增职级</Button>
+        <Button onClick={() => onNotice('职级导入入口已点击，可继续使用当前 Excel 数据源验证字段结构')}>导入</Button>
+        <Button onClick={() => downloadTextFile('职级数据导出.csv', toRankCsv(filtered))}>导出</Button>
+        <Button onClick={() => onNotice(selected.length ? `已选择 ${selected.length} 个职级，可执行批量操作` : '请先勾选职级')}>批量操作 <ChevronDown size={13} /></Button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <Button onClick={() => onNotice('管理岗位序列入口已点击，左侧序列与职级列表联动')}>管理岗位序列</Button>
+          <Button onClick={() => onNotice('职等设置入口已点击，当前 Excel 职等表为空')}>职等设置</Button>
+          <SegmentedIcon active={false} onClick={() => onNotice('已切换表格展示设置入口')}><ListTree size={15} /></SegmentedIcon>
+          <SegmentedIcon active={false} onClick={() => onNotice('字段配置入口已点击')}><Settings size={15} /></SegmentedIcon>
+        </div>
+      </div>
+      {error ? <div style={{ color: colors.primary, fontSize: 12, paddingBottom: 8 }}>真实职级数据连接失败：{error}</div> : null}
+      <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '230px minmax(0,1fr)', border: `1px solid ${colors.tableBorder}`, overflow: 'hidden' }}>
+        <aside style={{ borderRight: `1px solid ${colors.tableBorder}`, background: colors.cardBg, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ height: 38, padding: '0 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: colors.text, fontWeight: 700 }}>岗位序列/子序列 <SlidersHorizontal size={14} color={colors.textMuted} /></div>
+          <div style={{ padding: '0 12px 10px', position: 'relative' }}><Search size={13} color={colors.textMuted} style={{ position: 'absolute', left: 22, top: 9 }} /><input value={sequenceQuery} onChange={event => setSequenceQuery(event.target.value)} placeholder="搜索序列名称" style={{ ...filterInput(colors), paddingLeft: 28 }} /></div>
+          <div style={{ overflow: 'auto', padding: '0 8px 10px' }}>
+            {sequenceList.slice(0, 24).map(option => (
+              <button key={option} type="button" onClick={() => setActiveSequence(option)} style={{ width: '100%', minHeight: 34, border: 'none', borderRadius: 4, background: activeSequence === option ? colors.tagActiveBg : 'transparent', color: activeSequence === option ? colors.tagActiveText : colors.text, display: 'flex', alignItems: 'center', gap: 8, padding: '0 8px', textAlign: 'left', cursor: 'pointer' }}>
+                <ChevronRight size={12} />{option}
+              </button>
+            ))}
+          </div>
+        </aside>
+        <div style={{ minWidth: 0, overflow: 'auto', position: 'relative' }}>
+          {loading ? <div style={{ padding: 24, color: colors.textMuted }}>正在加载真实职级数据...</div> : (
+            <table style={{ width: '100%', minWidth: 1420, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+              <thead>
+                <tr style={{ background: colors.tableHeaderBg }}>
+                  <Header width={42}><input type="checkbox" checked={Boolean(pageRows.length) && pageRows.every(row => selected.includes(row.id))} onChange={event => toggleCurrentPage(event.target.checked)} /></Header>
+                  <Header width={150}>岗位序列名称</Header>
+                  <Header width={150}>岗位子序列名称</Header>
+                  <Header width={150}>适用公司</Header>
+                  <Header width={140}>职级代码</Header>
+                  <Header width={140}>职级名称</Header>
+                  <Header width={130}>职等</Header>
+                  <Header width={170}>职级描述</Header>
+                  <Header width={150}>在职人数统计 ⓘ</Header>
+                  <Header width={140}>职级状态</Header>
+                  <StickyHeader width={170}>操作</StickyHeader>
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.map(row => (
+                  <tr key={`${row.id}-${row.code}-${row.name}`} style={{ minHeight: 40, borderTop: `1px solid ${colors.tableBorder}` }}>
+                    <Cell center><input type="checkbox" checked={selected.includes(row.id)} onChange={() => toggleSelected(row.id)} /></Cell>
+                    <Cell wrap>{text(row.sequence)}</Cell>
+                    <Cell>{text(row.subSequence)}</Cell>
+                    <Cell wrap>{text(row.company)}</Cell>
+                    <Cell>{text(row.code)}</Cell>
+                    <Cell wrap>{text(row.name)}</Cell>
+                    <Cell>{text(row.grade)}</Cell>
+                    <Cell wrap>{text(row.desc)}</Cell>
+                    <Cell>{row.employeeCount ?? row.linkedEmployeeCount ?? 0}</Cell>
+                    <Cell>{text(row.status)}</Cell>
+                    <StickyActionCell><div style={{ display: 'flex', gap: 14 }}><TextButton onClick={() => onEdit(row)}>编辑</TextButton><TextButton onClick={() => onDisable(row)}>{/停用/.test(row.status) ? '启用' : '停用'}</TextButton><TextButton onClick={() => onDelete(row)}>删除</TextButton></div></StickyActionCell>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {!loading && !pageRows.length ? <EmptyTableState /> : null}
+        </div>
+      </div>
+      <MiniPager total={filtered.length} />
+      {showCompanyModal ? <PositionCompanyModal options={companyOptions} selected={filters.companies} onChange={(companies) => setFilters(current => ({ ...current, companies }))} onClose={() => setShowCompanyModal(false)} /> : null}
+    </div>
+  );
+}
+
+function BlankOption({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  const { colors } = useTheme();
+  return (
+    <label style={{ position: 'absolute', left: 0, top: 34, width: '100%', height: 38, zIndex: 20, border: `1px solid ${colors.inputBorder}`, background: colors.cardBg, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', boxShadow: '0 10px 22px rgba(31,43,69,0.12)' }}>
+      <input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} />未填写
+    </label>
+  );
+}
+
+function JobTitleManagementPage() {
+  const { colors } = useTheme();
+  const [filters, setFilters] = useState({ code: '', name: '', status: '已启用' });
+  const reset = () => setFilters({ code: '', name: '', status: '已启用' });
+  return (
+    <div style={{ height: '100%', background: colors.cardBg, borderRadius: 8, border: `1px solid ${colors.cardBorder}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ padding: '12px 14px 0', flexShrink: 0 }}>
+        <div style={{ height: 40, border: `1px solid ${colors.primary}`, background: colors.badgeBlueBg, color: colors.text, borderRadius: 4, display: 'flex', alignItems: 'center', padding: '0 12px', marginBottom: 16, gap: 8 }}>
+          <InfoIcon size={15} color={colors.primary} />
+          <span style={{ flex: 1 }}>职位是指在企业中，员工所承担的一系列任务和责任的集合。一个职位可能由多个员工同时担任，例如，“经理”。</span>
+          <button type="button" style={plainIconButton(colors.textMuted)}><X size={14} /></button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '70px 240px 70px 240px 70px 240px minmax(0,1fr)', gap: 10, alignItems: 'center', color: colors.text, fontSize: 13, marginBottom: 14 }}>
+          <span style={{ textAlign: 'right' }}>职位编码</span>
+          <input value={filters.code} onChange={event => setFilters(current => ({ ...current, code: event.target.value }))} placeholder="多个用；号隔开，支持Excel复制" style={filterInput(colors)} />
+          <span style={{ textAlign: 'right' }}>职位名称</span>
+          <input value={filters.name} onChange={event => setFilters(current => ({ ...current, name: event.target.value }))} placeholder="多个用；号隔开，支持Excel复制" style={filterInput(colors)} />
+          <span style={{ textAlign: 'right' }}>职位状态</span>
+          <select value={filters.status} onChange={event => setFilters(current => ({ ...current, status: event.target.value }))} style={filterInput(colors)}>
+            <option>已启用</option>
+            <option>已停用</option>
+          </select>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={reset}>重置</Button>
+            <Button primary onClick={() => undefined}>查询</Button>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <DisabledButton><Plus size={15} />新增职位</DisabledButton>
+          <DisabledButton>导入</DisabledButton>
+          <DisabledButton>导出</DisabledButton>
+          <DisabledButton>批量操作 <ChevronDown size={13} /></DisabledButton>
+        </div>
+      </div>
+      <div style={{ height: 1, background: colors.tableBorder, flexShrink: 0 }} />
+      <div style={{ flex: 1, minHeight: 0, padding: '16px 14px 18px', overflow: 'hidden' }}>
+        <div style={{ height: '100%', border: `1px solid ${colors.tableBorder}`, overflow: 'hidden', position: 'relative' }}>
+          <table style={{ width: '100%', minWidth: 1180, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+            <thead>
+              <tr style={{ background: colors.tableHeaderBg }}>
+                <Header width={42}><input type="checkbox" disabled /></Header>
+                <Header width={170}>职位编码</Header>
+                <Header width={170}>职位名称</Header>
+                <Header width={170}>顺序号</Header>
+                <Header width={170}>职位状态</Header>
+                <Header width={170}>职位描述</Header>
+                <Header width={170}>备注</Header>
+                <Header width={170}>操作</Header>
+              </tr>
+            </thead>
+          </table>
+          <EmptyTableState />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DisabledButton({ children }: { children: React.ReactNode }) {
+  const { colors } = useTheme();
+  return (
+    <button type="button" disabled style={{ height: 32, padding: '0 14px', borderRadius: 4, border: `1px solid ${colors.inputBorder}`, background: colors.tableHeaderBg, color: colors.textMuted, fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'not-allowed', whiteSpace: 'nowrap' }}>
+      {children}
+    </button>
+  );
+}
+
+function PositionManagementPage({ rows, loading, error, onReload, onCreate, onImport, onEdit, onDisable, onDelete, onNotice }: { rows: OrganizationPositionRecord[]; loading: boolean; error: string; onReload: () => void; onCreate: () => void; onImport: () => void; onEdit: (row: OrganizationPositionRecord) => void; onDisable: (row: OrganizationPositionRecord) => void; onDelete: (row: OrganizationPositionRecord) => void; onNotice: (message: string) => void }) {
+  const { colors } = useTheme();
+  const [filters, setFilters] = useState({ code: '', name: '', statuses: ['已启用'] as string[], parentNames: [] as string[], companies: [] as string[], orgs: [] as string[], blankCode: false });
+  const [selected, setSelected] = useState<number[]>([]);
+  const [openDropdown, setOpenDropdown] = useState<'code' | 'status' | 'parent' | 'org' | null>(null);
   const [showMore, setShowMore] = useState(false);
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [showColumnSettings, setShowColumnSettings] = useState(false);
@@ -1281,7 +1698,8 @@ function PositionManagementPage({ rows, loading, error, onReload, onCreate, onIm
   const statusOptions = useMemo(() => uniqueValues(rows.map(row => row.status || '已启用'), ['已启用', '已停用']), [rows]);
   const parentOptions = useMemo(() => uniqueValues(rows.map(row => row.parentName || '未填写')), [rows]);
   const companyOptions = useMemo(() => uniqueValues(rows.flatMap(row => splitValueList(row.companyText)), ['上海拉迷家具有限公司']), [rows]);
-  const sequenceOptions = useMemo(() => uniqueValues(rows.map(row => row.sequence || '未填写'), ['全部']), [rows]);
+  const orgOptions = useMemo(() => uniqueValues(rows.flatMap(row => splitValueList(row.orgText)), ['未填写']), [rows]);
+  const sequenceOptions = useMemo(() => uniqueValues(rows.map(row => row.sequence || '未填写'), ['全部', '未填写', '专业通道', '管理通道']), [rows]);
   const filtered = useMemo(() => rows.filter(row => {
     if (filters.blankCode && row.code) return false;
     if (codeTokens.length && !codeTokens.some(token => row.code.includes(token))) return false;
@@ -1289,17 +1707,29 @@ function PositionManagementPage({ rows, loading, error, onReload, onCreate, onIm
     if (filters.statuses.length && !filters.statuses.includes(row.status || '已启用')) return false;
     if (filters.parentNames.length && !filters.parentNames.includes(row.parentName || '未填写')) return false;
     if (filters.companies.length && !splitValueList(row.companyText).some(company => filters.companies.includes(company))) return false;
+    if (filters.orgs.length) {
+      const orgList = splitValueList(row.orgText);
+      if (filters.orgs.includes('未填写')) {
+        if (orgList.length) return false;
+      } else if (!orgList.some(org => filters.orgs.includes(org))) {
+        return false;
+      }
+    }
     if (activeSequence !== '全部' && (row.sequence || '未填写') !== activeSequence) return false;
     return true;
   }), [activeSequence, codeTokens, filters, rows]);
   const pageRows = filtered.slice(0, 20);
   const setValue = (key: 'code' | 'name' | 'blankCode', value: string | boolean) => setFilters(current => ({ ...current, [key]: value }));
   const reset = () => {
-    setFilters({ code: '', name: '', statuses: ['已启用'], parentNames: [], companies: [], blankCode: false });
+    setFilters({ code: '', name: '', statuses: ['已启用'], parentNames: [], companies: [], orgs: [], blankCode: false });
     setActiveSequence('全部');
   };
   const toggleSelected = (id: number) => setSelected(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
-  const toggleFilterList = (key: 'statuses' | 'parentNames' | 'companies', value: string) => {
+  const toggleCurrentPage = (checked: boolean) => {
+    const pageIds = pageRows.map(row => row.id);
+    setSelected(current => checked ? uniqueNumberValues([...current, ...pageIds]) : current.filter(id => !pageIds.includes(id)));
+  };
+  const toggleFilterList = (key: 'statuses' | 'parentNames' | 'companies' | 'orgs', value: string) => {
     setFilters(current => {
       const list = current[key];
       return { ...current, [key]: list.includes(value) ? list.filter(item => item !== value) : [...list, value] };
@@ -1340,11 +1770,17 @@ function PositionManagementPage({ rows, loading, error, onReload, onCreate, onIm
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: filters.companies.length ? colors.inputText : colors.textMuted }}>{filters.companies.length ? `${filters.companies.length} 个公司` : '请选择'}</span>
           <ChevronDown size={13} color={colors.textMuted} />
         </button>
-        <div style={{ display: 'flex', gap: 8 }}><Button onClick={reset}>重置</Button><Button primary onClick={onReload}>查询</Button><Button onClick={() => setShowMore(value => !value)}>更多筛选 <ChevronDown size={13} /></Button></div>
+        <div style={{ display: 'flex', gap: 8 }}><Button onClick={reset}>重置</Button><Button primary onClick={onReload}>查询</Button><Button onClick={() => setShowMore(value => !value)}>{showMore ? '收起选项' : '更多筛选'} <ChevronDown size={13} /></Button></div>
       </div>
       {showMore ? (
-        <div style={{ padding: '8px 12px', marginBottom: 10, border: `1px solid ${colors.tableBorder}`, borderRadius: 5, background: colors.statCardBg, color: colors.textMuted, display: 'flex', alignItems: 'center', gap: 16 }}>
-          <Filter size={14} />已读取岗位序列、岗位子序列、所属组织、适用公司字段，可继续用表格列进行核对。
+        <div style={{ display: 'grid', gridTemplateColumns: '72px 320px minmax(0, 1fr)', gap: 10, alignItems: 'center', marginBottom: 10, color: colors.text, fontSize: 13, flexShrink: 0 }}>
+          <span style={{ textAlign: 'right' }}>所属组织</span>
+          <FilterPicker label={filters.orgs.length ? `${filters.orgs.length} 个组织` : '请选择'} open={openDropdown === 'org'} onOpen={() => setOpenDropdown(openDropdown === 'org' ? null : 'org')} wide>
+            {orgOptions.slice(0, 12).map(option => <CheckOption key={option} label={option} checked={filters.orgs.includes(option)} onChange={() => toggleFilterList('orgs', option)} />)}
+          </FilterPicker>
+          <div style={{ color: colors.textMuted, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Filter size={14} />已接入岗位序列、岗位子序列、所属组织、适用公司真实字段。
+          </div>
         </div>
       ) : null}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexShrink: 0 }}>
@@ -1374,20 +1810,25 @@ function PositionManagementPage({ rows, loading, error, onReload, onCreate, onIm
         <div style={{ minWidth: 0, overflow: 'auto', position: 'relative' }}>
           {loading ? <div style={{ padding: 24, color: colors.textMuted }}>正在加载真实岗位数据...</div> : (
             <table style={{ width: '100%', minWidth: tableMinWidth, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-              <thead><tr style={{ background: colors.tableHeaderBg }}><Header width={42} />{visibleColumnDefs.map(column => <Header key={column.key} width={column.width}>{column.label}</Header>)}</tr></thead>
+              <thead>
+                <tr style={{ background: colors.tableHeaderBg }}>
+                  <Header width={42}><input type="checkbox" checked={Boolean(pageRows.length) && pageRows.every(row => selected.includes(row.id))} onChange={event => toggleCurrentPage(event.target.checked)} /></Header>
+                  {visibleColumnDefs.map(column => column.key === 'actions' ? <StickyHeader key={column.key} width={column.width}>{column.label}</StickyHeader> : <Header key={column.key} width={column.width}>{column.label}</Header>)}
+                </tr>
+              </thead>
               <tbody>
                 {pageRows.map(row => (
                   <tr key={`${row.id}-${row.code}-${row.name}`} style={{ minHeight: 40, borderTop: `1px solid ${colors.tableBorder}` }}>
                     <Cell center><input type="checkbox" checked={selected.includes(row.id)} onChange={() => toggleSelected(row.id)} /></Cell>
                     {visibleColumnDefs.map(column => (
-                      <PositionTableCell key={column.key} column={column.key} row={row} onEdit={onEdit} onDisable={onDisable} onNotice={onNotice} />
+                      <PositionTableCell key={column.key} column={column.key} row={row} onEdit={onEdit} onDisable={onDisable} onDelete={onDelete} onNotice={onNotice} />
                     ))}
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-          {!loading && !pageRows.length ? <div style={{ padding: 32, textAlign: 'center', color: colors.textMuted }}>暂无匹配岗位数据</div> : null}
+          {!loading && !pageRows.length ? <EmptyTableState /> : null}
         </div>
       </div>
       <MiniPager total={filtered.length} />
@@ -1396,14 +1837,26 @@ function PositionManagementPage({ rows, loading, error, onReload, onCreate, onIm
   );
 }
 
-function PositionTableCell({ column, row, onEdit, onDisable, onNotice }: { column: PositionColumnKey; row: OrganizationPositionRecord; onEdit: (row: OrganizationPositionRecord) => void; onDisable: (row: OrganizationPositionRecord) => void; onNotice: (message: string) => void }) {
+function PositionTableCell({ column, row, onEdit, onDisable, onDelete, onNotice }: { column: PositionColumnKey; row: OrganizationPositionRecord; onEdit: (row: OrganizationPositionRecord) => void; onDisable: (row: OrganizationPositionRecord) => void; onDelete: (row: OrganizationPositionRecord) => void; onNotice: (message: string) => void }) {
   if (column === 'actions') {
-    return <Cell><div style={{ display: 'flex', gap: 14 }}><TextButton onClick={() => onEdit(row)}>编辑</TextButton><TextButton onClick={() => onDisable(row)}>{/停用/.test(row.status) ? '启用' : '停用'}</TextButton><TextButton onClick={() => onNotice(row.source?.includes('本地') ? `${row.name} 已从本地列表移除` : '真实导出的岗位不在本地删除')}>删除</TextButton></div></Cell>;
+    return <StickyActionCell><div style={{ display: 'flex', gap: 14 }}><TextButton onClick={() => onEdit(row)}>编辑</TextButton><TextButton onClick={() => onDisable(row)}>{/停用/.test(row.status) ? '启用' : '停用'}</TextButton><TextButton onClick={() => onDelete(row)}>删除</TextButton></div></StickyActionCell>;
   }
-  if (column === 'desc' || column === 'remark') return <Cell wrap>-</Cell>;
+  if (column === 'desc' || column === 'remark') return <Cell wrap>{text((row as any)[column])}</Cell>;
   const value = column === 'sortNo' ? (row as any).sortNo : (row as any)[column];
   const wrap = ['name', 'parentName', 'companyText', 'orgText', 'sequence', 'subSequence'].includes(column);
   return <Cell wrap={wrap}>{text(value)}</Cell>;
+}
+
+function EmptyTableState() {
+  const { colors } = useTheme();
+  return (
+    <div style={{ position: 'absolute', inset: '38px 0 0', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10, color: colors.textMuted, pointerEvents: 'none' }}>
+      <div style={{ width: 64, height: 64, borderRadius: '50%', background: colors.statCardBg, border: `1px solid ${colors.tableBorder}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <MessageSquare size={30} color={colors.textMuted} />
+      </div>
+      <span>暂无内容</span>
+    </div>
+  );
 }
 
 function FilterPicker({ label, open, wide, onOpen, children }: { label: string; open: boolean; wide?: boolean; onOpen: () => void; children: React.ReactNode }) {
@@ -1502,28 +1955,44 @@ function PositionCompanyModal({ options, selected, onChange, onClose }: { option
   );
 }
 
-function PositionImportPage({ rows, onBack, onDone }: { rows: OrganizationPositionRecord[]; onBack: () => void; onDone: (message: string) => void }) {
+function PositionImportPage({ rows, onBack, onImportRows, onDone }: { rows: OrganizationPositionRecord[]; onBack: () => void; onImportRows: (rows: Partial<OrganizationPositionRecord>[]) => Promise<number>; onDone: (message: string) => void }) {
   const { colors } = useTheme();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [mode, setMode] = useState<'create' | 'upsert'>('create');
   const [fileName, setFileName] = useState('');
+  const [importFile, setImportFile] = useState<File | null>(null);
   const [separator, setSeparator] = useState('斜杠:/');
   const [separatorOpen, setSeparatorOpen] = useState(false);
   const [showExample, setShowExample] = useState(false);
   const [ignoreBlank, setIgnoreBlank] = useState(true);
   const [uniqueKey, setUniqueKey] = useState('岗位名称');
+  const [importing, setImporting] = useState(false);
   const separators = ['斜杠:/', '短横杠:-', '下划线:_', '反斜杠:\\', '竖杠:|', '右括号:>'];
   const handleFile = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     setFileName(file.name);
+    setImportFile(file);
   };
-  const confirm = () => {
-    if (!fileName) {
+  const confirm = async () => {
+    if (!importFile) {
       onDone('请先选择岗位 Excel 文件再确认导入');
       return;
     }
-    onDone(`已选择 ${fileName}，岗位导入校验完成；当前表格将继续读取真实岗位数据源。`);
+    setImporting(true);
+    try {
+      const parsedRows = await parsePositionWorkbook(importFile, separator, ignoreBlank, mode, uniqueKey);
+      if (!parsedRows.length) {
+        onDone(`${fileName} 未识别到可导入的岗位数据`);
+        return;
+      }
+      const saved = await onImportRows(parsedRows);
+      onDone(`已导入 ${saved} 条岗位数据，列表已重新读取真实岗位数据源。`);
+    } catch (err: any) {
+      onDone(`岗位导入失败：${String(err?.message || err)}`);
+    } finally {
+      setImporting(false);
+    }
   };
   return (
     <div style={{ height: '100%', background: colors.cardBg, borderRadius: 8, border: `1px solid ${colors.cardBorder}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -1589,10 +2058,72 @@ function PositionImportPage({ rows, onBack, onDone }: { rows: OrganizationPositi
       </div>
       <div style={{ height: 54, borderTop: `1px solid ${colors.tableBorder}`, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexShrink: 0 }}>
         <Button onClick={onBack}>取消</Button>
-        <Button primary onClick={confirm}>确认导入</Button>
+        <Button primary onClick={confirm}>{importing ? '导入中...' : '确认导入'}</Button>
       </div>
     </div>
   );
+}
+
+async function parsePositionWorkbook(file: File, separator: string, ignoreBlank: boolean, mode: 'create' | 'upsert', uniqueKey: string): Promise<Partial<OrganizationPositionRecord>[]> {
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+  const sheetName = workbook.SheetNames.find(name => name.includes('岗位')) || workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  const matrix = XLSX.utils.sheet_to_json<Array<string | number | boolean | Date>>(sheet, { defval: '', raw: false, header: 1 });
+  const headerIndex = Math.max(0, matrix.findIndex(row => row.some(cell => String(cell).includes('岗位编码')) && row.some(cell => String(cell).includes('岗位名称'))));
+  const headers = (matrix[headerIndex] || []).map(cell => String(cell || '').trim());
+  const delimiter = separator.includes(':') ? separator.split(':').slice(1).join(':') : '/';
+  const sourceRows = matrix.slice(headerIndex + 1);
+  return sourceRows.map(row => {
+    const name = workbookCell(headers, row, ['岗位名称', '职位名称']);
+    const code = workbookCell(headers, row, ['岗位编码', '职位编码']);
+    if (!name && !code) return null;
+    const orgs = workbookCells(headers, row, ['所属组织', '部门路径', '组织']).flatMap(value => splitImportedPath(value, delimiter));
+    const companies = workbookCells(headers, row, ['适用公司', '公司']).flatMap(value => splitImportedPath(value, delimiter));
+    const payload: Record<string, unknown> = {
+      code,
+      name,
+      parentName: workbookCell(headers, row, ['上级岗位']),
+      orgs,
+      orgText: orgs.join('；'),
+      companies,
+      companyText: companies.join('；'),
+      sequence: workbookCell(headers, row, ['岗位序列名称', '岗位序列']),
+      subSequence: workbookCell(headers, row, ['岗位子序列名称', '岗位子序列']),
+      sortNo: workbookCell(headers, row, ['顺序号']),
+      status: workbookCell(headers, row, ['岗位状态']) || '已启用',
+      desc: workbookCell(headers, row, ['岗位描述', '职位描述']),
+      remark: workbookCell(headers, row, ['备注']),
+    };
+    if (mode === 'upsert' && ignoreBlank) {
+      Object.keys(payload).forEach(key => {
+        const value = payload[key];
+        if (value === '' || (Array.isArray(value) && !value.length)) delete payload[key];
+      });
+      payload[uniqueKey === '岗位编码' ? 'code' : 'name'] = uniqueKey === '岗位编码' ? code : name;
+    }
+    return payload as Partial<OrganizationPositionRecord>;
+  }).filter((row): row is Partial<OrganizationPositionRecord> => Boolean(row?.name));
+}
+
+function workbookCell(headers: string[], row: Array<string | number | boolean | Date>, aliases: string[]) {
+  const index = headers.findIndex(header => aliases.some(alias => header.includes(alias)));
+  return index >= 0 ? text(row[index], '') : '';
+}
+
+function workbookCells(headers: string[], row: Array<string | number | boolean | Date>, aliases: string[]) {
+  return headers
+    .map((header, index) => aliases.some(alias => header.includes(alias)) ? text(row[index], '') : '')
+    .filter(Boolean);
+}
+
+function splitImportedPath(value: string, delimiter: string) {
+  const source = String(value || '').trim();
+  if (!source) return [];
+  if (source.includes('；') || source.includes(';') || source.includes('，') || source.includes(',')) {
+    return splitValueList(source);
+  }
+  return source.split(delimiter).map(item => item.trim()).filter(Boolean);
 }
 
 function ImportStep({ active, number, label }: { active?: boolean; number: string; label: string }) {
@@ -1639,6 +2170,10 @@ function uniqueValues(values: string[], seeds: string[] = []) {
     if (item && !result.includes(item)) result.push(item);
   });
   return result;
+}
+
+function uniqueNumberValues(values: number[]) {
+  return Array.from(new Set(values));
 }
 
 function StaffingManagementPage({ orgRows, positionRows, onApply, onContact }: { orgRows: OrganizationRecord[]; positionRows: OrganizationPositionRecord[]; onApply: () => void; onContact: () => void }) {
@@ -1754,6 +2289,22 @@ function toPositionCsv(rows: OrganizationPositionRecord[]) {
   return `\uFEFF${headers.map(csvCell).join(',')}\n${lines.join('\n')}`;
 }
 
+function toRankCsv(rows: OrganizationRankRecord[]) {
+  const headers = ['岗位序列名称', '岗位子序列名称', '适用公司', '职级代码', '职级名称', '职等', '职级描述', '在职人数统计', '职级状态'];
+  const lines = rows.map(row => [
+    row.sequence || '',
+    row.subSequence || '',
+    row.company || '',
+    row.code || '',
+    row.name || '',
+    row.grade || '',
+    row.desc || '',
+    row.employeeCount ?? row.linkedEmployeeCount ?? 0,
+    row.status || '',
+  ].map(csvCell).join(','));
+  return `\uFEFF${headers.map(csvCell).join(',')}\n${lines.join('\n')}`;
+}
+
 function OrganizationTypeEditModal({ type, onChange, onClose, onSave }: { type: OrganizationTypeRow; onChange: (type: OrganizationTypeRow) => void; onClose: () => void; onSave: () => void }) {
   const { colors } = useTheme();
   const title = type.name ? '编辑组织类型' : '新增组织类型';
@@ -1811,19 +2362,197 @@ function OrganizationTypeSortModal({ types, onMove, onClose, onSave }: { types: 
   );
 }
 
-function PositionEditModal({ draft, onChange, onClose, onSave }: { draft: PositionFormState; onChange: (draft: PositionFormState) => void; onClose: () => void; onSave: () => void }) {
+function PositionEditModal({ draft, positions, orgRows, onChange, onClose, onSave }: { draft: PositionFormState; positions: OrganizationPositionRecord[]; orgRows: OrganizationRecord[]; onChange: (draft: PositionFormState) => void; onClose: () => void; onSave: () => void }) {
   const update = (key: keyof PositionFormState, value: string) => onChange({ ...draft, [key]: value });
+  const { colors } = useTheme();
+  const [companyPickerOpen, setCompanyPickerOpen] = useState(false);
+  const [orgPickerOpen, setOrgPickerOpen] = useState(false);
+  const [sequenceOpen, setSequenceOpen] = useState(false);
+  const [parentOpen, setParentOpen] = useState(false);
+  const companyOptions = useMemo(() => uniqueValues(positions.flatMap(position => splitValueList(position.companyText)), ['上海拉迷家具有限公司', '上海拉迷家具有限公司（含其下级公司）']), [positions]);
+  const orgOptions = useMemo(() => uniqueValues(orgRows.map(row => row.fullPath || row.name), ['上海拉迷家具有限公司']), [orgRows]);
+  const parentOptions = useMemo(() => uniqueValues(positions.map(position => position.name).filter(name => name !== draft.name)), [draft.name, positions]);
+  const sequenceOptions = useMemo(() => uniqueValues(positions.map(position => position.sequence || '').filter(Boolean)), [positions]);
   return (
     <ModalShell title={draft.code ? '编辑岗位' : '新增岗位'} width={430} onClose={onClose} footer={<><Button onClick={onClose}>取消</Button><Button primary onClick={onSave}>保存</Button></>}>
       <div style={{ padding: '18px 34px 28px', display: 'flex', flexDirection: 'column', gap: 14, fontSize: 13 }}>
         <FormRow label="岗位编码"><Input value={draft.code} onChange={value => update('code', value)} placeholder="系统可自动生成" max={30} count /></FormRow>
         <FormRow label="岗位名称" required><Input value={draft.name} onChange={value => update('name', value)} placeholder="请输入" max={30} count /></FormRow>
-        <FormRow label="上级岗位"><Input value={draft.parentName} onChange={value => update('parentName', value)} placeholder="请选择或输入" /></FormRow>
-        <FormRow label="所属组织"><Input value={draft.orgText} onChange={value => update('orgText', value)} placeholder="请输入组织名称" /></FormRow>
-        <FormRow label="适用公司"><Input value={draft.companyText} onChange={value => update('companyText', value)} placeholder="请输入公司名称" /></FormRow>
-        <FormRow label="岗位序列"><Input value={draft.sequence} onChange={value => update('sequence', value)} placeholder="请输入" /></FormRow>
+        <FormRow label="适用公司">
+          <TagSelector value={draft.companyText} placeholder="请选择" onClick={() => setCompanyPickerOpen(true)} />
+        </FormRow>
+        <FormRow label="岗位序列/子序列">
+          <div style={{ position: 'relative' }}>
+            <button type="button" onClick={() => setSequenceOpen(open => !open)} style={{ ...formInput(colors), textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', color: draft.sequence ? colors.inputText : colors.textMuted }}>
+              <span>{draft.sequence || '请选择'}</span><ChevronDown size={13} />
+            </button>
+            {sequenceOpen ? (
+              <div style={{ position: 'absolute', left: 0, right: 0, top: 36, minHeight: 112, zIndex: 60, border: `1px solid ${colors.cardBorder}`, borderRadius: 5, background: colors.cardBg, boxShadow: '0 16px 32px rgba(31,43,69,0.16)', overflow: 'hidden' }}>
+                {sequenceOptions.length ? sequenceOptions.slice(0, 8).map(option => (
+                  <button key={option} type="button" onClick={() => { update('sequence', option); setSequenceOpen(false); }} style={{ width: '100%', height: 32, border: 'none', background: option === draft.sequence ? colors.statCardBg : 'transparent', color: colors.text, textAlign: 'left', padding: '0 10px', cursor: 'pointer' }}>{option}</button>
+                )) : <EmptyDropdown />}
+              </div>
+            ) : null}
+          </div>
+        </FormRow>
+        <FormRow label="上级岗位">
+          <div style={{ position: 'relative' }}>
+            <button type="button" onClick={() => setParentOpen(open => !open)} style={{ ...formInput(colors), textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', color: draft.parentName ? colors.inputText : colors.textMuted }}>
+              <span>{draft.parentName || '请选择'}</span><ChevronDown size={13} />
+            </button>
+            {parentOpen ? (
+              <div style={{ position: 'absolute', left: 0, right: 0, top: 36, maxHeight: 220, overflow: 'auto', zIndex: 60, border: `1px solid ${colors.cardBorder}`, borderRadius: 5, background: colors.cardBg, boxShadow: '0 16px 32px rgba(31,43,69,0.16)' }}>
+                {parentOptions.slice(0, 12).map(option => <button key={option} type="button" onClick={() => { update('parentName', option); setParentOpen(false); }} style={{ width: '100%', height: 32, border: 'none', background: option === draft.parentName ? colors.statCardBg : 'transparent', color: colors.text, textAlign: 'left', padding: '0 10px', cursor: 'pointer' }}>{option}</button>)}
+              </div>
+            ) : null}
+          </div>
+        </FormRow>
+        <FormRow label="所属组织">
+          <TagSelector value={draft.orgText} placeholder="请选择" onClick={() => setOrgPickerOpen(true)} />
+        </FormRow>
+        <FormRow label="顺序号"><Input value={draft.sortNo} onChange={value => update('sortNo', value)} placeholder="请输入" /></FormRow>
         <FormRow label="子序列"><Input value={draft.subSequence} onChange={value => update('subSequence', value)} placeholder="请输入" /></FormRow>
         <FormRow label="岗位状态"><SelectInput value={draft.status} onChange={value => update('status', value)} options={['已启用', '已停用']} /></FormRow>
+        <FormRow label="岗位描述"><textarea value={draft.desc} onChange={event => update('desc', event.target.value.slice(0, 500))} placeholder="请输入" style={{ ...formInput(colors), height: 64, paddingTop: 8, resize: 'none' }} /></FormRow>
+        <FormRow label="备注"><textarea value={draft.remark} onChange={event => update('remark', event.target.value.slice(0, 500))} placeholder="请输入" style={{ ...formInput(colors), height: 64, paddingTop: 8, resize: 'none' }} /></FormRow>
+      </div>
+      {companyPickerOpen ? (
+        <PositionCompanyModal
+          options={companyOptions}
+          selected={splitValueList(draft.companyText)}
+          onChange={(companies) => update('companyText', companies.join('；'))}
+          onClose={() => setCompanyPickerOpen(false)}
+        />
+      ) : null}
+      {orgPickerOpen ? (
+        <PositionCompanyModal
+          options={orgOptions}
+          selected={splitValueList(draft.orgText)}
+          onChange={(orgs) => update('orgText', orgs.join('；'))}
+          onClose={() => setOrgPickerOpen(false)}
+        />
+      ) : null}
+    </ModalShell>
+  );
+}
+
+function TagSelector({ value, placeholder, onClick }: { value: string; placeholder: string; onClick: () => void }) {
+  const { colors } = useTheme();
+  const items = splitValueList(value);
+  return (
+    <button type="button" onClick={onClick} style={{ ...formInput(colors), minHeight: 34, height: 'auto', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', textAlign: 'left' }}>
+      {items.length ? (
+        <>
+          {items.slice(0, 2).map(item => <span key={item} style={{ maxWidth: 82, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', borderRadius: 4, background: colors.statCardBg, padding: '2px 6px' }}>{item}</span>)}
+          {items.length > 2 ? <span style={{ borderRadius: 4, background: colors.statCardBg, padding: '2px 6px' }}>+{items.length - 2}</span> : null}
+        </>
+      ) : <span style={{ color: colors.textMuted }}>{placeholder}</span>}
+      <ChevronDown size={13} style={{ marginLeft: 'auto', flexShrink: 0 }} />
+    </button>
+  );
+}
+
+function EmptyDropdown() {
+  const { colors } = useTheme();
+  return (
+    <div style={{ height: 112, display: 'grid', placeItems: 'center', color: colors.textMuted, fontSize: 12 }}>
+      <span style={{ display: 'grid', justifyItems: 'center', gap: 6 }}>
+        <FileDown size={30} color={colors.textMuted} />
+        暂无内容
+      </span>
+    </div>
+  );
+}
+
+function RankEditModal({ draft, ranks, onChange, onClose, onSave }: { draft: RankFormState; ranks: OrganizationRankRecord[]; onChange: (draft: RankFormState) => void; onClose: () => void; onSave: () => void }) {
+  const update = (key: keyof RankFormState, value: string) => onChange({ ...draft, [key]: value });
+  const { colors } = useTheme();
+  const [sequenceOpen, setSequenceOpen] = useState(false);
+  const [companyPickerOpen, setCompanyPickerOpen] = useState(false);
+  const sequenceOptions = useMemo(() => uniqueValues(ranks.map(rank => rank.sequence || '').filter(Boolean), ['专业通道', '管理通道']), [ranks]);
+  const gradeOptions = useMemo(() => uniqueValues(ranks.map(rank => rank.grade || '').filter(Boolean), ['G1', 'G2', 'G3', 'G4', 'G5']), [ranks]);
+  const companyOptions = useMemo(() => uniqueValues(ranks.flatMap(rank => splitValueList(rank.company)), ['上海拉迷家具有限公司', '上海拉迷家具有限公司（含其下级公司）']), [ranks]);
+  return (
+    <ModalShell title={draft.code ? '编辑职级' : '新增职级'} width={430} onClose={onClose} footer={<><Button onClick={onClose}>取消</Button><Button primary onClick={onSave}>保存</Button></>}>
+      <div style={{ maxHeight: 'calc(100vh - 180px)', overflowY: 'auto', padding: '18px 34px 28px', display: 'flex', flexDirection: 'column', gap: 14, fontSize: 13 }}>
+        <FormRow label="岗位序列/子序列" required>
+          <div style={{ position: 'relative' }}>
+            <button type="button" onClick={() => setSequenceOpen(open => !open)} style={{ ...formInput(colors), textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', color: draft.sequence ? colors.inputText : colors.textMuted }}>
+              <span>{draft.sequence || '请选择'}</span><ChevronDown size={13} />
+            </button>
+            {sequenceOpen ? (
+              <div style={{ position: 'absolute', left: 0, right: 0, top: 36, minHeight: 78, zIndex: 60, border: `1px solid ${colors.cardBorder}`, borderRadius: 5, background: colors.cardBg, boxShadow: '0 16px 32px rgba(31,43,69,0.16)', overflow: 'hidden' }}>
+                {sequenceOptions.map(option => (
+                  <button key={option} type="button" onClick={() => { update('sequence', option); setSequenceOpen(false); }} style={{ width: '100%', height: 32, border: 'none', background: option === draft.sequence ? colors.statCardBg : 'transparent', color: colors.text, textAlign: 'left', padding: '0 10px', cursor: 'pointer' }}>{option}</button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </FormRow>
+        <FormRow label="适用公司">
+          <button type="button" onClick={() => setCompanyPickerOpen(true)} style={{ ...formInput(colors), color: draft.company ? colors.inputText : colors.textMuted, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{draft.company || '适用公司为空，所有人可见'}</span>
+            <ChevronDown size={13} />
+          </button>
+        </FormRow>
+        <FormRow label="职级代码" required><Input value={draft.code} onChange={value => update('code', value)} placeholder="请输入（例如：P7、P7.1）" max={30} /></FormRow>
+        <FormRow label="职级名称"><Input value={draft.name} onChange={value => update('name', value)} placeholder="请输入（例如：高级工程师）" max={30} /></FormRow>
+        <FormRow label="职等"><SelectInput value={draft.grade} onChange={value => update('grade', value)} options={gradeOptions} /></FormRow>
+        <FormRow label="职级状态"><Switch checked={!/停用/.test(draft.status)} onChange={() => update('status', /停用/.test(draft.status) ? '已启用' : '已停用')} /></FormRow>
+        <FormRow label="职级描述">
+          <div style={{ position: 'relative' }}>
+            <textarea value={draft.desc} onChange={event => update('desc', event.target.value.slice(0, 500))} placeholder="请输入" style={{ ...formInput(colors), height: 74, paddingTop: 8, resize: 'none' }} />
+            <span style={{ position: 'absolute', right: 8, bottom: 6, color: colors.textMuted, fontSize: 11 }}>{draft.desc.length} / 500</span>
+          </div>
+        </FormRow>
+      </div>
+      {companyPickerOpen ? (
+        <PositionCompanyModal
+          options={companyOptions}
+          selected={splitValueList(draft.company)}
+          onChange={(companies) => update('company', companies.join('；'))}
+          onClose={() => setCompanyPickerOpen(false)}
+        />
+      ) : null}
+    </ModalShell>
+  );
+}
+
+function RankDeleteConfirm({ rank, onClose, onConfirm }: { rank: OrganizationRankRecord; onClose: () => void; onConfirm: () => void }) {
+  const { colors } = useTheme();
+  const label = `${rank.code ? `${rank.code}-` : ''}${rank.name}`;
+  return (
+    <ModalShell title="" width={360} onClose={onClose}>
+      <div style={{ padding: '24px 26px 16px', display: 'flex', alignItems: 'flex-start', gap: 10, color: colors.text, fontSize: 14 }}>
+        <AlertCircle size={18} color="#f59e0b" />
+        <div>
+          <strong>删除“{label}”？</strong>
+          <div style={{ marginTop: 12, color: colors.textMuted, fontSize: 13 }}>职级删除后会从当前职级列表隐藏</div>
+        </div>
+      </div>
+      <div style={{ height: 58, borderTop: `1px solid ${colors.tableBorder}`, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, padding: '0 18px' }}>
+        <Button onClick={onClose}>取消</Button>
+        <button type="button" onClick={onConfirm} style={{ height: 32, padding: '0 14px', borderRadius: 4, border: 'none', background: '#ef4444', color: '#fff', fontSize: 13, cursor: 'pointer' }}>删除</button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function PositionDeleteConfirm({ position, onClose, onConfirm }: { position: OrganizationPositionRecord; onClose: () => void; onConfirm: () => void }) {
+  const { colors } = useTheme();
+  const label = `${position.code ? `${position.code}-` : ''}${position.name}`;
+  return (
+    <ModalShell title="" width={360} onClose={onClose}>
+      <div style={{ padding: '24px 26px 16px', display: 'flex', alignItems: 'flex-start', gap: 10, color: colors.text, fontSize: 14 }}>
+        <AlertCircle size={18} color="#f59e0b" />
+        <div>
+          <strong>删除“{label}”？</strong>
+          <div style={{ marginTop: 12, color: colors.textMuted, fontSize: 13 }}>岗位删除后不可恢复</div>
+        </div>
+      </div>
+      <div style={{ height: 58, borderTop: `1px solid ${colors.tableBorder}`, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, padding: '0 18px' }}>
+        <Button onClick={onClose}>取消</Button>
+        <button type="button" onClick={onConfirm} style={{ height: 32, padding: '0 14px', borderRadius: 4, border: 'none', background: '#ef4444', color: '#fff', fontSize: 13, cursor: 'pointer' }}>删除</button>
       </div>
     </ModalShell>
   );
@@ -2165,25 +2894,123 @@ function PreviewNode({ color, left, top, label }: { color: string; left: number;
 
 function OrganizationSettingsPage({ fields, onBack, onAdd, onEdit, onToggle }: { fields: FieldSetting[]; onBack: () => void; onAdd: () => void; onEdit: (field: FieldSetting) => void; onToggle: (id: string, key: 'enabled' | 'tableVisible') => void }) {
   const { colors } = useTheme();
+  const [staffingEnabled, setStaffingEnabled] = useState(false);
+  const [controlMode, setControlMode] = useState<'strong' | 'weak'>('strong');
+  void fields;
+  void onBack;
+  void onAdd;
+  void onEdit;
+  void onToggle;
   return (
-    <PageShell title="组织基础设置" onBack={onBack}>
-      <div style={{ marginBottom: 12 }}><Button primary onClick={onAdd}>新增字段</Button></div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', border: `1px solid ${colors.tableBorder}` }}>
-        <table style={{ width: '100%', minWidth: 1320, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-          <thead><tr style={{ background: colors.tableHeaderBg }}><Header width={210}>字段名称</Header><Header width={210}>字段编码</Header><Header width={210}>字段类型</Header><Header width={160}>字段来源</Header><Header width={120}>是否必填</Header><Header width={180}>启用状态</Header><Header width={220}>表头展示设置 ⓘ</Header><Header width={160}>操作</Header></tr></thead>
-          <tbody>
-            {fields.map(field => (
-              <tr key={field.id} style={{ height: 40, borderTop: `1px solid ${colors.tableBorder}` }}>
-                <Cell>{field.name}</Cell><Cell>{field.code}</Cell><Cell>{field.type}</Cell><Cell>{field.source}</Cell><Cell>{field.required ? '必填' : '选填'}</Cell><Cell><Switch checked={field.enabled} onChange={() => onToggle(field.id, 'enabled')} /></Cell>
-                <Cell center><input type="checkbox" checked={field.tableVisible} onChange={() => onToggle(field.id, 'tableVisible')} /></Cell>
-                <Cell>{field.editable ? <TextButton onClick={() => onEdit(field)}>编辑</TextButton> : null}</Cell>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div style={{ height: '100%', background: colors.cardBg, borderRadius: 8, border: `1px solid ${colors.cardBorder}`, overflow: 'auto', paddingTop: 28 }}>
+      <div style={{ width: 640, maxWidth: 'calc(100% - 64px)', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <SettingsBlock title="基础设置">
+          <div style={{ padding: '14px 18px 12px', borderBottom: `1px solid ${colors.tableBorder}` }}>
+            <div style={{ color: colors.text, fontWeight: 600, marginBottom: 8 }}>部门展示设置</div>
+            <div style={{ color: colors.textMuted, lineHeight: 1.8 }}>
+              设置企业所需的部门展示形式。
+              <button type="button" style={linkButton(colors)}>设置</button>
+            </div>
+          </div>
+          <div style={{ padding: '14px 18px 16px' }}>
+            <div style={{ color: colors.text, fontWeight: 600, marginBottom: 8 }}>职等设置</div>
+            <div style={{ color: colors.textMuted, lineHeight: 1.8 }}>
+              职等
+              <button type="button" style={linkButton(colors)}>设置</button>
+            </div>
+          </div>
+        </SettingsBlock>
+
+        <SettingsBlock title="编制管理设置">
+          <div style={{ padding: '14px 18px 14px', borderBottom: `1px solid ${colors.tableBorder}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <span style={{ color: colors.text, fontWeight: 600 }}>启用编制管理</span>
+              <Switch checked={staffingEnabled} onChange={() => setStaffingEnabled(value => !value)} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '64px 170px', alignItems: 'center', gap: 8, color: colors.text, fontSize: 13 }}>
+              <span>编制维度 <span style={{ color: colors.textMuted }}>ⓘ</span></span>
+              <select style={filterInput(colors)} defaultValue="组织">
+                <option>组织</option>
+                <option>岗位</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ padding: '14px 18px 16px', borderBottom: `1px solid ${colors.tableBorder}` }}>
+            <div style={{ color: colors.text, fontWeight: 600, marginBottom: 10 }}>强弱控制</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <ControlCard
+                active={controlMode === 'strong'}
+                title="强控制"
+                tag="细分"
+                desc="当人员超出编制时，进行限制，不能进入企业"
+                onClick={() => setControlMode('strong')}
+              />
+              <ControlCard
+                active={controlMode === 'weak'}
+                title="弱控制"
+                tag="细分"
+                desc="当人员超出编制时，仅进行提示，员工仍能进入企业"
+                onClick={() => setControlMode('weak')}
+              />
+            </div>
+          </div>
+
+          <div style={{ padding: '14px 18px 16px' }}>
+            <div style={{ color: colors.text, fontWeight: 600, marginBottom: 8 }}>编制占用设置</div>
+            <div style={{ color: colors.textMuted, lineHeight: 1.8 }}>
+              设置企业的编制占用规则，根据规则显示占编人数
+              <button type="button" style={linkButton(colors)}>设置</button>
+            </div>
+            <div style={{ color: colors.textMuted, marginTop: 6, lineHeight: 1.7 }}>
+              占编公式：占编人数=在职人数+录用审批中+待入职人数+待调入人数+待离职人数-待调出人数
+            </div>
+          </div>
+        </SettingsBlock>
       </div>
-      <MiniPager total={fields.length} />
-    </PageShell>
+    </div>
+  );
+}
+
+function SettingsBlock({ title, children }: { title: string; children: React.ReactNode }) {
+  const { colors } = useTheme();
+  return (
+    <section style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 5, background: colors.cardBg, overflow: 'hidden' }}>
+      <div style={{ height: 36, padding: '0 18px', display: 'flex', alignItems: 'center', gap: 8, background: colors.tableHeaderBg, color: colors.text, fontWeight: 700 }}>
+        <ChevronDown size={13} />
+        {title}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ControlCard({ active, title, tag, desc, onClick }: { active: boolean; title: string; tag: string; desc: string; onClick: () => void }) {
+  const { colors } = useTheme();
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        minHeight: 60,
+        border: 'none',
+        borderRadius: 4,
+        background: active ? colors.tagActiveBg : colors.tableHeaderBg,
+        padding: '10px 12px',
+        textAlign: 'left',
+        cursor: 'pointer',
+        color: colors.text,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+        <span style={{ width: 14, height: 14, borderRadius: '50%', border: `2px solid ${active ? colors.primary : colors.textMuted}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          {active ? <span style={{ width: 6, height: 6, borderRadius: '50%', background: colors.primary }} /> : null}
+        </span>
+        <strong>{title}</strong>
+        <span style={{ color: active ? colors.primary : colors.textMuted }}>{tag}</span>
+      </div>
+      <div style={{ color: colors.textMuted, fontSize: 12, lineHeight: 1.6, paddingLeft: 20 }}>{desc}</div>
+    </button>
   );
 }
 

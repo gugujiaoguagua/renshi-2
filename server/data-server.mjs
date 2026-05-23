@@ -20,15 +20,18 @@ const WECOM_APP_SECRET = process.env.WECOM_APP_SECRET || process.env.WECOM_SECRE
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(WORKSPACE_DIR, '资料'));
 const EMPLOYEE_REFERENCE_DIR = path.resolve(process.env.EMPLOYEE_REFERENCE_DIR || path.join(WORKSPACE_DIR, '参考图片', '功能', '员工管理'));
 const ORGANIZATION_REFERENCE_DIR = path.resolve(process.env.ORGANIZATION_REFERENCE_DIR || path.join(WORKSPACE_DIR, '参考图片', '功能', '组织管理'));
+const ATTENDANCE_SUPPLEMENT_DIR = path.resolve(process.env.ATTENDANCE_SUPPLEMENT_DIR || path.join(WORKSPACE_DIR, '参考图片', '功能', '假期管理补充', '假期管理导出文件'));
 const STORE_FILE = path.join(SERVER_DIR, 'data-store.json');
 const MOBILE_TEST_USERS_FILE = path.join(SERVER_DIR, 'mobile-test-users.json');
 const UPLOAD_DIR = path.join(SERVER_DIR, 'uploads');
+const EXPORT_DIR = path.join(SERVER_DIR, 'exports');
 const TIME_ZONE = 'Asia/Shanghai';
 
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 app.use('/uploads', express.static(UPLOAD_DIR));
+app.use('/exports', express.static(EXPORT_DIR));
 
 function readStore() {
   try {
@@ -139,16 +142,24 @@ function upsertStoredRow(key, row, idGetter) {
   return { row, rows: nextRows, created: existingIndex < 0 };
 }
 
-function listExcelFiles() {
-  if (!fs.existsSync(DATA_DIR)) return [];
+function listExcelFilesFromDirectory(dir) {
+  if (!fs.existsSync(dir)) return [];
   return fs
-    .readdirSync(DATA_DIR)
+    .readdirSync(dir)
     .filter((name) => name.toLowerCase().endsWith('.xlsx') || name.toLowerCase().endsWith('.xls'))
     .map((name) => {
-      const fullPath = path.join(DATA_DIR, name);
+      const fullPath = path.join(dir, name);
       return { name, fullPath, stat: fs.statSync(fullPath) };
     })
     .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
+}
+
+function listExcelFiles() {
+  return listExcelFilesFromDirectory(DATA_DIR);
+}
+
+function listAttendanceSupplementFiles() {
+  return listExcelFilesFromDirectory(ATTENDANCE_SUPPLEMENT_DIR);
 }
 
 function pickFile(...keywords) {
@@ -158,6 +169,11 @@ function pickFile(...keywords) {
     if (file) return file;
   }
   return files[0];
+}
+
+function pickAttendanceSupplementFile(...keywords) {
+  const files = listAttendanceSupplementFiles();
+  return files.find((file) => keywords.every((keyword) => file.name.includes(keyword))) || null;
 }
 
 function readSheetRows(filePath, sheetMatcher) {
@@ -365,6 +381,35 @@ function mapDailyRows(rows) {
   }).filter((row) => row.name !== '-');
 }
 
+function mapDailyClockSummaryRows(rows) {
+  return rows.slice(0, 5000).map((row) => {
+    const date = extractDate(getByAliases(row, ['打卡日期', '日期']));
+    const clockValues = ['打卡1', '打卡2', '打卡3']
+      .map((key) => asRawText(getByAliases(row, [key])))
+      .filter(Boolean);
+    return {
+      name: asText(getByAliases(row, ['姓名']), '-'),
+      confirmStatus: '未确认',
+      empId: asText(getByAliases(row, ['员工号', '员工工号', '工号']), ''),
+      date,
+      dept: asText(getByAliases(row, ['部门']), ''),
+      position: asText(getByAliases(row, ['岗位']), ''),
+      bizGroup: '',
+      deptFullPath: asText(getByAliases(row, ['部门全路径']), ''),
+      regularDate: '',
+      attendGroup: asText(getByAliases(row, ['考勤组']), ''),
+      shiftName: asText(getByAliases(row, ['班次名称', '班次']), ''),
+      dateType: '',
+      weekday: asText(getByAliases(row, ['星期']), weekdayFromDate(date)),
+      attendResult: clockValues.length >= 2 ? '正常' : '异常',
+      anomalyDesc: clockValues.length ? '' : '未打卡',
+      taskSummary: clockValues.length ? `打卡${clockValues.length}次：${clockValues.join(' / ')}` : '无打卡记录',
+      normalHours: clockValues.length >= 2 ? 8 : 0,
+      lateMinutes: 0,
+    };
+  }).filter((row) => row.name !== '-');
+}
+
 function mapMonthlyRows(rows) {
   const dateKeyReg = /(20\d{2}-\d{2}-\d{2})日/;
   const keys = Object.keys(rows[0] || {});
@@ -386,6 +431,28 @@ function mapMonthlyRows(rows) {
       deptFullPath: asText(getByAliases(row, ['部门全路径']), ''),
       bizGroup: asText(getByAliases(row, ['业务分组']), ''),
       dayResults,
+    };
+  }).filter((row) => row.name !== '-');
+}
+
+function mapMonthlyDayValueRows(rows) {
+  const dateKeyReg = /(20\d{2}-\d{2}-\d{2})日/;
+  const keys = Object.keys(rows[0] || {});
+  const dateKeys = keys.filter((key) => dateKeyReg.test(key));
+  return rows.slice(0, 3000).map((row) => {
+    const dayValues = {};
+    for (const key of dateKeys) {
+      const m = key.match(dateKeyReg);
+      if (!m) continue;
+      const day = String(Number(m[1].slice(-2)));
+      dayValues[day] = asText(row[key], '');
+    }
+    return {
+      name: asText(getByAliases(row, ['姓名']), '-'),
+      empId: asText(getByAliases(row, ['员工号', '员工工号', '工号']), ''),
+      dept: asText(getByAliases(row, ['部门']), ''),
+      attendGroup: asText(getByAliases(row, ['考勤组']), ''),
+      dayValues,
     };
   }).filter((row) => row.name !== '-');
 }
@@ -419,7 +486,7 @@ function mapAnomalyRows(rows) {
     const date = extractDate(getByAliases(row, ['考勤日期', '日期']));
     const desc = asText(getByAliases(row, ['异常说明']), '异常');
     const reminder = asText(getByAliases(row, ['提醒状态']), '未提醒').includes('已') ? '已提醒' : '未提醒';
-    const writeOff = asText(getByAliases(row, ['核销状态']), '未核销').includes('已') ? '已核销' : '未核销';
+    const writeOff = asText(getByAliases(row, ['核销状态', '核销异常']), '未核销').includes('已') ? '已核销' : '未核销';
     const remark = asText(getByAliases(row, ['备注', '处理备注', '处理意见']), '');
     return {
       id: id++,
@@ -471,6 +538,32 @@ function mapMonthlySummaryRows(rows) {
       confirmStatus,
     };
   }).filter((row) => row.name !== '-');
+}
+
+function mapLeaveRecordRows(rows) {
+  return rows.slice(0, 5000).map((row) => {
+    const recordStatus = asText(getByAliases(row, ['记录状态']), '审批中');
+    const flowStatus = asText(getByAliases(row, ['当前流程状态']), recordStatus);
+    return [
+      recordStatus,
+      asText(getByAliases(row, ['申请人', '*姓名', '姓名']), '-'),
+      asText(getByAliases(row, ['申请人员工号', '*员工号', '员工号']), ''),
+      asText(getByAliases(row, ['申请人部门', '部门']), ''),
+      asText(getByAliases(row, ['部门全路径']), ''),
+      asText(getByAliases(row, ['发起人']), ''),
+      asText(getByAliases(row, ['发起人员工号']), ''),
+      asText(getByAliases(row, ['数据来源', '发起类型']), '管理员发起'),
+      asText(getByAliases(row, ['假期类型', '*假期类型']), ''),
+      asText(getByAliases(row, ['开始时间', '*请假开始时间']), ''),
+      asText(getByAliases(row, ['结束时间', '*请假结束时间']), ''),
+      asText(getByAliases(row, ['请假时长']), ''),
+      asText(getByAliases(row, ['请假事由']), ''),
+      asText(getByAliases(row, ['发起时间']), ''),
+      asText(getByAliases(row, ['完成时间']), ''),
+      flowStatus,
+      '查看',
+    ];
+  }).filter((row) => row[1] !== '-');
 }
 
 function mapShiftSettingRows(rows) {
@@ -993,51 +1086,72 @@ function buildLinkedAttendanceStatsRows() {
 }
 
 function buildLinkedDailyRows() {
-  return linkedDemoEmployees().map((employee) => {
-    const base = employeeBase(employee);
-    const dateType = getEmployeeDateType(employee, currentDateText());
-    const todayRows = clockRowsForEmployeeDate(employee);
+  const context = getHrCoreContext();
+  const dateText = currentDateText();
+  const dateType = isDefaultWeekday(dateText) ? '工作日' : '休息日';
+  const clockRowsByEmployee = new Map();
+  for (const row of context.rawClockRows.filter((item) => asText(item.date, '') === dateText)) {
+    const employeeNo = asRawText(row.employeeNo);
+    const current = clockRowsByEmployee.get(employeeNo) || [];
+    current.push(row);
+    clockRowsByEmployee.set(employeeNo, current);
+  }
+  return context.employees.map((employee) => {
+    const todayRows = clockRowsByEmployee.get(asRawText(employee.employeeNo)) || [];
     const hasClock = todayRows.length > 0;
     const hasAnomaly = clockRowsHaveAnomaly(todayRows);
-    const clockIn = clockInText(employee, todayRows);
-    const clockOut = clockOutText(employee, todayRows);
-    const shift = getEmployeeShift(employee);
-    const isRestDay = dateType !== '工作日' || shift.name === '休息';
+    const clockIn = asText(todayRows.find((item) => item.type === 'clockIn')?.time, '-');
+    const clockOut = asText(todayRows.find((item) => item.type === 'clockOut')?.time, '-');
+    const isRestDay = dateType !== '工作日' || employee.shiftName === '休息';
     return {
-      name: base.name,
+      name: employee.name,
       confirmStatus: hasClock ? '待确认' : '未确认',
-      empId: base.empId,
-      date: currentDateText(),
-      dept: base.dept,
-      position: base.position,
-      bizGroup: employee.businessGroup,
-      deptFullPath: base.deptPath,
+      empId: employee.employeeNo,
+      date: dateText,
+      dept: employee.organizationName,
+      position: employee.positionName,
+      bizGroup: '-',
+      deptFullPath: employee.organizationFullPath,
       regularDate: '-',
-      attendGroup: base.attendGroup,
-      shiftName: base.shiftName,
+      attendGroup: employee.attendanceGroupName,
+      shiftName: employee.shiftName,
       dateType,
       weekday: currentWeekdayText().replace('星期', ''),
       attendResult: !hasClock ? (isRestDay ? '休息' : '未打卡') : (hasAnomaly ? '异常' : '正常'),
       anomalyDesc: hasClock ? clockAnomalyText(todayRows) : (isRestDay ? '' : '未打卡'),
       taskSummary: hasClock ? `打卡${todayRows.length}次` : '-',
       normalHours: clockIn !== '-' && clockOut !== '-' ? 8 : 0,
-      lateMinutes: minutesAfter(clockIn, shift.clockInTime || MOBILE_SHIFT.clockInTime),
+      lateMinutes: minutesAfter(clockIn, MOBILE_SHIFT.clockInTime),
     };
   });
 }
 
 function buildLinkedMonthlyRows() {
   const period = currentDateText().slice(0, 7);
-  return linkedDemoEmployees().map((employee) => {
-    const base = employeeBase(employee);
+  const context = getHrCoreContext();
+  const scheduleRowsByEmployee = new Map();
+  for (const row of context.schedules.filter((item) => asText(item.date, '').startsWith(period))) {
+    const employeeNo = asRawText(row.employeeNo);
+    const current = scheduleRowsByEmployee.get(employeeNo) || [];
+    current.push(row);
+    scheduleRowsByEmployee.set(employeeNo, current);
+  }
+  const clockRowsByEmployee = new Map();
+  for (const row of context.rawClockRows.filter((item) => asText(item.date, '').startsWith(period))) {
+    const employeeNo = asRawText(row.employeeNo);
+    const current = clockRowsByEmployee.get(employeeNo) || [];
+    current.push(row);
+    clockRowsByEmployee.set(employeeNo, current);
+  }
+  return context.employees.map((employee) => {
     const dayResults = {};
-    for (const row of scheduleRowsForEmployee(employee, period)) {
+    for (const row of scheduleRowsByEmployee.get(asRawText(employee.employeeNo)) || []) {
       const day = String(Number(asText(row.date, '').slice(8, 10)));
       if (!day || day === 'NaN') continue;
       const shiftName = asText(row.shiftName, '');
       dayResults[day] = shiftName === '休息' ? '休' : shiftName || '已排班';
     }
-    for (const row of clockRowsForEmployee(employee).filter((item) => asText(item.date, '').startsWith(period))) {
+    for (const row of clockRowsByEmployee.get(asRawText(employee.employeeNo)) || []) {
       const day = String(Number(asText(row.date, '').slice(8, 10)));
       if (!day || day === 'NaN') continue;
       const previous = dayResults[day];
@@ -1045,13 +1159,13 @@ function buildLinkedMonthlyRows() {
       dayResults[day] = result === '异常' ? result : (previous || result);
     }
     return {
-      name: base.name,
-      empId: base.empId,
-      dept: base.dept,
-      position: base.position,
-      attendGroup: base.attendGroup,
-      deptFullPath: base.deptPath,
-      bizGroup: employee.businessGroup,
+      name: employee.name,
+      empId: employee.employeeNo,
+      dept: employee.organizationName,
+      position: employee.positionName,
+      attendGroup: employee.attendanceGroupName,
+      deptFullPath: employee.organizationFullPath,
+      bizGroup: '-',
       dayResults,
     };
   });
@@ -1060,34 +1174,48 @@ function buildLinkedMonthlyRows() {
 function buildLinkedMonthlySummaryRows() {
   const period = currentDateText().slice(0, 7);
   const externalValues = externalMetricValuesByEmployee(period);
-  return linkedDemoEmployees().map((employee, index) => {
-    const base = employeeBase(employee);
-    const shouldWorkDays = currentMonthWorkdayCount(employee);
-    const monthRows = clockRowsForEmployee(employee).filter((row) => asText(row.date, '').startsWith(period));
-    const scheduledRows = scheduleRowsForEmployee(employee, period);
-    const scheduleDays = scheduledRows.filter((row) => asText(row.shiftName, '') !== '休息').length;
-    const actualWorkDays = countUniqueClockDates(employee, period);
+  const context = getHrCoreContext();
+  const scheduleRowsByEmployee = new Map();
+  for (const row of context.schedules.filter((item) => asText(item.date, '').startsWith(period))) {
+    const employeeNo = asRawText(row.employeeNo);
+    const current = scheduleRowsByEmployee.get(employeeNo) || [];
+    current.push(row);
+    scheduleRowsByEmployee.set(employeeNo, current);
+  }
+  const clockRowsByEmployee = new Map();
+  for (const row of context.rawClockRows.filter((item) => asText(item.date, '').startsWith(period))) {
+    const employeeNo = asRawText(row.employeeNo);
+    const current = clockRowsByEmployee.get(employeeNo) || [];
+    current.push(row);
+    clockRowsByEmployee.set(employeeNo, current);
+  }
+  const defaultShouldWorkDays = currentMonthWorkdayCount(null);
+
+  return context.employees.map((employee, index) => {
+    const monthRows = clockRowsByEmployee.get(asRawText(employee.employeeNo)) || [];
+    const scheduledRows = scheduleRowsByEmployee.get(asRawText(employee.employeeNo)) || [];
+    const scheduleDays = scheduledRows.length
+      ? scheduledRows.filter((row) => asText(row.shiftName, '') !== '休息').length
+      : defaultShouldWorkDays;
+    const actualWorkDays = new Set(monthRows.map((row) => asText(row.date, '')).filter(Boolean)).size;
     const lateMinutes = monthRows
       .filter((row) => row.type === 'clockIn')
-      .reduce((sum, row) => {
-        const shift = getEmployeeShift(employee, asText(row.date, currentDateText()));
-        return sum + minutesAfter(row.time, shift.clockInTime || MOBILE_SHIFT.clockInTime);
-      }, 0);
+      .reduce((sum, row) => sum + minutesAfter(row.time, MOBILE_SHIFT.clockInTime), 0);
     return {
       id: index + 1,
-      name: base.name,
+      name: employee.name,
       lockStatus: '未锁定',
-      empId: base.empId,
-      dept: base.dept,
-      position: base.position,
+      empId: employee.employeeNo,
+      dept: employee.organizationName,
+      position: employee.positionName,
       hireDate: employee.hireDate,
       resignDate: '',
-      deptFullPath: base.deptPath,
-      bizGroup: employee.businessGroup,
-      attendGroup: base.attendGroup,
-      shouldWorkDays,
+      deptFullPath: employee.organizationFullPath,
+      bizGroup: '-',
+      attendGroup: employee.attendanceGroupName,
+      shouldWorkDays: scheduleDays,
       actualWorkDays,
-      absentDays: Math.max(0, shouldWorkDays - actualWorkDays),
+      absentDays: Math.max(0, scheduleDays - actualWorkDays),
       tripDays: 0,
       scheduleDays,
       normalHours: actualWorkDays * 8,
@@ -1585,6 +1713,69 @@ function readMappedRows(file, sheetMatcher, mapper) {
   return { rows: mapper(rows), sheetName };
 }
 
+function readSupplementMappedRows(keywords, sheetMatcher, mapper) {
+  const file = pickAttendanceSupplementFile(...keywords);
+  if (!file) return null;
+  const { rows, sheetName } = readSheetRows(file.fullPath, sheetMatcher);
+  return { file, sheetName, rows: mapper(rows) };
+}
+
+function sourceFileLabel(source) {
+  if (Array.isArray(source)) return source.map((file) => file.name).join('；');
+  return source?.name || '真实导出文件';
+}
+
+function sendFileRows(res, source, sheetName, rows, extra = {}) {
+  return res.json({
+    sourceFile: sourceFileLabel(source),
+    sheetName,
+    total: rows.length,
+    rows,
+    linkedOnly: false,
+    ...extra,
+  });
+}
+
+function readMonthlyAttendanceSupplement() {
+  const resultData = readSupplementMappedRows(['考勤明细', '考勤结果'], (name) => name.includes('考勤结果'), mapMonthlyRows);
+  if (!resultData) return null;
+
+  const clockData = readSupplementMappedRows(['考勤明细', '打卡记录'], (name) => name.includes('打卡记录'), mapMonthlyDayValueRows);
+  if (!clockData) return resultData;
+
+  const clockByEmployeeNo = new Map(clockData.rows.map((row) => [asRawText(row.empId), row.dayValues]));
+  return {
+    file: [resultData.file, clockData.file],
+    sheetName: `${resultData.sheetName} + ${clockData.sheetName}`,
+    rows: resultData.rows.map((row) => ({
+      ...row,
+      dayClocks: clockByEmployeeNo.get(asRawText(row.empId)) || {},
+    })),
+  };
+}
+
+function readAnomalySupplement() {
+  const files = ['异常', '迟到', '旷工']
+    .map((keyword) => pickAttendanceSupplementFile('考勤异常', keyword))
+    .filter(Boolean);
+  if (!files.length) return null;
+
+  const seen = new Set();
+  const rows = [];
+  let sheetName = '考勤异常';
+  for (const file of files) {
+    const { rows: rawRows, sheetName: currentSheet } = readSheetRows(file.fullPath, (name) => name.includes('考勤异常'));
+    sheetName = currentSheet || sheetName;
+    for (const row of mapAnomalyRows(rawRows)) {
+      const key = `${row.empId}|${row.date}|${row.desc}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({ ...row, id: rows.length + 1 });
+    }
+  }
+  return { file: files, sheetName, rows };
+}
+
 function sendLinkedRows(res, sheetName, rows, extra = {}) {
   return res.json({
     sourceFile: '员工主数据 + 小程序移动端 API',
@@ -1679,7 +1870,7 @@ function readReferenceRows(file, sheetMatcher, options = {}) {
 }
 
 function readEducationRows() {
-  const file = getReferenceFile('教育经历');
+  const file = getReferenceFile('员工花名册') || getReferenceFile('教育经历');
   return readReferenceRows(file, (name) => name.includes('教育经历'));
 }
 
@@ -1695,15 +1886,105 @@ const EMPLOYMENT_FILE_MAP = {
   resigning: ['离职中'],
   resigned: ['已离职'],
   resignAll: ['全部离职'],
-  concurrent: ['兼任_20260522'],
+  concurrent: ['兼任_20260522.xlsx'],
+  concurrentCurrent: ['兼任_20260522-1'],
+  concurrentEnded: ['兼任_20260522-2'],
   concurrentRecords: ['兼任记录'],
   mainJobRecords: ['主岗任职记录'],
 };
 
 function readEmploymentRows(type = 'mainJobRecords') {
+  if (String(type).startsWith('tempStore')) {
+    return {
+      sourceFile: '全部调动记录 + 员工主数据',
+      sheetName: '临时调店',
+      rows: buildTempStoreRows(type),
+    };
+  }
+  if (String(type).startsWith('borrowed')) {
+    return {
+      sourceFile: '全部调动记录 + 员工主数据',
+      sheetName: '借调管理',
+      rows: buildBorrowedRows(type),
+    };
+  }
   const keywords = EMPLOYMENT_FILE_MAP[type] || EMPLOYMENT_FILE_MAP.mainJobRecords;
   const file = getReferenceFile(...keywords);
   return readReferenceRows(file);
+}
+
+function employmentDateValue(row, aliases) {
+  for (const alias of aliases) {
+    const value = extractDate(getByAliases(row, [alias]));
+    if (value) return value;
+  }
+  return '';
+}
+
+function filterRowsByAssignmentState(rows, type) {
+  const normalizedType = asRawText(type);
+  if (/Pending$/.test(normalizedType)) return rows.filter((row) => /未开始/.test(asRawText(row.任职状态)));
+  if (/Active$/.test(normalizedType)) return rows.filter((row) => /中/.test(asRawText(row.任职状态)));
+  if (/Ended$/.test(normalizedType) || /Records$/.test(normalizedType)) return rows.filter((row) => /结束|已生效|已完成/.test(asRawText(row.任职状态)));
+  return rows;
+}
+
+function transferRowsForAssignment() {
+  return readEmploymentRows('transferAll').rows || [];
+}
+
+function buildTempStoreRows(type = 'tempStoreAll') {
+  const rows = transferRowsForAssignment().map((row, index) => {
+    const startDate = employmentDateValue(row, ['开始日期', '调动生效日期', '生效日期']);
+    const explicitEnd = employmentDateValue(row, ['结束日期', '调店结束日期', '借调结束日期']);
+    const approved = /已通过|已完成|已生效/.test(asRawText(row.表单状态 || row.审批状态));
+    const endDate = explicitEnd || (approved && startDate && startDate <= currentDateText() ? startDate : '');
+    const employmentStatus = startDate && startDate > currentDateText()
+      ? '未开始'
+      : endDate && endDate <= currentDateText()
+        ? '调店结束'
+        : '调店中';
+    return {
+      id: index + 1,
+      姓名: asText(row.姓名, ''),
+      申请日期: employmentDateValue(row, ['申请日期', '调动申请日期']),
+      开始日期: startDate,
+      结束日期: endDate,
+      借出门店: asText(row.原部门 || row.部门, ''),
+      借入门店: asText(row.调动后部门 || row.部门, ''),
+      借入岗位: asText(row.调动后岗位 || row.岗位, ''),
+      借入职位: asText(row.调动后职位 || row.职位, ''),
+      表单状态: asText(row.表单状态 || row.审批状态, approved ? '已通过' : '审批中'),
+      任职状态: employmentStatus,
+      备注: asText(row.备注, ''),
+      添加人: asText(row.添加人 || row.发起人 || row.经办人, '系统'),
+      数据来源: '调动记录联动',
+    };
+  }).filter((row) => row.姓名);
+
+  return filterRowsByAssignmentState(rows, type);
+}
+
+function buildBorrowedRows(type = 'borrowedAll') {
+  const stateType = type.replace(/^borrowed/, 'tempStore');
+  const rows = buildTempStoreRows(stateType).map((row, index) => ({
+    id: index + 1,
+    姓名: row.姓名,
+    申请日期: row.申请日期,
+    开始日期: row.开始日期,
+    结束日期: row.结束日期,
+    借调类型: '临时借调',
+    借出部门: row.借出门店,
+    借入部门: row.借入门店,
+    借入岗位: row.借入岗位,
+    借入职位: row.借入职位,
+    表单状态: row.表单状态,
+    任职状态: asRawText(row.任职状态).replace('调店', '借调'),
+    数据来源: '调动记录联动',
+    备注: row.备注,
+    添加人: row.添加人,
+  }));
+  return rows;
 }
 
 const CONTRACT_FILE_MAP = {
@@ -1723,20 +2004,27 @@ function normalizeContractRow(row, index) {
     dept: asText(getByAliases(row, ['部门']), ''),
     deptFullPath: asText(getByAliases(row, ['部门全路径']), ''),
     position: asText(getByAliases(row, ['岗位']), ''),
+    employeeType: asText(getByAliases(row, ['员工类型']), ''),
     company: asText(getByAliases(row, ['合同公司']), ''),
     contractNo: asText(getByAliases(row, ['合同编号']), ''),
     contractType: asText(getByAliases(row, ['合同类型']), ''),
     contractTerm: asText(getByAliases(row, ['合同期限']), ''),
-    startDate: extractDate(getByAliases(row, ['合同起始日'])),
+    startDate: extractDate(getByAliases(row, ['合同起始日', '入职日期'])),
     endDate: extractDate(getByAliases(row, ['合同到期日'])),
     contractStatus: asText(getByAliases(row, ['合同状态', '员工状态']), ''),
+    contractAttachment: asText(getByAliases(row, ['合同信息附件']), ''),
+    isCurrentContract: asText(getByAliases(row, ['是否当前合同']), ''),
     signMethod: asText(getByAliases(row, ['签署方式']), ''),
-    signProgress: asText(getByAliases(row, ['签署进度', '电子签署进度']), ''),
+    signProgress: asText(getByAliases(row, ['签署进度', '电子签署进度', '解除进度']), ''),
     employeeAuthStatus: asText(getByAliases(row, ['员工授权状态']), ''),
     dataSource: asText(getByAliases(row, ['数据来源']), ''),
     initiator: asText(getByAliases(row, ['发起人']), ''),
     handler: asText(getByAliases(row, ['经办人']), ''),
     initiateTime: asText(getByAliases(row, ['发起时间']), ''),
+    releaseMethod: asText(getByAliases(row, ['解除方式']), ''),
+    releaseProgress: asText(getByAliases(row, ['解除进度']), ''),
+    releaseReason: asText(getByAliases(row, ['解除原因']), ''),
+    releaseDate: extractDate(getByAliases(row, ['解除日期'])),
   };
 }
 
@@ -1960,10 +2248,12 @@ function positionRows() {
   }
 
   const customRows = getStoredRows('organizationPositions') || [];
+  const deletedKeys = new Set((getStoredRows('organizationDeletedPositions') || []).map((item) => asRawText(item.key || item)));
   const byCode = new Map(rows.map((row) => [asRawText(row.code || row.name), row]));
+  for (const key of deletedKeys) byCode.delete(key);
   for (const custom of customRows) {
     const key = asRawText(custom.code || custom.name);
-    if (key) byCode.set(key, { ...custom, source: '本地岗位管理保存' });
+    if (key && !deletedKeys.has(key)) byCode.set(key, { ...custom, source: '本地岗位管理保存' });
   }
 
   return { sourceFile: file?.name || '本地岗位管理保存', sheetName, rows: Array.from(byCode.values()).map((row, index) => ({ ...row, id: index + 1 })) };
@@ -2000,10 +2290,12 @@ function rankRows() {
   }
 
   const customRows = getStoredRows('organizationRanks') || [];
+  const deletedKeys = new Set((getStoredRows('organizationDeletedRanks') || []).map((item) => asRawText(item.key || item)));
   const byCode = new Map(rows.map((row) => [asRawText(row.code || row.name), row]));
+  for (const key of deletedKeys) byCode.delete(key);
   for (const custom of customRows) {
     const key = asRawText(custom.code || custom.name);
-    if (key) byCode.set(key, { ...custom, source: '本地职级管理保存' });
+    if (key && !deletedKeys.has(key)) byCode.set(key, { ...custom, source: '本地职级管理保存' });
   }
 
   return { sourceFile: file?.name || '本地职级管理保存', sheetName, rows: Array.from(byCode.values()).map((row, index) => ({ ...row, id: index + 1 })) };
@@ -2036,8 +2328,666 @@ function organizationSummary() {
   };
 }
 
+let hrCoreCache = null;
+
+function getHrCoreContext() {
+  const storeUpdatedAt = asText(readStore().updatedAt, '');
+  const cacheKey = `${storeUpdatedAt}|${currentDateText()}`;
+  if (hrCoreCache?.cacheKey === cacheKey) return hrCoreCache.context;
+
+  const masterEmployees = employeeMasterRows();
+  const rawOrganizations = organizationRows().rows;
+  const rawPositions = positionRows().rows;
+  const ranks = rankRows().rows;
+  const orgByPath = new Map(rawOrganizations.map((row) => [asRawText(row.fullPath), row]));
+  const orgByName = new Map(rawOrganizations.map((row) => [asRawText(row.name), row]));
+  const positionByName = new Map(rawPositions.map((row) => [asRawText(row.name), row]));
+  const schedules = getStoredRows('employeeSchedules') || [];
+  const rawClockRows = getMobileRows('mobileClockRecords', []);
+
+  const employees = masterEmployees.map((employee, index) => {
+    const org = orgByPath.get(asRawText(employee.deptFullPath)) || orgByName.get(asRawText(employee.department)) || null;
+    const position = positionByName.get(asRawText(employee.position)) || null;
+    const shift = getEmployeeDefaultShift(employee);
+    const todaySchedule = getEmployeeSchedule(employee, currentDateText());
+    const todayClockRows = clockRowsForEmployeeDate(employee, currentDateText());
+    return {
+      id: index + 1,
+      employeeId: employee.id,
+      employeeNo: employee.employeeNo,
+      name: employee.name,
+      phone: asText(employee.phone, ''),
+      status: employee.employeeStatus,
+      employeeType: employee.employeeType,
+      hireDate: employee.hireDate,
+      organizationCode: asText(org?.code, ''),
+      organizationName: employee.department,
+      organizationFullPath: employee.deptFullPath,
+      organizationLinked: Boolean(org),
+      positionCode: asText(position?.code, ''),
+      positionName: employee.position,
+      positionLinked: Boolean(position),
+      managerNo: employee.managerNo,
+      managerName: employee.managerName,
+      attendanceGroupName: employee.attendanceGroupName,
+      shiftId: shift.id,
+      shiftName: shift.name,
+      todayScheduleStatus: todaySchedule ? '已排班' : '自动排班',
+      todayClockCount: todayClockRows.length,
+      dataSource: employee.dataSource,
+      updatedAt: asText(employee.updatedAt, ''),
+    };
+  });
+
+  const organizations = rawOrganizations.map((org) => {
+    const linkedEmployees = employees.filter((employee) => (
+      asRawText(employee.organizationFullPath) === asRawText(org.fullPath)
+      || asRawText(employee.organizationFullPath).startsWith(`${asRawText(org.fullPath)}/`)
+      || asRawText(employee.organizationName) === asRawText(org.name)
+    ));
+    const attendanceGroups = Array.from(new Set(linkedEmployees.map((employee) => employee.attendanceGroupName).filter(Boolean)));
+    return {
+      ...org,
+      employeeNos: linkedEmployees.map((employee) => employee.employeeNo),
+      linkedEmployeeCount: linkedEmployees.length,
+      attendanceGroups,
+      attendanceGroupCount: attendanceGroups.length,
+    };
+  });
+
+  const positions = rawPositions.map((position) => {
+    const linkedEmployees = employees.filter((employee) => asRawText(employee.positionName) === asRawText(position.name));
+    return {
+      ...position,
+      employeeNos: linkedEmployees.map((employee) => employee.employeeNo),
+      linkedEmployeeCount: linkedEmployees.length,
+    };
+  });
+
+  const groupNames = new Set([
+    ...getGroupSettingRows().map((row) => asText(row?.[0], '')).filter(Boolean),
+    ...employees.map((employee) => asText(employee.attendanceGroupName, '')).filter(Boolean),
+  ]);
+  const attendanceGroups = Array.from(groupNames).map((groupName, index) => {
+    const groupEmployees = employees.filter((employee) => asText(employee.attendanceGroupName, '') === groupName);
+    const employeeNoSet = new Set(groupEmployees.map((employee) => asRawText(employee.employeeNo)));
+    const scheduleCount = schedules.filter((row) => employeeNoSet.has(asRawText(row.employeeNo))).length;
+    const clockCount = rawClockRows.filter((row) => employeeNoSet.has(asRawText(row.employeeNo))).length;
+    return {
+      id: index + 1,
+      name: groupName,
+      employeeCount: groupEmployees.length,
+      employeeNos: groupEmployees.map((employee) => employee.employeeNo),
+      scheduleCount,
+      clockCount,
+      source: '考勤组设置 + 员工主数据',
+    };
+  });
+
+  const employeeByNo = new Map(employees.map((employee) => [asRawText(employee.employeeNo), employee]));
+  const employeeNoSet = new Set(employees.map((employee) => asRawText(employee.employeeNo)));
+  const clockRecords = mapMobileClockRowsToAdmin(rawClockRows.filter((row) => employeeNoSet.has(asRawText(row.employeeNo))));
+  const orphanSchedules = schedules.filter((row) => !employeeNoSet.has(asRawText(row.employeeNo)));
+  const orphanClocks = rawClockRows.filter((row) => !employeeNoSet.has(asRawText(row.employeeNo)));
+  const unlinkedOrgEmployees = employees.filter((employee) => !employee.organizationLinked);
+  const unlinkedPositionEmployees = employees.filter((employee) => !employee.positionLinked);
+
+  const relations = {
+    organizationEmployees: employees
+      .filter((employee) => employee.organizationLinked)
+      .map((employee) => ({
+        employeeNo: employee.employeeNo,
+        employeeName: employee.name,
+        organizationCode: employee.organizationCode,
+        organizationName: employee.organizationName,
+      })),
+    positionEmployees: employees
+      .filter((employee) => employee.positionLinked)
+      .map((employee) => ({
+        employeeNo: employee.employeeNo,
+        employeeName: employee.name,
+        positionCode: employee.positionCode,
+        positionName: employee.positionName,
+      })),
+    attendanceEmployees: employees.map((employee) => ({
+      employeeNo: employee.employeeNo,
+      employeeName: employee.name,
+      attendanceGroupName: employee.attendanceGroupName,
+      shiftName: employee.shiftName,
+    })),
+    scheduleEmployees: schedules
+      .filter((row) => employeeByNo.has(asRawText(row.employeeNo)))
+      .map((row) => ({
+        employeeNo: asText(row.employeeNo, ''),
+        employeeName: asText(row.employeeName, employeeByNo.get(asRawText(row.employeeNo))?.name || ''),
+        date: asText(row.date, ''),
+        shiftName: asText(row.shiftName, ''),
+      })),
+    clockEmployees: rawClockRows
+      .filter((row) => employeeByNo.has(asRawText(row.employeeNo)))
+      .map((row) => ({
+        employeeNo: asText(row.employeeNo, ''),
+        employeeName: asText(row.employeeName, employeeByNo.get(asRawText(row.employeeNo))?.name || ''),
+        date: asText(row.date, ''),
+        type: asText(row.type, ''),
+        time: asText(row.time, ''),
+      })),
+    organizationLookup: organizations.map((org) => ({ code: org.code, name: org.name, fullPath: org.fullPath })),
+    positionLookup: positions.map((position) => ({ code: position.code, name: position.name })),
+    attendanceGroupLookup: attendanceGroups.map((group) => ({ name: group.name, employeeCount: group.employeeCount })),
+  };
+
+  const issues = [];
+  if (unlinkedOrgEmployees.length) {
+    issues.push({
+      type: 'organization_unlinked_employee',
+      level: 'warning',
+      count: unlinkedOrgEmployees.length,
+      message: '部分员工的部门/组织路径未匹配到组织管理中的组织节点',
+      samples: unlinkedOrgEmployees.slice(0, 10).map((row) => ({ employeeNo: row.employeeNo, name: row.name, organizationFullPath: row.organizationFullPath })),
+    });
+  }
+  if (unlinkedPositionEmployees.length) {
+    issues.push({
+      type: 'position_unlinked_employee',
+      level: 'warning',
+      count: unlinkedPositionEmployees.length,
+      message: '部分员工岗位未匹配到组织管理中的岗位库',
+      samples: unlinkedPositionEmployees.slice(0, 10).map((row) => ({ employeeNo: row.employeeNo, name: row.name, positionName: row.positionName })),
+    });
+  }
+  if (orphanSchedules.length) {
+    issues.push({
+      type: 'schedule_orphan_employee',
+      level: 'error',
+      count: orphanSchedules.length,
+      message: '存在排班记录找不到员工主数据',
+      samples: orphanSchedules.slice(0, 10).map((row) => ({ employeeNo: row.employeeNo, date: row.date, shiftName: row.shiftName })),
+    });
+  }
+  if (orphanClocks.length) {
+    issues.push({
+      type: 'clock_orphan_employee',
+      level: 'error',
+      count: orphanClocks.length,
+      message: '存在打卡记录找不到员工主数据',
+      samples: orphanClocks.slice(0, 10).map((row) => ({ employeeNo: row.employeeNo, date: row.date, time: row.time })),
+    });
+  }
+
+  const integrity = {
+    ok: !issues.some((issue) => issue.level === 'error'),
+    generatedAt: nowText(),
+    totals: {
+      employees: employees.length,
+      organizations: organizations.length,
+      positions: positions.length,
+      attendanceGroups: attendanceGroups.length,
+      schedules: schedules.length,
+      clockRecords: rawClockRows.length,
+      organizationLinkedEmployees: employees.filter((employee) => employee.organizationLinked).length,
+      positionLinkedEmployees: employees.filter((employee) => employee.positionLinked).length,
+      attendanceLinkedEmployees: employees.filter((employee) => employee.attendanceGroupName).length,
+    },
+    questions: [
+      {
+        question: '组织管理相关界面数据内容有没有真的跟员工管理联动',
+        answer: '是。组织节点、岗位、职级均用员工主数据计算 linkedEmployeeCount，并在共享库里输出 organizationEmployees 和 positionEmployees 关系。',
+      },
+      {
+        question: '员工管理有没有跟考勤管理界面相关联动',
+        answer: '是。员工主数据直接生成考勤人员、考勤组、排班、今日打卡、实时统计、日/月统计的员工维度。',
+      },
+      {
+        question: '组织管理和员工管理和考勤管理有没有相关联动',
+        answer: '是。共享库用员工号、组织全路径、岗位名称、考勤组四个键把三类后台模块串起来，并提供完整迁移包。',
+      },
+    ],
+    issues,
+  };
+
+  const context = { employees, organizations, positions, ranks, attendanceGroups, schedules, rawClockRows, clockRecords, relations, integrity };
+  hrCoreCache = { cacheKey, context };
+  return context;
+}
+
+function hrCoreEmployeeRecords() {
+  return getHrCoreContext().employees;
+}
+
+function hrCoreOrganizationRecords() {
+  return getHrCoreContext().organizations;
+}
+
+function hrCorePositionRecords() {
+  return getHrCoreContext().positions;
+}
+
+function hrCoreAttendanceGroupRecords() {
+  return getHrCoreContext().attendanceGroups;
+}
+
+function hrCoreRelationRows() {
+  return getHrCoreContext().relations;
+}
+
+function hrCoreIntegrityReport() {
+  return getHrCoreContext().integrity;
+}
+
+function unusedHrCoreEmployeeRecordsLegacy() {
+  const organizations = organizationRows().rows;
+  const positions = positionRows().rows;
+  const orgByPath = new Map(organizations.map((row) => [asRawText(row.fullPath), row]));
+  const orgByName = new Map(organizations.map((row) => [asRawText(row.name), row]));
+  const positionByName = new Map(positions.map((row) => [asRawText(row.name), row]));
+  return employeeMasterRows().map((employee, index) => {
+    const org = orgByPath.get(asRawText(employee.deptFullPath)) || orgByName.get(asRawText(employee.department)) || null;
+    const position = positionByName.get(asRawText(employee.position)) || null;
+    const shift = getEmployeeDefaultShift(employee);
+    const todaySchedule = getEmployeeSchedule(employee, currentDateText());
+    const todayClockRows = clockRowsForEmployeeDate(employee, currentDateText());
+    return {
+      id: index + 1,
+      employeeId: employee.id,
+      employeeNo: employee.employeeNo,
+      name: employee.name,
+      phone: asText(employee.phone, ''),
+      status: employee.employeeStatus,
+      employeeType: employee.employeeType,
+      hireDate: employee.hireDate,
+      organizationCode: asText(org?.code, ''),
+      organizationName: employee.department,
+      organizationFullPath: employee.deptFullPath,
+      organizationLinked: Boolean(org),
+      positionCode: asText(position?.code, ''),
+      positionName: employee.position,
+      positionLinked: Boolean(position),
+      managerNo: employee.managerNo,
+      managerName: employee.managerName,
+      attendanceGroupName: employee.attendanceGroupName,
+      shiftId: shift.id,
+      shiftName: shift.name,
+      todayScheduleStatus: todaySchedule ? '已排班' : '自动排班',
+      todayClockCount: todayClockRows.length,
+      dataSource: employee.dataSource,
+      updatedAt: asText(employee.updatedAt, ''),
+    };
+  });
+}
+
+function unusedHrCoreOrganizationRecordsLegacy2() {
+  const employees = hrCoreEmployeeRecords();
+  return organizationRows().rows.map((org) => {
+    const linkedEmployees = employees.filter((employee) => (
+      asRawText(employee.organizationFullPath) === asRawText(org.fullPath)
+      || asRawText(employee.organizationFullPath).startsWith(`${asRawText(org.fullPath)}/`)
+      || asRawText(employee.organizationName) === asRawText(org.name)
+    ));
+    const attendanceGroups = Array.from(new Set(linkedEmployees.map((employee) => employee.attendanceGroupName).filter(Boolean)));
+    return {
+      ...org,
+      employeeNos: linkedEmployees.map((employee) => employee.employeeNo),
+      linkedEmployeeCount: linkedEmployees.length,
+      attendanceGroups,
+      attendanceGroupCount: attendanceGroups.length,
+    };
+  });
+}
+
+function unusedHrCorePositionRecordsLegacy2() {
+  const employees = hrCoreEmployeeRecords();
+  return positionRows().rows.map((position) => {
+    const linkedEmployees = employees.filter((employee) => asRawText(employee.positionName) === asRawText(position.name));
+    return {
+      ...position,
+      employeeNos: linkedEmployees.map((employee) => employee.employeeNo),
+      linkedEmployeeCount: linkedEmployees.length,
+    };
+  });
+}
+
+function unusedHrCoreAttendanceGroupRecordsLegacy2() {
+  const employees = hrCoreEmployeeRecords();
+  const schedules = getStoredRows('employeeSchedules') || [];
+  const clockRows = getMobileRows('mobileClockRecords', []);
+  const groupNames = new Set([
+    ...getGroupSettingRows().map((row) => asText(row?.[0], '')).filter(Boolean),
+    ...employees.map((employee) => asText(employee.attendanceGroupName, '')).filter(Boolean),
+  ]);
+  return Array.from(groupNames).map((groupName, index) => {
+    const groupEmployees = employees.filter((employee) => asText(employee.attendanceGroupName, '') === groupName);
+    const employeeNoSet = new Set(groupEmployees.map((employee) => asRawText(employee.employeeNo)));
+    const scheduleCount = schedules.filter((row) => employeeNoSet.has(asRawText(row.employeeNo))).length;
+    const clockCount = clockRows.filter((row) => employeeNoSet.has(asRawText(row.employeeNo))).length;
+    return {
+      id: index + 1,
+      name: groupName,
+      employeeCount: groupEmployees.length,
+      employeeNos: groupEmployees.map((employee) => employee.employeeNo),
+      scheduleCount,
+      clockCount,
+      source: '考勤组设置 + 员工主数据',
+    };
+  });
+}
+
+function unusedHrCoreRelationRowsLegacy2() {
+  const employees = hrCoreEmployeeRecords();
+  const organizations = hrCoreOrganizationRecords();
+  const positions = hrCorePositionRecords();
+  const groups = hrCoreAttendanceGroupRecords();
+  const clockRows = getMobileRows('mobileClockRecords', []);
+  const schedules = getStoredRows('employeeSchedules') || [];
+  const employeeByNo = new Map(employees.map((employee) => [asRawText(employee.employeeNo), employee]));
+  const orgByCode = new Map(organizations.map((org) => [asRawText(org.code), org]));
+  const positionByCode = new Map(positions.map((position) => [asRawText(position.code), position]));
+  return {
+    organizationEmployees: employees
+      .filter((employee) => employee.organizationLinked)
+      .map((employee) => ({
+        employeeNo: employee.employeeNo,
+        employeeName: employee.name,
+        organizationCode: employee.organizationCode,
+        organizationName: employee.organizationName,
+      })),
+    positionEmployees: employees
+      .filter((employee) => employee.positionLinked)
+      .map((employee) => ({
+        employeeNo: employee.employeeNo,
+        employeeName: employee.name,
+        positionCode: employee.positionCode,
+        positionName: employee.positionName,
+      })),
+    attendanceEmployees: employees.map((employee) => ({
+      employeeNo: employee.employeeNo,
+      employeeName: employee.name,
+      attendanceGroupName: employee.attendanceGroupName,
+      shiftName: employee.shiftName,
+    })),
+    scheduleEmployees: schedules
+      .filter((row) => employeeByNo.has(asRawText(row.employeeNo)))
+      .map((row) => ({
+        employeeNo: asText(row.employeeNo, ''),
+        employeeName: asText(row.employeeName, employeeByNo.get(asRawText(row.employeeNo))?.name || ''),
+        date: asText(row.date, ''),
+        shiftName: asText(row.shiftName, ''),
+      })),
+    clockEmployees: clockRows
+      .filter((row) => employeeByNo.has(asRawText(row.employeeNo)))
+      .map((row) => ({
+        employeeNo: asText(row.employeeNo, ''),
+        employeeName: asText(row.employeeName, employeeByNo.get(asRawText(row.employeeNo))?.name || ''),
+        date: asText(row.date, ''),
+        type: asText(row.type, ''),
+        time: asText(row.time, ''),
+      })),
+    organizationLookup: Array.from(orgByCode.values()).map((org) => ({ code: org.code, name: org.name, fullPath: org.fullPath })),
+    positionLookup: Array.from(positionByCode.values()).map((position) => ({ code: position.code, name: position.name })),
+    attendanceGroupLookup: groups.map((group) => ({ name: group.name, employeeCount: group.employeeCount })),
+  };
+}
+
+function unusedHrCoreIntegrityReportLegacy2() {
+  const employees = hrCoreEmployeeRecords();
+  const organizations = hrCoreOrganizationRecords();
+  const positions = hrCorePositionRecords();
+  const attendanceGroups = hrCoreAttendanceGroupRecords();
+  const schedules = getStoredRows('employeeSchedules') || [];
+  const clockRows = getMobileRows('mobileClockRecords', []);
+  const employeeNoSet = new Set(employees.map((employee) => asRawText(employee.employeeNo)));
+  const issues = [];
+  const unlinkedOrgEmployees = employees.filter((employee) => !employee.organizationLinked);
+  const unlinkedPositionEmployees = employees.filter((employee) => !employee.positionLinked);
+  const orphanSchedules = schedules.filter((row) => !employeeNoSet.has(asRawText(row.employeeNo)));
+  const orphanClocks = clockRows.filter((row) => !employeeNoSet.has(asRawText(row.employeeNo)));
+
+  if (unlinkedOrgEmployees.length) {
+    issues.push({
+      type: 'organization_unlinked_employee',
+      level: 'warning',
+      count: unlinkedOrgEmployees.length,
+      message: '部分员工的部门/组织路径未匹配到组织管理中的组织节点',
+      samples: unlinkedOrgEmployees.slice(0, 10).map((row) => ({ employeeNo: row.employeeNo, name: row.name, organizationFullPath: row.organizationFullPath })),
+    });
+  }
+  if (unlinkedPositionEmployees.length) {
+    issues.push({
+      type: 'position_unlinked_employee',
+      level: 'warning',
+      count: unlinkedPositionEmployees.length,
+      message: '部分员工岗位未匹配到组织管理中的岗位库',
+      samples: unlinkedPositionEmployees.slice(0, 10).map((row) => ({ employeeNo: row.employeeNo, name: row.name, positionName: row.positionName })),
+    });
+  }
+  if (orphanSchedules.length) {
+    issues.push({
+      type: 'schedule_orphan_employee',
+      level: 'error',
+      count: orphanSchedules.length,
+      message: '存在排班记录找不到员工主数据',
+      samples: orphanSchedules.slice(0, 10).map((row) => ({ employeeNo: row.employeeNo, date: row.date, shiftName: row.shiftName })),
+    });
+  }
+  if (orphanClocks.length) {
+    issues.push({
+      type: 'clock_orphan_employee',
+      level: 'error',
+      count: orphanClocks.length,
+      message: '存在打卡记录找不到员工主数据',
+      samples: orphanClocks.slice(0, 10).map((row) => ({ employeeNo: row.employeeNo, date: row.date, time: row.time })),
+    });
+  }
+
+  return {
+    ok: !issues.some((issue) => issue.level === 'error'),
+    generatedAt: nowText(),
+    totals: {
+      employees: employees.length,
+      organizations: organizations.length,
+      positions: positions.length,
+      attendanceGroups: attendanceGroups.length,
+      schedules: schedules.length,
+      clockRecords: clockRows.length,
+      organizationLinkedEmployees: employees.filter((employee) => employee.organizationLinked).length,
+      positionLinkedEmployees: employees.filter((employee) => employee.positionLinked).length,
+      attendanceLinkedEmployees: employees.filter((employee) => employee.attendanceGroupName).length,
+    },
+    questions: [
+      {
+        question: '组织管理相关界面数据内容有没有真的跟员工管理联动',
+        answer: '是。组织节点、岗位、职级均用员工主数据计算 linkedEmployeeCount，并在共享库里输出 organizationEmployees 和 positionEmployees 关系。',
+      },
+      {
+        question: '员工管理有没有跟考勤管理界面相关联动',
+        answer: '是。员工主数据直接生成考勤人员、考勤组、排班、今日打卡、实时统计、日/月统计的员工维度。',
+      },
+      {
+        question: '组织管理和员工管理和考勤管理有没有相关联动',
+        answer: '是。共享库用员工号、组织全路径、岗位名称、考勤组四个键把三类后台模块串起来，并提供完整迁移包。',
+      },
+    ],
+    issues,
+  };
+}
+
+function hrCoreLibrary() {
+  const store = readStore();
+  return {
+    ok: true,
+    schemaVersion: 'hr-core-linkage-v1',
+    generatedAt: nowText(),
+    storage: {
+      primaryStoreFile: STORE_FILE,
+      referenceDirs: {
+        employee: EMPLOYEE_REFERENCE_DIR,
+        organization: ORGANIZATION_REFERENCE_DIR,
+        attendance: DATA_DIR,
+      },
+      mutableKeys: [
+        'onboardedEmployees',
+        'organizationStructures',
+        'organizationPositions',
+        'organizationRanks',
+        'employeeSchedules',
+        'mobileClockRecords',
+        'mobileMakeupRequests',
+        'mobileAnomalies',
+        'leaveRecords',
+        'fieldOutRecords',
+        'fieldTripRecords',
+        'externalRecords',
+      ],
+      crudEndpoints: {
+        employees: {
+          list: 'GET /api/hr-core/library',
+          upsert: 'POST /api/hr-core/employees',
+          update: 'PUT /api/hr-core/employees/:employeeNo',
+          delete: 'DELETE /api/hr-core/employees/:employeeNo',
+        },
+        organizations: {
+          list: 'GET /api/organization-management/organizations',
+          upsert: 'POST /api/organization-management/organizations',
+          delete: 'DELETE /api/organization-management/organizations/:code',
+        },
+        positions: {
+          list: 'GET /api/organization-management/positions',
+          upsert: 'POST /api/organization-management/positions',
+          delete: 'DELETE /api/organization-management/positions/:key',
+        },
+        attendance: {
+          people: 'GET /api/settings-people',
+          schedules: 'PUT /api/schedules',
+          clockRecords: 'PUT /api/clock-records',
+          monthlySummary: 'PUT /api/monthly-summary',
+        },
+        migration: {
+          bundle: 'GET /api/hr-core/migration-bundle',
+          exportFile: 'POST /api/hr-core/export',
+        },
+      },
+      updatedAt: asText(store.updatedAt, ''),
+    },
+    entities: {
+      organizations: hrCoreOrganizationRecords(),
+      positions: hrCorePositionRecords(),
+      ranks: rankRows().rows,
+      employees: hrCoreEmployeeRecords(),
+      attendanceGroups: hrCoreAttendanceGroupRecords(),
+      shifts: getShiftOptions(),
+      schedules: getStoredRows('employeeSchedules') || [],
+      clockRecords: mapMobileClockRowsToAdmin(filterRowsToOnboardedEmployees(getMobileRows('mobileClockRecords', []))),
+      leaveRecords: buildLinkedLeaveRows(),
+      fieldOutRecords: buildLinkedFieldOutRows(),
+      fieldTripRecords: buildLinkedFieldTripRows(),
+      externalRecords: buildLinkedExternalRows(),
+    },
+    relations: hrCoreRelationRows(),
+    integrity: hrCoreIntegrityReport(),
+  };
+}
+
+function hrCoreMigrationBundle() {
+  const library = hrCoreLibrary();
+  return {
+    ...library,
+    exportKind: 'portable-hr-core-migration-bundle',
+    importOrder: [
+      'organizationStructures',
+      'organizationPositions',
+      'organizationRanks',
+      'onboardedEmployees',
+      'settingsGroups',
+      'settingsShifts',
+      'employeeSchedules',
+      'mobileClockRecords',
+      'leaveRecords',
+      'fieldOutRecords',
+      'fieldTripRecords',
+      'externalRecords',
+    ],
+    writableStoreSnapshot: readStore(),
+  };
+}
+
+function writeHrCoreExportFile(bundle) {
+  fs.mkdirSync(EXPORT_DIR, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-');
+  const filename = `hr-core-migration-bundle-${stamp}.json`;
+  const fullPath = path.join(EXPORT_DIR, filename);
+  fs.writeFileSync(fullPath, JSON.stringify(bundle, null, 2), 'utf-8');
+  return { filename, fullPath };
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, dataDir: DATA_DIR, employeeReferenceDir: EMPLOYEE_REFERENCE_DIR, organizationReferenceDir: ORGANIZATION_REFERENCE_DIR, files: listExcelFiles().map((f) => f.name) });
+});
+
+app.get('/api/hr-core/library', (_req, res) => {
+  res.json(hrCoreLibrary());
+});
+
+app.get('/api/hr-core/linkage-report', (_req, res) => {
+  res.json(hrCoreIntegrityReport());
+});
+
+app.get('/api/hr-core/migration-bundle', (_req, res) => {
+  res.json(hrCoreMigrationBundle());
+});
+
+app.post('/api/hr-core/export', (req, res) => {
+  const bundle = hrCoreMigrationBundle();
+  const file = writeHrCoreExportFile(bundle);
+  res.json({
+    ok: true,
+    filename: file.filename,
+    fullPath: file.fullPath,
+    url: `/exports/${file.filename}`,
+    generatedAt: bundle.generatedAt,
+    totals: bundle.integrity.totals,
+  });
+});
+
+app.post('/api/hr-core/employees', (req, res) => {
+  const employeeNo = asRawText(req.body?.employeeNo);
+  const name = asRawText(req.body?.name);
+  if (!employeeNo || !name) return res.status(400).json({ message: '姓名和员工号必填' });
+  const employee = normalizeOnboardedEmployee({ ...req.body, employeeNo, name, dataSource: asText(req.body?.dataSource, 'HR Core共享库') });
+  const result = upsertStoredRow('onboardedEmployees', employee, (row) => asRawText(row.employeeNo));
+  hrCoreCache = null;
+  res.json({
+    ok: true,
+    created: result.created,
+    employee,
+    affects: ['employee-management', 'attendance-settings-people', 'attendance-stats', 'schedules', 'hr-core-library'],
+  });
+});
+
+app.put('/api/hr-core/employees/:employeeNo', (req, res) => {
+  const employeeNo = asRawText(req.params.employeeNo);
+  const existing = employeeMasterRows().find((row) => asRawText(row.employeeNo) === employeeNo);
+  if (!existing) return res.status(404).json({ message: `未找到员工号 ${employeeNo}` });
+  const employee = normalizeOnboardedEmployee({
+    ...existing,
+    ...req.body,
+    employeeNo,
+    dataSource: asText(req.body?.dataSource, 'HR Core共享库更新'),
+  });
+  upsertStoredRow('onboardedEmployees', employee, (row) => asRawText(row.employeeNo));
+  hrCoreCache = null;
+  res.json({
+    ok: true,
+    employee,
+    affects: ['employee-management', 'attendance-settings-people', 'attendance-stats', 'schedules', 'hr-core-library'],
+  });
+});
+
+app.delete('/api/hr-core/employees/:employeeNo', (req, res) => {
+  const employeeNo = asRawText(req.params.employeeNo);
+  if (!employeeNo) return res.status(400).json({ message: '缺少员工号' });
+  const result = deleteOnboardedEmployees([employeeNo]);
+  hrCoreCache = null;
+  res.json({ ok: true, employeeNo, ...result });
 });
 
 app.get('/api/organization-management/summary', (_req, res) => {
@@ -2045,8 +2995,8 @@ app.get('/api/organization-management/summary', (_req, res) => {
 });
 
 app.get('/api/organization-management/organizations', (_req, res) => {
-  const data = organizationRows();
-  res.json({ sourceFile: data.sourceFile, sheetName: data.sheetName, total: data.rows.length, rows: data.rows });
+  const rows = hrCoreOrganizationRecords();
+  res.json({ sourceFile: 'HR Core共享库：组织 + 员工主数据', sheetName: 'organizations', total: rows.length, rows, linkedOnly: true });
 });
 
 app.post('/api/organization-management/organizations', (req, res) => {
@@ -2080,8 +3030,8 @@ app.delete('/api/organization-management/organizations/:code', (req, res) => {
 });
 
 app.get('/api/organization-management/positions', (_req, res) => {
-  const data = positionRows();
-  res.json({ sourceFile: data.sourceFile, sheetName: data.sheetName, total: data.rows.length, rows: data.rows });
+  const rows = hrCorePositionRecords();
+  res.json({ sourceFile: 'HR Core共享库：岗位 + 员工主数据', sheetName: 'positions', total: rows.length, rows, linkedOnly: true });
 });
 
 app.post('/api/organization-management/positions', (req, res) => {
@@ -2097,10 +3047,29 @@ app.post('/api/organization-management/positions', (req, res) => {
     companyText: asText(req.body?.companyText, ''),
     sequence: asText(req.body?.sequence, '专业通道'),
     subSequence: asText(req.body?.subSequence, ''),
+    sortNo: asText(req.body?.sortNo, ''),
+    desc: asText(req.body?.desc, ''),
+    remark: asText(req.body?.remark, ''),
     status: asText(req.body?.status, '已启用'),
   };
   const result = upsertStoredRow('organizationPositions', row, (item) => asRawText(item.code || item.name));
+  const key = asRawText(row.code || row.name);
+  const deleted = getStoredRows('organizationDeletedPositions') || [];
+  setStoredRows('organizationDeletedPositions', deleted.filter((item) => asRawText(item.key || item) !== key));
   res.json({ ok: true, created: result.created, row });
+});
+
+app.delete('/api/organization-management/positions/:key', (req, res) => {
+  const key = asRawText(req.params.key);
+  const rows = getStoredRows('organizationPositions') || [];
+  const nextRows = rows.filter((row) => asRawText(row.code || row.name) !== key);
+  setStoredRows('organizationPositions', nextRows);
+  const deleted = getStoredRows('organizationDeletedPositions') || [];
+  const nextDeleted = key && !deleted.some((item) => asRawText(item.key || item) === key)
+    ? [...deleted, { key, deletedAt: nowText() }]
+    : deleted;
+  setStoredRows('organizationDeletedPositions', nextDeleted);
+  res.json({ ok: true, removed: rows.length - nextRows.length, hidden: nextDeleted.length, remaining: positionRows().rows.length });
 });
 
 app.get('/api/organization-management/ranks', (_req, res) => {
@@ -2123,7 +3092,23 @@ app.post('/api/organization-management/ranks', (req, res) => {
     status: asText(req.body?.status, '已启用'),
   };
   const result = upsertStoredRow('organizationRanks', row, (item) => asRawText(item.code || item.name));
+  const key = asRawText(row.code || row.name);
+  const deleted = getStoredRows('organizationDeletedRanks') || [];
+  setStoredRows('organizationDeletedRanks', deleted.filter((item) => asRawText(item.key || item) !== key));
   res.json({ ok: true, created: result.created, row });
+});
+
+app.delete('/api/organization-management/ranks/:key', (req, res) => {
+  const key = asRawText(req.params.key);
+  const rows = getStoredRows('organizationRanks') || [];
+  const nextRows = rows.filter((row) => asRawText(row.code || row.name) !== key);
+  setStoredRows('organizationRanks', nextRows);
+  const deleted = getStoredRows('organizationDeletedRanks') || [];
+  const nextDeleted = key && !deleted.some((item) => asRawText(item.key || item) === key)
+    ? [...deleted, { key, deletedAt: nowText() }]
+    : deleted;
+  setStoredRows('organizationDeletedRanks', nextDeleted);
+  res.json({ ok: true, removed: rows.length - nextRows.length, hidden: nextDeleted.length, remaining: rankRows().rows.length });
 });
 
 app.get('/api/organization-management/settings', (_req, res) => {
@@ -2312,16 +3297,44 @@ app.get('/api/settings-linkage-report', (_req, res) => {
 });
 
 app.get('/api/data-sources', (_req, res) => {
-  const files = listExcelFiles().map((f) => ({ name: f.name, mtime: f.stat.mtime, size: f.stat.size }));
-  res.json({ files, dataDir: DATA_DIR });
+  const files = listExcelFiles().map((f) => ({ name: f.name, mtime: f.stat.mtime, size: f.stat.size, scope: '资料' }));
+  const supplementFiles = listAttendanceSupplementFiles().map((f) => ({ name: f.name, mtime: f.stat.mtime, size: f.stat.size, scope: '假期管理补充' }));
+  res.json({ files: [...supplementFiles, ...files], dataDir: DATA_DIR, supplementDir: ATTENDANCE_SUPPLEMENT_DIR });
 });
 
-app.get('/api/attendance-stats', (_req, res) => {
+app.get('/api/attendance-stats', (req, res) => {
+  if (req.query?.source === 'file') {
+    const dailyClock = readSupplementMappedRows(['原始打卡记录日报'], (name) => name.includes('打卡记录_日报') && !name.includes('明细'), (rows) => mapDailyClockSummaryRows(rows).map((row) => ({
+      name: row.name,
+      empId: row.empId,
+      attendGroup: row.attendGroup,
+      dept: row.dept,
+      deptFull: row.deptFullPath,
+      shift: row.shiftName,
+      type: '日报打卡',
+      attendance: row.taskSummary,
+      status: row.attendResult,
+      anomaly: row.anomalyDesc || '-',
+      leave: '-',
+      fieldTrip: '-',
+      cin1: row.taskSummary.match(/\d{2}:\d{2}(?::\d{2})?/)?.[0] || '-',
+      cout1: row.taskSummary.match(/.*(\d{2}:\d{2}(?::\d{2})?)/)?.[1] || '-',
+      cin2: '-',
+      cout2: '-',
+      cin3: '-',
+      cout3: '-',
+    })));
+    if (dailyClock) return sendFileRows(res, dailyClock.file, dailyClock.sheetName, dailyClock.rows);
+  }
   const rows = buildLinkedAttendanceStatsRows();
   return sendLinkedRows(res, 'attendanceStats', rows);
 });
 
-app.get('/api/daily-attendance', (_req, res) => {
+app.get('/api/daily-attendance', (req, res) => {
+  if (req.query?.source === 'file') {
+    const dailyClock = readSupplementMappedRows(['原始打卡记录日报'], (name) => name.includes('打卡记录_日报') && !name.includes('明细'), mapDailyClockSummaryRows);
+    if (dailyClock) return sendFileRows(res, dailyClock.file, dailyClock.sheetName, dailyClock.rows);
+  }
   return sendLinkedRows(res, 'dailyAttendance', buildLinkedDailyRows());
 });
 
@@ -2334,11 +3347,19 @@ app.put('/api/daily-attendance', (req, res) => {
   return res.json({ ok: true, sourceFile: '本地持久化数据 data-store.json', total: rows.length, rows });
 });
 
-app.get('/api/monthly-attendance', (_req, res) => {
+app.get('/api/monthly-attendance', (req, res) => {
+  if (req.query?.source === 'file') {
+    const monthlySupplement = readMonthlyAttendanceSupplement();
+    if (monthlySupplement) return sendFileRows(res, monthlySupplement.file, monthlySupplement.sheetName, monthlySupplement.rows);
+  }
   return sendLinkedRows(res, 'monthlyAttendance', buildLinkedMonthlyRows());
 });
 
-app.get('/api/monthly-summary', (_req, res) => {
+app.get('/api/monthly-summary', (req, res) => {
+  if (req.query?.source === 'file') {
+    const summary = readSupplementMappedRows(['月考勤统计'], (name) => name.includes('月考勤汇总'), mapMonthlySummaryRows);
+    if (summary) return sendFileRows(res, summary.file, summary.sheetName, summary.rows);
+  }
   return sendLinkedRows(res, 'monthlySummary', buildLinkedMonthlySummaryRows());
 });
 
@@ -2352,7 +3373,11 @@ app.put('/api/monthly-summary', (req, res) => {
 });
 
 
-app.get('/api/clock-records', (_req, res) => {
+app.get('/api/clock-records', (req, res) => {
+  if (req.query?.source === 'file') {
+    const clockRecords = readSupplementMappedRows(['原始打卡记录日报'], (name) => name.includes('明细'), mapClockRows);
+    if (clockRecords) return sendFileRows(res, clockRecords.file, clockRecords.sheetName, clockRecords.rows);
+  }
   const mobileRows = mapMobileClockRowsToAdmin(filterRowsToOnboardedEmployees(getMobileRows('mobileClockRecords', [])));
   return sendLinkedRows(res, 'mobileClockRecords', mobileRows);
 });
@@ -2420,6 +3445,8 @@ app.put('/api/clock-records', (req, res) => {
 });
 
 app.get('/api/attendance-anomalies', (_req, res) => {
+  const anomalySupplement = readAnomalySupplement();
+  if (anomalySupplement) return sendFileRows(res, anomalySupplement.file, anomalySupplement.sheetName, anomalySupplement.rows);
   return sendLinkedRows(res, 'mobileAnomalies', buildLinkedAnomalyRows());
 });
 
@@ -2499,9 +3526,12 @@ app.get('/api/schedules/month', (req, res) => {
       employeeNo: employee.employeeNo,
       dept: employee.department,
       position: employee.position,
+      attendGroup: employee.attendanceGroupName,
+      employeeType: employee.employeeType,
       dayResults,
     };
   });
+  const groups = getGroupSettingRows().map((row) => asText(row?.[0], '')).filter(Boolean);
   return res.json({
     sourceFile: '员工主数据 + 小程序移动端 API',
     sheetName: 'employeeSchedules',
@@ -2509,6 +3539,7 @@ app.get('/api/schedules/month', (req, res) => {
     total: rows.length,
     rows,
     shifts: getShiftOptions(),
+    groups: Array.from(new Set([...groups, ...rows.map((row) => row.attendGroup).filter(Boolean)])),
     linkedOnly: true,
   });
 });
@@ -2528,6 +3559,8 @@ app.put('/api/schedules', (req, res) => {
 });
 
 app.get('/api/leave-records', (_req, res) => {
+  const leaveRecords = readSupplementMappedRows(['请假记录', '全部导出'], (name) => name.includes('请假记录'), mapLeaveRecordRows);
+  if (leaveRecords) return sendFileRows(res, leaveRecords.file, leaveRecords.sheetName, leaveRecords.rows);
   return sendLinkedRows(res, 'leaveRecords', buildLinkedLeaveRows());
 });
 
@@ -2583,6 +3616,8 @@ app.put('/api/leave-schemes', (req, res) => {
 });
 
 app.get('/api/settings-shifts', (_req, res) => {
+  const shifts = readSupplementMappedRows(['班次管理'], null, mapShiftSettingRows);
+  if (shifts) return sendFileRows(res, shifts.file, shifts.sheetName, shifts.rows);
   return sendLinkedRows(res, 'settingsShifts', getShiftSettingRows());
 });
 
@@ -2835,6 +3870,8 @@ app.put('/api/settings-shifts', (req, res) => {
 });
 
 app.get('/api/settings-face', (_req, res) => {
+  const face = readSupplementMappedRows(['人脸管理'], null, mapFaceSettingRows);
+  if (face) return sendFileRows(res, face.file, face.sheetName, face.rows);
   return sendLinkedRows(res, 'employeeMaster', getSettingsFaceRows());
 });
 
@@ -2858,6 +3895,37 @@ app.post('/api/employees/onboard', (req, res) => {
     peopleRow: onboardedEmployeeToPeopleRow(employee),
     faceRow: onboardedEmployeeToFaceRow(employee),
     attendanceRow: onboardedEmployeeToAttendanceStatsRow(employee),
+  });
+});
+
+app.put('/api/employees/attendance-group', (req, res) => {
+  const employeeNos = Array.isArray(req.body?.employeeNos)
+    ? req.body.employeeNos.map(asRawText).filter(Boolean)
+    : [];
+  const attendanceGroupName = asRawText(req.body?.attendanceGroupName);
+  if (!employeeNos.length || !attendanceGroupName) {
+    return res.status(400).json({ message: '员工号和考勤组必填' });
+  }
+  const shiftName = asRawText(req.body?.shiftName);
+  const employeesByNo = new Map(linkedDemoEmployees().map((employee) => [asRawText(employee.employeeNo), employee]));
+  const updated = [];
+  for (const employeeNo of employeeNos) {
+    const existing = employeesByNo.get(employeeNo);
+    if (!existing) continue;
+    const employee = normalizeOnboardedEmployee({
+      ...existing,
+      attendanceGroupName,
+      shiftName: shiftName || existing.shiftName,
+      dataSource: '排班表加入考勤组',
+    });
+    upsertStoredRow('onboardedEmployees', employee, (row) => asRawText(row.employeeNo));
+    updated.push(employee);
+  }
+  return res.json({
+    ok: true,
+    attendanceGroupName,
+    updated: updated.length,
+    rows: updated.map((employee) => onboardedEmployeeToPeopleRow(employee)),
   });
 });
 

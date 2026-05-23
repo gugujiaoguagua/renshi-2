@@ -1041,6 +1041,7 @@ function GroupsView({
   sourceInfo?: string;
   loadError?: string;
 }) {
+  const navigate = useNavigate();
   const [rowsData, setRowsData] = useState<string[][]>(groupRows);
   const [draftFilters, setDraftFilters] = useState({ name: '', types: ['排班制'] });
   const [appliedFilters, setAppliedFilters] = useState(draftFilters);
@@ -1118,11 +1119,14 @@ function GroupsView({
       return;
     }
     if (label === '排班') {
-      const nextShift = window.prompt('请输入要关联的班次名称', String(row[3] ?? effectiveShiftOptions[0]?.name ?? '早九晚六'));
-      if (nextShift === null) return;
-      const trimmed = nextShift.trim();
-      if (!trimmed) return;
-      commitRows(current => current.map(item => createRowId(item) === rowId ? setRowCell(item, 3, trimmed) : item));
+      const groupName = String(row[0] ?? '').trim();
+      const shiftName = String(row[3] ?? '').trim();
+      const scopeText = String(row[2] ?? '').trim();
+      const params = new URLSearchParams();
+      if (groupName) params.set('attendanceGroup', groupName);
+      if (shiftName) params.set('shift', shiftName);
+      if (scopeText) params.set('scope', scopeText);
+      navigate(`/attendance/schedule${params.toString() ? `?${params.toString()}` : ''}`);
       return;
     }
     const groupName = String(row[0] ?? '');

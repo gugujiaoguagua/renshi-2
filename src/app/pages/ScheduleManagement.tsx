@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
-import { fetchScheduleMonth, saveScheduleAssignments, type ScheduleMonthEmployee, type ScheduleShiftOption } from '../api/realData';
+import { assignEmployeesToAttendanceGroup, fetchScheduleMonth, saveScheduleAssignments, type ScheduleMonthEmployee, type ScheduleShiftOption } from '../api/realData';
 import { monthEndISO, monthStartISO, todayISO } from '../utils/date';
 import {
   Calendar,
@@ -25,6 +25,7 @@ type AdjustTabConfig = {
   columns: string[];
 };
 type ScheduleRow = ScheduleMonthEmployee;
+type ActiveCell = { row: ScheduleRow; day: number } | null;
 
 const CALENDAR_DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 const CALENDAR_WEEK_DAYS = ['五', '六', '日', '一', '二', '三', '四', '五', '六', '日', '一', '二', '三', '四', '五', '六', '日', '一', '二', '三', '四', '五', '六', '日', '一', '二', '三', '四', '五', '六', '日'];
@@ -51,6 +52,17 @@ const ADJUST_TABS: AdjustTabConfig[] = [
     columns: ['申请人', '员工号', '部门', '部门全路径', '排休日期', '排休天数', '备注', '发起时间', '完成时间', '审批状态'],
   },
 ];
+
+function scheduleRowMatchesGroup(row: ScheduleRow, groupName: string, scopeText: string) {
+  if (!groupName) return true;
+  if (row.attendGroup === groupName) return true;
+  const normalizedScope = scopeText.replace(/[，、]/g, ',');
+  const deptTokens = normalizedScope
+    .split(',')
+    .map(token => token.replace(/^部门[:：]/, '').trim())
+    .filter(Boolean);
+  return deptTokens.some(token => row.dept.includes(token) || token.includes(row.dept));
+}
 
 export default function ScheduleManagement() {
   const { colors } = useTheme();
@@ -115,12 +127,30 @@ function ScheduleTableView({
   showMore: boolean;
   onToggleMore: () => void;
 }) {
+  const location = useLocation();
+  const linkedParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const linkedGroup = linkedParams.get('attendanceGroup') || '';
+  const linkedShift = linkedParams.get('shift') || '';
+  const linkedScope = linkedParams.get('scope') || '';
   const [month, setMonth] = useState(todayISO().slice(0, 7));
   const [rows, setRows] = useState<ScheduleRow[]>([]);
   const [shifts, setShifts] = useState<ScheduleShiftOption[]>([]);
+  const [allGroups, setAllGroups] = useState<string[]>([]);
   const [employeeFilter, setEmployeeFilter] = useState('');
+  const [groupFilter, setGroupFilter] = useState(linkedGroup);
   const [deptFilter, setDeptFilter] = useState('');
+  const [positionFilter, setPositionFilter] = useState('');
+  const [employeeTypeFilter, setEmployeeTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [joining, setJoining] = useState(false);
+  const [joinSelected, setJoinSelected] = useState<Set<string>>(new Set());
+  const [joinFilters, setJoinFilters] = useState({ employee: '', dept: '', position: '', employeeType: '' });
+  const [activeCell, setActiveCell] = useState<ActiveCell>(null);
+
+  useEffect(() => {
+    setGroupFilter(linkedGroup);
+  }, [linkedGroup]);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,6 +159,7 @@ function ScheduleTableView({
         if (cancelled) return;
         setRows(res.rows || []);
         setShifts(res.shifts || []);
+        setAllGroups(res.groups || []);
       })
       .catch(() => {
         if (!cancelled) {
@@ -145,23 +176,27 @@ function ScheduleTableView({
     const keyword = employeeFilter.trim().toLowerCase();
     const scheduledCount = Object.values(row.dayResults || {}).filter(Boolean).length;
     return (!keyword || row.name.toLowerCase().includes(keyword) || row.employeeNo.toLowerCase().includes(keyword))
+      && (!groupFilter || scheduleRowMatchesGroup(row, groupFilter, groupFilter === linkedGroup ? linkedScope : ''))
       && (!deptFilter || row.dept === deptFilter)
+      && (!positionFilter || row.position === positionFilter)
+      && (!employeeTypeFilter || row.employeeType === employeeTypeFilter)
       && (!statusFilter || (statusFilter === '已排班' ? scheduledCount > 0 : scheduledCount === 0));
   });
+  const groupOptions = Array.from(new Set([...allGroups, ...rows.map(row => row.attendGroup).filter(Boolean), linkedGroup].filter(Boolean)));
   const deptOptions = Array.from(new Set(rows.map(row => row.dept).filter(Boolean)));
+  const positionOptions = Array.from(new Set(rows.map(row => row.position).filter(Boolean)));
+  const employeeTypeOptions = Array.from(new Set(rows.map(row => row.employeeType).filter(Boolean))) as string[];
   const shiftOptions = shifts.length ? shifts : [{ id: 'shift_0900_1800', name: '早九晚六', time: '09:00-18:00' }];
   const monthLabel = `${month.slice(0, 4)}年${Number(month.slice(5, 7))}月`;
   const cycleStart = `${month}-01`;
   const cycleEnd = monthEndISO(new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1));
-  const applySchedule = (row: ScheduleRow, day: number) => {
-    const current = row.dayResults?.[String(day)] || '';
-    const currentIndex = shiftOptions.findIndex(shift => shift.name === current);
-    const nextShift = shiftOptions[(currentIndex + 1) % shiftOptions.length] || shiftOptions[0];
+  const applySchedule = (row: ScheduleRow, day: number, nextShift: ScheduleShiftOption) => {
     const date = `${month}-${String(day).padStart(2, '0')}`;
     const nextRows = rows.map(item => item.employeeNo === row.employeeNo
       ? { ...item, dayResults: { ...(item.dayResults || {}), [String(day)]: nextShift.name } }
       : item);
     setRows(nextRows);
+    setActiveCell(null);
     void saveScheduleAssignments([{
       date,
       employeeNo: row.employeeNo,
@@ -171,9 +206,58 @@ function ScheduleTableView({
       shiftName: nextShift.name,
     }]).catch(() => window.alert('排班已在页面更新，但保存到后端失败'));
   };
+  const openJoinModal = () => {
+    if (!groupFilter) {
+      window.alert('请先选择要加入的考勤组');
+      return;
+    }
+    setJoinFilters({ employee: employeeFilter, dept: deptFilter, position: positionFilter, employeeType: employeeTypeFilter });
+    setJoinSelected(new Set());
+    setShowJoinModal(true);
+  };
+  const joinCandidates = rows.filter(row => {
+    const keyword = joinFilters.employee.trim().toLowerCase();
+    return row.attendGroup !== groupFilter
+      && (!keyword || row.name.toLowerCase().includes(keyword) || row.employeeNo.toLowerCase().includes(keyword))
+      && (!joinFilters.dept || row.dept === joinFilters.dept)
+      && (!joinFilters.position || row.position === joinFilters.position)
+      && (!joinFilters.employeeType || row.employeeType === joinFilters.employeeType);
+  });
+  const toggleJoinEmployee = (employeeNo: string) => {
+    setJoinSelected(current => {
+      const next = new Set(current);
+      if (next.has(employeeNo)) next.delete(employeeNo);
+      else next.add(employeeNo);
+      return next;
+    });
+  };
+  const joinEmployees = async () => {
+    if (!groupFilter || !joinSelected.size || joining) return;
+    setJoining(true);
+    try {
+      await assignEmployeesToAttendanceGroup({
+        employeeNos: Array.from(joinSelected),
+        attendanceGroupName: groupFilter,
+        shiftName: linkedShift || undefined,
+      });
+      const res = await fetchScheduleMonth(month);
+      setRows(res.rows || []);
+      setShifts(res.shifts || []);
+      setAllGroups(res.groups || []);
+      setShowJoinModal(false);
+      setJoinSelected(new Set());
+    } catch (_error) {
+      window.alert('加入人员失败，请检查后端服务');
+    } finally {
+      setJoining(false);
+    }
+  };
   const resetFilters = () => {
     setEmployeeFilter('');
+    setGroupFilter('');
     setDeptFilter('');
+    setPositionFilter('');
+    setEmployeeTypeFilter('');
     setStatusFilter('');
   };
 
@@ -200,13 +284,19 @@ function ScheduleTableView({
       </div>
 
       <div style={{ padding: '12px 16px 10px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0 }}>
+        {linkedGroup ? (
+          <div style={{ marginBottom: 10, padding: '8px 12px', borderRadius: 6, border: `1px solid ${colors.primary}`, backgroundColor: colors.badgeBlueBg, color: colors.primary, fontSize: 12 }}>
+            已从考勤组管理联动：{linkedGroup}{linkedShift ? `，默认班次：${linkedShift}` : ''}{linkedScope ? `，适用范围：${linkedScope}` : ''}。当前排班表已按该考勤组筛选。
+          </div>
+        ) : null}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <SelectField label="考勤组" placeholder="请选择考勤组" colors={colors} width={148} />
+          <SelectField label="考勤组" placeholder="请选择考勤组" colors={colors} width={148} options={groupOptions} value={groupFilter} onChange={setGroupFilter} />
           <SearchField label="员工" placeholder="请输入姓名或工号" colors={colors} width={178} showUserIcon value={employeeFilter} onChange={setEmployeeFilter} />
           <SelectField label="部门" placeholder="请选择" colors={colors} width={136} options={deptOptions} value={deptFilter} onChange={setDeptFilter} />
-          <SelectField label="岗位" placeholder="请选择" colors={colors} width={136} />
-          <SelectField label="员工类型" placeholder="请选择" colors={colors} width={144} />
+          <SelectField label="岗位" placeholder="请选择" colors={colors} width={136} options={positionOptions} value={positionFilter} onChange={setPositionFilter} />
+          <SelectField label="员工类型" placeholder="请选择" colors={colors} width={144} options={employeeTypeOptions} value={employeeTypeFilter} onChange={setEmployeeTypeFilter} />
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button onClick={openJoinModal} disabled={!groupFilter} style={groupFilter ? primaryBtn(colors) : disabledBtn(colors)}>加入人员</button>
             <button onClick={onToggleMore} style={toggleBtn(colors, showMore)}>
               更多筛选
               {showMore ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -251,7 +341,7 @@ function ScheduleTableView({
                   const value = row.dayResults?.[String(day)] || '未排班';
                   return (
                     <td key={day} style={{ ...td(colors), width: 42, padding: '4px 2px', textAlign: 'center' }}>
-                      <button onClick={() => applySchedule(row, day)} title="点击切换班次并同步到移动端排班" style={{ width: 34, minHeight: 24, border: `1px solid ${value === '未排班' ? colors.inputBorder : colors.primary}`, borderRadius: 4, background: value === '未排班' ? 'transparent' : colors.badgeBlueBg, color: value === '未排班' ? colors.textMuted : colors.primary, fontSize: 11, cursor: 'pointer', padding: '2px 0' }}>
+                      <button onClick={() => setActiveCell({ row, day })} title="点击选择班次并同步到移动端排班" style={{ width: 34, minHeight: 24, border: `1px solid ${value === '未排班' ? colors.inputBorder : colors.primary}`, borderRadius: 4, background: value === '未排班' ? 'transparent' : colors.badgeBlueBg, color: value === '未排班' ? colors.textMuted : colors.primary, fontSize: 11, cursor: 'pointer', padding: '2px 0' }}>
                         {value === '未排班' ? '-' : value.slice(0, 2)}
                       </button>
                     </td>
@@ -268,6 +358,75 @@ function ScheduleTableView({
           </tbody>
         </table>
       </div>
+      {showJoinModal ? (
+        <div style={modalBackdropStyle}>
+          <div style={{ ...modalPanelStyle(colors), width: 760 }}>
+            <div style={modalHeaderStyle(colors)}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>加入人员到 {groupFilter}</div>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>按员工、部门、岗位筛选后勾选人员，加入后会立即进入当前考勤组的排班表。</div>
+              </div>
+              <button onClick={() => setShowJoinModal(false)} style={iconBtn(colors)}>×</button>
+            </div>
+            <div style={{ padding: 14, borderBottom: `1px solid ${colors.cardBorder}`, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <SearchField label="员工" placeholder="姓名或工号" colors={colors} width={174} value={joinFilters.employee} onChange={value => setJoinFilters(current => ({ ...current, employee: value }))} showUserIcon />
+              <SelectField label="部门" placeholder="请选择" colors={colors} width={142} options={deptOptions} value={joinFilters.dept} onChange={value => setJoinFilters(current => ({ ...current, dept: value }))} />
+              <SelectField label="岗位" placeholder="请选择" colors={colors} width={142} options={positionOptions} value={joinFilters.position} onChange={value => setJoinFilters(current => ({ ...current, position: value }))} />
+              <SelectField label="员工类型" placeholder="请选择" colors={colors} width={142} options={employeeTypeOptions} value={joinFilters.employeeType} onChange={value => setJoinFilters(current => ({ ...current, employeeType: value }))} />
+            </div>
+            <div style={{ maxHeight: 360, overflow: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ backgroundColor: colors.tableHeaderBg, position: 'sticky', top: 0 }}>
+                    <th style={{ ...th(colors), width: 46 }}><input type="checkbox" checked={joinCandidates.length > 0 && joinCandidates.every(row => joinSelected.has(row.employeeNo))} onChange={event => setJoinSelected(event.target.checked ? new Set(joinCandidates.map(row => row.employeeNo)) : new Set())} /></th>
+                    {['姓名', '员工号', '部门', '岗位', '原考勤组'].map(column => <th key={column} style={th(colors)}>{column}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {joinCandidates.length ? joinCandidates.slice(0, 300).map(row => (
+                    <tr key={row.employeeNo} style={{ borderBottom: `1px solid ${colors.tableBorder}` }}>
+                      <td style={{ ...td(colors), textAlign: 'center' }}><input type="checkbox" checked={joinSelected.has(row.employeeNo)} onChange={() => toggleJoinEmployee(row.employeeNo)} /></td>
+                      <td style={td(colors)}>{row.name}</td>
+                      <td style={td(colors)}>{row.employeeNo}</td>
+                      <td style={td(colors)}>{row.dept}</td>
+                      <td style={td(colors)}>{row.position || '-'}</td>
+                      <td style={td(colors)}>{row.attendGroup || '-'}</td>
+                    </tr>
+                  )) : (
+                    <tr><td colSpan={6} style={{ padding: '54px 0', textAlign: 'center', color: colors.textMuted, fontSize: 12 }}>暂无可加入人员</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div style={modalFooterStyle(colors)}>
+              <span style={{ marginRight: 'auto', fontSize: 12, color: colors.textMuted }}>已选 {joinSelected.size} 人，可选 {joinCandidates.length} 人</span>
+              <button onClick={() => setShowJoinModal(false)} style={outlineBtn(colors)}>取消</button>
+              <button onClick={joinEmployees} disabled={!joinSelected.size || joining} style={joinSelected.size && !joining ? primaryBtn(colors) : disabledBtn(colors)}>{joining ? '加入中...' : '加入当前考勤组'}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {activeCell ? (
+        <div style={modalBackdropStyle}>
+          <div style={{ ...modalPanelStyle(colors), width: 420 }}>
+            <div style={modalHeaderStyle(colors)}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>选择班次</div>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>{activeCell.row.name} / {month}-{String(activeCell.day).padStart(2, '0')}</div>
+              </div>
+              <button onClick={() => setActiveCell(null)} style={iconBtn(colors)}>×</button>
+            </div>
+            <div style={{ padding: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, maxHeight: 360, overflow: 'auto' }}>
+              {shiftOptions.map(shift => (
+                <button key={shift.id} onClick={() => applySchedule(activeCell.row, activeCell.day, shift)} style={{ ...outlineBtn(colors), height: 'auto', minHeight: 42, justifyContent: 'flex-start', flexDirection: 'column', alignItems: 'flex-start', gap: 2, padding: '8px 10px' }}>
+                  <span style={{ fontSize: 12, color: colors.text, fontWeight: 600 }}>{shift.name}</span>
+                  <span style={{ fontSize: 11, color: colors.textMuted }}>{shift.time || '-'}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -602,6 +761,50 @@ function fieldShell(colors: any, width: number): React.CSSProperties {
   };
 }
 
+const modalBackdropStyle: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 900,
+  backgroundColor: 'rgba(15, 23, 42, 0.38)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 24,
+};
+
+function modalPanelStyle(colors: any): React.CSSProperties {
+  return {
+    maxWidth: 'calc(100vw - 48px)',
+    backgroundColor: colors.cardBg,
+    border: `1px solid ${colors.cardBorder}`,
+    borderRadius: 8,
+    boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)',
+    overflow: 'hidden',
+  };
+}
+
+function modalHeaderStyle(colors: any): React.CSSProperties {
+  return {
+    minHeight: 52,
+    padding: '0 18px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottom: `1px solid ${colors.cardBorder}`,
+  };
+}
+
+function modalFooterStyle(colors: any): React.CSSProperties {
+  return {
+    padding: '12px 18px 16px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 10,
+    borderTop: `1px solid ${colors.cardBorder}`,
+  };
+}
+
 function textInput(colors: any): React.CSSProperties {
   return {
     flex: 1,
@@ -635,6 +838,19 @@ function primaryBtn(colors: any): React.CSSProperties {
     color: '#fff',
     fontSize: '12px',
     cursor: 'pointer',
+  };
+}
+
+function disabledBtn(colors: any): React.CSSProperties {
+  return {
+    height: 30,
+    padding: '0 14px',
+    border: `1px solid ${colors.inputBorder}`,
+    borderRadius: 4,
+    backgroundColor: colors.tableHeaderBg,
+    color: colors.textMuted,
+    fontSize: '12px',
+    cursor: 'not-allowed',
   };
 }
 

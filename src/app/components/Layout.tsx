@@ -56,7 +56,28 @@ export const Layout: React.FC = () => {
   const location = useLocation();
 
   const isAttendance = location.pathname.startsWith('/attendance');
+  const isEmployeeBackend = location.pathname.startsWith('/employee');
   const crumbs = breadcrumbMap[location.pathname] || (isAttendance ? ['首页'] : []);
+
+  if (isEmployeeBackend) {
+    return (
+      <div
+        style={{
+          height: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          backgroundColor: colors.appBg,
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+          fontSize: '13px',
+        }}
+      >
+        <TopNav />
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <Outlet />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

@@ -1,0 +1,7 @@
+.chrome-*/
+*.log
+/*.png
+*-verify.png
+verify-*.png
+preview-*.png
+*-headless.png

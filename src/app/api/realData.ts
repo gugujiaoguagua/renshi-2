@@ -72,6 +72,7 @@ export type MonthlyAttendanceEmployee = {
   deptFullPath: string;
   bizGroup: string;
   dayResults?: Record<string, string>;
+  dayClocks?: Record<string, string>;
 };
 
 export type MonthlySummaryEmployee = {
@@ -285,6 +286,8 @@ export type ScheduleMonthEmployee = {
   employeeNo: string;
   dept: string;
   position: string;
+  attendGroup: string;
+  employeeType?: string;
   dayResults: Record<string, string>;
 };
 
@@ -404,10 +407,15 @@ export type OrganizationPositionRecord = {
   code: string;
   name: string;
   parentName?: string;
+  orgs?: string[];
   orgText: string;
+  companies?: string[];
   companyText: string;
   sequence?: string;
   subSequence?: string;
+  sortNo?: string;
+  desc?: string;
+  remark?: string;
   status: string;
   linkedEmployeeCount: number;
   linkedEmployees?: EmployeeRosterRecord[];
@@ -556,7 +564,7 @@ export async function saveFieldTripRecords(rows: FieldWorkRecord[]) {
 }
 
 export async function fetchScheduleMonth(month: string) {
-  return requestJson<DataResponse<ScheduleMonthEmployee> & { shifts: ScheduleShiftOption[]; month: string }>(`/api/schedules/month?month=${encodeURIComponent(month)}`);
+  return requestJson<DataResponse<ScheduleMonthEmployee> & { shifts: ScheduleShiftOption[]; groups: string[]; month: string }>(`/api/schedules/month?month=${encodeURIComponent(month)}`);
 }
 
 export async function saveScheduleAssignments(rows: Array<{ date: string; employeeNo: string; employeeName: string; dept: string; shiftId?: string; shiftName: string }>) {
@@ -564,6 +572,14 @@ export async function saveScheduleAssignments(rows: Array<{ date: string; employ
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rows }),
+  });
+}
+
+export async function assignEmployeesToAttendanceGroup(payload: { employeeNos: string[]; attendanceGroupName: string; shiftName?: string }) {
+  return requestJson<{ ok: boolean; attendanceGroupName: string; updated: number }>('/api/employees/attendance-group', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   });
 }
 
@@ -881,6 +897,12 @@ export async function saveOrganizationPosition(row: Partial<OrganizationPosition
   });
 }
 
+export async function deleteOrganizationPosition(key: string) {
+  return requestJson<{ ok: boolean; removed: number; hidden: number; remaining: number }>(`/api/organization-management/positions/${encodeURIComponent(key)}`, {
+    method: 'DELETE',
+  });
+}
+
 export async function fetchOrganizationRanks() {
   return limitDataResponse(await requestJson<DataResponse<OrganizationRankRecord>>('/api/organization-management/ranks'));
 }
@@ -890,6 +912,12 @@ export async function saveOrganizationRank(row: Partial<OrganizationRankRecord>)
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(row),
+  });
+}
+
+export async function deleteOrganizationRank(key: string) {
+  return requestJson<{ ok: boolean; removed: number; hidden: number; remaining: number }>(`/api/organization-management/ranks/${encodeURIComponent(key)}`, {
+    method: 'DELETE',
   });
 }
 

@@ -2,31 +2,34 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 import xlsx from 'xlsx';
-
-const __filename = fileURLToPath(import.meta.url);
-const SERVER_DIR = path.dirname(__filename);
-const APP_DIR = path.resolve(SERVER_DIR, '..');
-const WORKSPACE_DIR = path.resolve(APP_DIR, '..');
+import {
+  ATTENDANCE_SUPPLEMENT_DIR,
+  DATA_DIR,
+  EMPLOYEE_REFERENCE_DIR,
+  EXPORT_DIR,
+  HOST,
+  MOBILE_ALLOW_OUT_OF_RANGE,
+  MOBILE_TEST_USERS_FILE,
+  ORGANIZATION_REFERENCE_DIR,
+  PORT,
+  STORE_FILE,
+  TIME_ZONE,
+  UPLOAD_DIR,
+  WECOM_APP_SECRET,
+  WECOM_AUTH_MODE,
+  WECOM_CORP_ID,
+  BACKEND_DOMAIN_FLOW,
+  getBackendDomain,
+  getStoredRows,
+  onStoreWrite,
+  readStore,
+  setStoredRows,
+  upsertStoredRow,
+  writeStore,
+} from './core/foundation.mjs';
 
 const app = express();
-const PORT = Number(process.env.DATA_SERVER_PORT || 3101);
-const HOST = process.env.DATA_SERVER_HOST || '0.0.0.0';
-const MOBILE_ALLOW_OUT_OF_RANGE = process.env.MOBILE_ALLOW_OUT_OF_RANGE === 'true';
-const WECOM_AUTH_MODE = process.env.WECOM_AUTH_MODE || 'test';
-const WECOM_CORP_ID = process.env.WECOM_CORP_ID || '';
-const WECOM_APP_SECRET = process.env.WECOM_APP_SECRET || process.env.WECOM_SECRET || '';
-const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(WORKSPACE_DIR, '资料'));
-const EMPLOYEE_REFERENCE_DIR = path.resolve(process.env.EMPLOYEE_REFERENCE_DIR || path.join(WORKSPACE_DIR, '参考图片', '功能', '员工管理'));
-const ORGANIZATION_REFERENCE_DIR = path.resolve(process.env.ORGANIZATION_REFERENCE_DIR || path.join(WORKSPACE_DIR, '参考图片', '功能', '组织管理'));
-const ATTENDANCE_SUPPLEMENT_DIR = path.resolve(process.env.ATTENDANCE_SUPPLEMENT_DIR || path.join(WORKSPACE_DIR, '参考图片', '功能', '假期管理补充', '假期管理导出文件'));
-const STORE_FILE = path.join(SERVER_DIR, 'data-store.json');
-const MOBILE_TEST_USERS_FILE = path.join(SERVER_DIR, 'mobile-test-users.json');
-const UPLOAD_DIR = path.join(SERVER_DIR, 'uploads');
-const EXPORT_DIR = path.join(SERVER_DIR, 'exports');
-const TIME_ZONE = 'Asia/Shanghai';
-
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
@@ -44,31 +47,6 @@ app.use((req, res, next) => {
   });
   return next();
 });
-
-let storeCache = null;
-let storeCacheMtimeMs = 0;
-
-function readStore() {
-  try {
-    if (!fs.existsSync(STORE_FILE)) return {};
-    const stat = fs.statSync(STORE_FILE);
-    if (storeCache && storeCacheMtimeMs === stat.mtimeMs) return storeCache;
-    storeCache = JSON.parse(fs.readFileSync(STORE_FILE, 'utf-8'));
-    storeCacheMtimeMs = stat.mtimeMs;
-    return storeCache;
-  } catch (_error) {
-    return {};
-  }
-}
-
-function writeStore(store) {
-  fs.mkdirSync(path.dirname(STORE_FILE), { recursive: true });
-  fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2), 'utf-8');
-  const stat = fs.statSync(STORE_FILE);
-  storeCache = store;
-  storeCacheMtimeMs = stat.mtimeMs;
-  hrCoreCache = null;
-}
 
 function publicUrl(req, relativePath) {
   if (!relativePath) return '';
@@ -140,29 +118,6 @@ function readJsonFile(filePath, fallback) {
   } catch (_error) {
     return fallback;
   }
-}
-
-function getStoredRows(key) {
-  const rows = readStore()[key];
-  return Array.isArray(rows) ? rows : null;
-}
-
-function setStoredRows(key, rows) {
-  const store = readStore();
-  store[key] = rows;
-  store.updatedAt = new Date().toISOString();
-  writeStore(store);
-}
-
-function upsertStoredRow(key, row, idGetter) {
-  const rows = getStoredRows(key) || [];
-  const nextId = idGetter(row);
-  const existingIndex = rows.findIndex((item) => idGetter(item) === nextId);
-  const nextRows = existingIndex >= 0
-    ? rows.map((item, index) => (index === existingIndex ? { ...item, ...row } : item))
-    : [row, ...rows];
-  setStoredRows(key, nextRows);
-  return { row, rows: nextRows, created: existingIndex < 0 };
 }
 
 function listExcelFilesFromDirectory(dir) {
@@ -272,6 +227,25 @@ function asText(value, fallback = '-') {
 function asRawText(value) {
   if (value === null || value === undefined) return '';
   return String(value).trim();
+}
+
+const EMPLOYEE_TYPE_VALUES = new Set(['全职', '兼任中']);
+const EMPLOYEE_STATUS_VALUES = new Set(['待入职', '已入职', '已转正']);
+
+function normalizeEmployeeType(value, fallback = '全职') {
+  const text = asRawText(value);
+  if (!text) return fallback;
+  if (EMPLOYEE_TYPE_VALUES.has(text)) return text;
+  return /兼|兼职|兼任/.test(text) ? '兼任中' : '全职';
+}
+
+function normalizeEmployeeStatus(value, fallback = '已入职') {
+  const text = asRawText(value);
+  if (!text) return fallback;
+  if (EMPLOYEE_STATUS_VALUES.has(text)) return text;
+  if (/待入职|待到岗|入职审批|待确认入职/.test(text)) return '待入职';
+  if (/已转正|转正|正式/.test(text)) return '已转正';
+  return '已入职';
 }
 
 function asNum(value) {
@@ -746,11 +720,14 @@ function normalizeReferenceEmployee(row = {}) {
   const deptFullPath = asText(getByAliases(row, ['部门全路径', '部门全路径 ', '部门完整路径']), `上海拉迷家具有限公司/${dept}`);
   const manager = splitManager(getByAliases(row, ['汇报上级', '直属上级']));
   const hireDate = extractDate(getByAliases(row, ['入职日期', '实际入职日期', '到岗日期'])) || currentDateText();
-  const status = asText(getByAliases(row, ['员工状态', '任职状态']), '在职');
-  const employeeType = asText(getByAliases(row, ['员工类型']), '全职');
+  const status = normalizeEmployeeStatus(getByAliases(row, ['员工状态', '任职状态']));
+  const employeeType = normalizeEmployeeType(getByAliases(row, ['员工类型']));
   return {
     id: `ref_${employeeNo}`,
-    userId: asRawText(getByAliases(row, ['企微账号'])) || `wecom_${employeeNo}`,
+    userId: asRawText(getByAliases(row, ['企微账号', '企业微信UserID', '企业微信用户ID', 'wecomUserId'])) || `wecom_${employeeNo}`,
+    wecomUserId: asRawText(getByAliases(row, ['企微账号', '企业微信UserID', '企业微信用户ID', 'wecomUserId'])),
+    feishuOpenId: asRawText(getByAliases(row, ['飞书OpenID', '飞书OpenId', 'feishuOpenId', 'openId'])),
+    feishuUnionId: asRawText(getByAliases(row, ['飞书UnionID', '飞书UnionId', 'feishuUnionId', 'unionId'])),
     name,
     employeeNo,
     phone: asRawText(getByAliases(row, ['手机号', '手机号码'])),
@@ -793,12 +770,31 @@ function normalizeReferenceEmployee(row = {}) {
   };
 }
 
+let referenceRosterEmployeesCache = null;
+let employeeDomainSnapshotCache = null;
+
+function fileCacheSignature(file) {
+  if (!file?.fullPath) return '';
+  try {
+    const stat = fs.statSync(file.fullPath);
+    return `${file.fullPath}|${stat.mtimeMs}|${stat.size}`;
+  } catch (_error) {
+    return `${file.fullPath}|missing`;
+  }
+}
+
 function getReferenceRosterEmployees() {
   const file = getReferenceFile('员工花名册');
   if (!file) return [];
+  const signature = fileCacheSignature(file);
+  if (referenceRosterEmployeesCache?.signature === signature) {
+    return referenceRosterEmployeesCache.rows;
+  }
   try {
     const { rows } = readSheetRowsByHeader(file.fullPath, (name) => name.includes('花名册'), 1);
-    return rows.map(normalizeReferenceEmployee).filter(Boolean);
+    const normalizedRows = rows.map(normalizeReferenceEmployee).filter(Boolean);
+    referenceRosterEmployeesCache = { signature, rows: normalizedRows };
+    return normalizedRows;
   } catch (_error) {
     return [];
   }
@@ -810,17 +806,25 @@ function normalizeOnboardedEmployee(input = {}) {
   const managerNo = asRawText(input.managerNo || input.managerEmployeeNo);
   const managerName = asRawText(input.managerName);
   const shift = resolveShiftOption(input);
+  const materialRecords = Array.isArray(input.materials) ? input.materials : [];
+  const educationExperiences = Array.isArray(input.educationExperiences) ? input.educationExperiences : [];
+  const workExperiences = Array.isArray(input.workExperiences) ? input.workExperiences : [];
   return {
     id: asRawText(input.id || `emp_${employeeNo}`),
     userId: asRawText(input.userId || `wecom_${employeeNo}`),
+    wecomUserId: asRawText(input.wecomUserId || input.wecomUserID || input.wecomId || input.userId),
+    feishuOpenId: asRawText(input.feishuOpenId || input.feishuOpenID || input.openId),
+    feishuUnionId: asRawText(input.feishuUnionId || input.feishuUnionID || input.unionId),
     name,
     employeeNo,
+    phone: asRawText(input.phone),
+    email: asRawText(input.email),
     department: asText(input.department || input.dept, '未分配部门'),
     deptFullPath: asText(input.deptFullPath || input.department, input.department ? `上海拉迷家具有限公司/${input.department}` : '上海拉迷家具有限公司/未分配部门'),
     position: asText(input.position, '-'),
     hireDate: asText(input.hireDate, currentDateText()),
-    employeeType: asText(input.employeeType, '全职'),
-    employeeStatus: asText(input.employeeStatus, '在职'),
+    employeeType: normalizeEmployeeType(input.employeeType),
+    employeeStatus: normalizeEmployeeStatus(input.employeeStatus),
     managerNo,
     managerName,
     businessGroup: asText(input.businessGroup, '-'),
@@ -837,7 +841,64 @@ function normalizeOnboardedEmployee(input = {}) {
     office: input.office && typeof input.office === 'object' ? input.office : MOBILE_OFFICE,
     createdAt: asText(input.createdAt, nowText()),
     updatedAt: nowText(),
+    idCardType: asText(input.idType || input.idCardType, ''),
+    idCardNo: asRawText(input.idNo || input.idCardNo),
+    gender: asText(input.gender, ''),
+    birthday: asText(input.birthday, ''),
+    currentAddress: asText(input.currentAddress, ''),
+    emergencyContact: asText(input.emergencyContact, ''),
+    emergencyRelation: asText(input.emergencyRelation, ''),
+    emergencyPhone: asText(input.emergencyPhone, ''),
+    socialSecurityNo: asText(input.socialSecurityNo, ''),
+    fundNo: asText(input.fundNo, ''),
+    bankCard: asText(input.bankCard, ''),
+    bankName: asText(input.bankName, ''),
+    contractStartDate: asText(input.contractStartDate, ''),
+    contractEndDate: asText(input.contractEndDate, ''),
+    identityVerify: asText(input.identityVerify || input.faceStatus, '未核验'),
+    materials: materialRecords.map((record, index) => ({
+      id: asText(record.id, `material_${employeeNo}_${index + 1}`),
+      employeeNo,
+      employeeName: name,
+      materialType: asText(record.materialType || record.label, '员工材料'),
+      fileName: asText(record.fileName || record.name, ''),
+      uploadedAt: asText(record.uploadedAt, nowText()),
+      source: asText(record.source, '新增员工上传'),
+    })).filter((record) => record.fileName),
+    educationExperiences,
+    workExperiences,
   };
+}
+
+function normalizeEmployeeLinkedRecord(input = {}, type = 'record') {
+  const employeeNo = asRawText(input.employeeNo || input['员工号']);
+  const employeeName = asRawText(input.employeeName || input.name || input['姓名']);
+  const employee = employeeMasterRows().find((row) => asRawText(row.employeeNo) === employeeNo || asRawText(row.name) === employeeName);
+  const resolvedEmployeeNo = employeeNo || asRawText(employee?.employeeNo);
+  const resolvedName = employeeName || asRawText(employee?.name);
+  const timestamp = nowText();
+  return {
+    id: asText(input.id, `${type}_${resolvedEmployeeNo || stableShortHash(resolvedName)}_${Date.now()}`),
+    employeeNo: resolvedEmployeeNo,
+    employeeName: resolvedName,
+    name: resolvedName,
+    dept: asText(input.dept || input.department || input['部门'], employee?.department || ''),
+    position: asText(input.position || input['岗位'], employee?.position || ''),
+    source: asText(input.source || input['数据来源'], '本地录入'),
+    createdAt: asText(input.createdAt, timestamp),
+    updatedAt: timestamp,
+    ...input,
+  };
+}
+
+function upsertEmployeeLinkedRecord(key, input, type) {
+  const row = normalizeEmployeeLinkedRecord(input, type);
+  if (!asRawText(row.employeeNo) || !asRawText(row.employeeName || row.name)) {
+    const error = new Error('员工姓名或员工号必须至少填写一项，并且能关联到员工主数据');
+    error.statusCode = 400;
+    throw error;
+  }
+  return upsertStoredRow(key, row, (item) => asRawText(item.id));
 }
 
 function onboardedEmployeeToPeopleRow(employee) {
@@ -899,14 +960,61 @@ function onboardedEmployeeToAttendanceStatsRow(employee) {
 
 function linkedDemoEmployees() {
   const byEmployeeNo = new Map();
-  for (const employee of getReferenceRosterEmployees()) {
+  const referenceEmployees = getReferenceRosterEmployees();
+  const storedEmployees = getOnboardedEmployees().map(normalizeOnboardedEmployee);
+  const referenceNos = new Set(referenceEmployees.map((employee) => asRawText(employee.employeeNo)).filter(Boolean));
+  for (const employee of referenceEmployees) {
     byEmployeeNo.set(asRawText(employee.employeeNo), employee);
   }
-  for (const employee of getOnboardedEmployees().map(normalizeOnboardedEmployee)) {
+  for (const employee of storedEmployees) {
     const employeeNo = asRawText(employee.employeeNo);
     byEmployeeNo.set(employeeNo, { ...(byEmployeeNo.get(employeeNo) || {}), ...employee });
   }
-  return Array.from(byEmployeeNo.values()).filter((employee) => asRawText(employee.employeeNo));
+  const rows = Array.from(byEmployeeNo.values()).filter((employee) => asRawText(employee.employeeNo));
+  const store = readStore();
+  const keepEmployeeNos = Array.isArray(store.employeeMasterKeepEmployeeNos)
+    ? store.employeeMasterKeepEmployeeNos.map(asRawText).filter(Boolean)
+    : [];
+  const localOnlyEmployeeNos = storedEmployees
+    .map((employee) => asRawText(employee.employeeNo))
+    .filter((employeeNo) => employeeNo && !referenceNos.has(employeeNo));
+  const rowsByNo = new Map(rows.map((employee) => [asRawText(employee.employeeNo), employee]));
+  const storeLimit = Number(store.employeeMasterLimit ?? 10);
+  const baseLimit = Number.isFinite(storeLimit) && storeLimit > 0 ? storeLimit : 0;
+  const localOnlySet = new Set(localOnlyEmployeeNos);
+  const localEmployees = [];
+  const baseEmployees = [];
+  const addEmployee = (targetRows, employeeNo) => {
+    const employee = rowsByNo.get(asRawText(employeeNo));
+    if (!employee) return;
+    const targetEmployeeNo = asRawText(employee.employeeNo);
+    if (!targetEmployeeNo) return;
+    if (localEmployees.some((row) => asRawText(row.employeeNo) === targetEmployeeNo)) return;
+    if (baseEmployees.some((row) => asRawText(row.employeeNo) === targetEmployeeNo)) return;
+    targetRows.push(employee);
+  };
+  localOnlyEmployeeNos.forEach((employeeNo) => addEmployee(localEmployees, employeeNo));
+  keepEmployeeNos
+    .filter((employeeNo) => !localOnlySet.has(employeeNo))
+    .forEach((employeeNo) => addEmployee(baseEmployees, employeeNo));
+  rows
+    .filter((employee) => !localOnlySet.has(asRawText(employee.employeeNo)))
+    .forEach((employee) => addEmployee(baseEmployees, employee.employeeNo));
+  const limitedBaseEmployees = baseLimit > 0 ? baseEmployees.slice(0, baseLimit) : baseEmployees;
+  return [...localEmployees, ...limitedBaseEmployees];
+}
+
+function prioritizeEmployeeInMasterKeepList(employeeNo) {
+  const normalizedEmployeeNo = asRawText(employeeNo);
+  if (!normalizedEmployeeNo) return;
+  const store = readStore();
+  const current = Array.isArray(store.employeeMasterKeepEmployeeNos)
+    ? store.employeeMasterKeepEmployeeNos.map(asRawText).filter(Boolean)
+    : [];
+  const next = [normalizedEmployeeNo, ...current.filter((item) => item !== normalizedEmployeeNo)];
+  store.employeeMasterKeepEmployeeNos = next;
+  store.updatedAt = new Date().toISOString();
+  writeStore(store);
 }
 
 function clockRowsForEmployee(employee) {
@@ -1113,6 +1221,7 @@ function buildLinkedAttendanceStatsRows() {
     return {
       name: employee.name,
       empId: employee.employeeNo,
+      employeeStatus: employee.status,
       attendGroup: employee.attendanceGroupName,
       dept: employee.organizationName,
       deptFull: employee.organizationFullPath,
@@ -1148,6 +1257,7 @@ function buildLinkedDailyRows() {
       name: employee.name,
       confirmStatus: hasClock ? '待确认' : '未确认',
       empId: employee.employeeNo,
+      employeeStatus: employee.status,
       date: dateText,
       dept: employee.organizationName,
       position: employee.positionName,
@@ -1189,6 +1299,7 @@ function buildLinkedMonthlyRows() {
     return {
       name: employee.name,
       empId: employee.employeeNo,
+      employeeStatus: employee.status,
       dept: employee.organizationName,
       position: employee.positionName,
       attendGroup: employee.attendanceGroupName,
@@ -1221,6 +1332,7 @@ function buildLinkedMonthlySummaryRows() {
       name: employee.name,
       lockStatus: '未锁定',
       empId: employee.employeeNo,
+      employeeStatus: employee.status,
       dept: employee.organizationName,
       position: employee.positionName,
       hireDate: employee.hireDate,
@@ -1243,7 +1355,39 @@ function buildLinkedMonthlySummaryRows() {
 }
 
 function buildLinkedAnomalyRows() {
-  return mapMobileAnomalyRowsToAdmin(filterRowsToOnboardedEmployees(getMobileRows('mobileAnomalies', [])));
+  const context = getHrCoreContext();
+  const dateText = currentDateText();
+  const manualRows = mapMobileAnomalyRowsToAdmin(filterRowsToOnboardedEmployees(getMobileRows('mobileAnomalies', [])));
+  const manualKeys = new Set(manualRows.map((row) => `${asRawText(row.empId)}|${asText(row.date, '')}|${asText(row.type, '')}`));
+  const missingRows = context.employees
+    .filter((employee) => {
+      const employeeNo = asRawText(employee.employeeNo);
+      const todayRows = context.indexes.todayClockRowsByEmployee.get(employeeNo) || [];
+      const shiftName = asText(employee.shiftName, '');
+      return !todayRows.length && shiftName && shiftName !== '休息';
+    })
+    .map((employee, index) => {
+      const row = {
+        id: 940000 + index + 1,
+        name: asText(employee.name, ''),
+        empId: asText(employee.employeeNo, ''),
+        dept: asText(employee.organizationName, ''),
+        date: dateText,
+        weekday: weekdayFromDate(dateText),
+        shift: asText(employee.shiftName, ''),
+        type: '未打卡',
+        desc: '今日未打卡，系统自动生成未出勤异常',
+        clock: '—',
+        reminder: '未提醒',
+        handled: false,
+        writeOff: '未核销',
+        remark: '来源：实时考勤未出勤',
+        remarkUpdatedAt: '',
+      };
+      return row;
+    })
+    .filter((row) => !manualKeys.has(`${asRawText(row.empId)}|${asText(row.date, '')}|${asText(row.type, '')}`));
+  return [...manualRows, ...missingRows];
 }
 
 function buildLinkedWorkDataRows() {
@@ -1296,11 +1440,25 @@ const DEFAULT_LEAVE_TYPE_ROWS = [
   { name: '婚假', short: '婚', enabled: true, unit: '按天请假', paid: '是', negative: '否', before: '否', note: '婚假按法定或公司规定执行，支持一次性发放。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:22' },
   { name: '产假', short: '产', enabled: true, unit: '按天请假', paid: '是', negative: '否', before: '是', note: '产假支持前置请假及分段休假，系统可自动关联哺乳假规则。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:27' },
   { name: '调休假', short: '调', enabled: true, unit: '按小时请假', paid: '否', negative: '否', before: '否', note: '加班转调休产生的额度，优先消耗近期生成的调休额度。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:54' },
+  { name: '陪产假', short: '陪', enabled: false, unit: '按天请假', paid: '否', negative: '否', before: '否', note: '男员工生育相关陪护假，审批时需同步提交证明材料。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:32' },
+  { name: '补偿假', short: '补', enabled: false, unit: '按天请假', paid: '否', negative: '否', before: '否', note: '特殊奖励或项目补贴类假期，默认关闭，由管理员按需启用。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:43' },
+  { name: '流产假', short: '流', enabled: false, unit: '按天请假', paid: '否', negative: '否', before: '否', note: '女性员工特殊医疗假期，需上传证明后方可申请。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:09:49' },
+  { name: '亲友假', short: '亲', enabled: false, unit: '按天请假', paid: '否', negative: '否', before: '否', note: '适用于家属重大事项处理的延伸假期，按公司制度执行。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:10:05' },
+  { name: '非出勤日假', short: '非', enabled: false, unit: '按天请假', paid: '否', negative: '否', before: '否', note: '如涉及非排班日请假需单独配置，请假计算将跳过非排班时段。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:10:11' },
+  { name: '哺乳时间假', short: '哺', enabled: false, unit: '需审批假', paid: '否', negative: '否', before: '否', note: '哺乳期女性员工使用的按次假期，单次时长由规则控制。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:10:17' },
+  { name: '合并哺乳时间', short: '哺', enabled: false, unit: '需审批假', paid: '否', negative: '否', before: '否', note: '支持合并使用多次哺乳时间，系统自动校验每日最大使用量。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:10:22' },
+  { name: '育儿假', short: '育', enabled: false, unit: '按天请假', paid: '否', negative: '否', before: '否', note: '子女三周岁以内员工可享受的地区政策假，支持按次或按年配置。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2026-01-29 19:10:59' },
+  { name: '加班调休', short: '补', enabled: false, unit: '按小时请假', paid: '否', negative: '否', before: '否', note: '无法单独控制的日度过账类调休生成申请。', reason: '否', attachment: '否', attachmentNote: '-', creator: '系统', createdAt: '2025-08-26 15:59:58', editor: '系统', editedAt: '2025-08-26 15:59:58' },
 ];
 
 function getLeaveTypeRows() {
   const storedRows = getStoredRows('leaveTypes');
-  return storedRows && storedRows.length ? storedRows : DEFAULT_LEAVE_TYPE_ROWS;
+  if (!storedRows || !storedRows.length) return DEFAULT_LEAVE_TYPE_ROWS;
+  const storedByName = new Map(storedRows.map((row) => [asText(row?.name), row]));
+  return [
+    ...storedRows,
+    ...DEFAULT_LEAVE_TYPE_ROWS.filter((row) => !storedByName.has(row.name)),
+  ];
 }
 
 function getLeaveSchemeRows() {
@@ -1436,7 +1594,24 @@ function mobileApprovalRows(managerEmployee = null) {
       detail: asText(row.detail, ''),
     }));
 
-  const rows = [...makeupRows, ...anomalyRows, ...genericRows];
+  const bindingRows = accountBindingRows()
+    .map((row) => ({
+      id: `binding:${row.id}`,
+      source: 'mobileAccountBindings',
+      sourceId: row.id,
+      category: '账号绑定',
+      employeeName: asText(row.employeeName || row.name, '待确认员工'),
+      employeeNo: asText(row.employeeNo, ''),
+      dept: asText(row.dept, ''),
+      date: asText(row.createTime, currentDateText()).slice(0, 10),
+      time: asText(row.createTime, '').slice(11, 16),
+      reason: asText(row.reason, '首次登录账号绑定申请'),
+      status: approvalStatusText(row.status),
+      createTime: asText(row.createTime, ''),
+      detail: `${normalizeAccountProvider(row.provider) === 'feishu' ? '飞书' : '企业微信'}：${asText(row.externalUserId, '-')}`,
+    }));
+
+  const rows = [...makeupRows, ...anomalyRows, ...genericRows, ...bindingRows];
   const scopedRows = managerEmployee ? filterRowsToManagerEmployees(rows, managerEmployee) : rows;
   return scopedRows
     .sort((a, b) => asText(b.createTime || b.date, '').localeCompare(asText(a.createTime || a.date, '')));
@@ -1451,6 +1626,7 @@ function updateApprovalRow(approvalId, action) {
     makeup: 'mobileMakeupRequests',
     anomaly: 'mobileAnomalies',
     approval: 'mobileApprovalRequests',
+    binding: 'mobileAccountBindings',
   };
   const key = keyBySource[source];
   const rows = Array.isArray(store[key]) ? store[key] : [];
@@ -1579,6 +1755,9 @@ function deleteOnboardedEmployees(employeeNos) {
   const matchesEmployee = (row) => rowMatchesEmployeeNo(row, employeeNoSet) || removedIds.has(asRawText(row?.employeeId));
 
   store.onboardedEmployees = beforeEmployees.filter((row) => !employeeNoSet.has(asRawText(row.employeeNo)));
+  if (Array.isArray(store.employeeMasterKeepEmployeeNos)) {
+    store.employeeMasterKeepEmployeeNos = store.employeeMasterKeepEmployeeNos.filter((employeeNo) => !employeeNoSet.has(asRawText(employeeNo)));
+  }
 
   [
     'mobileClockRecords',
@@ -1778,10 +1957,12 @@ function readAnomalySupplement() {
   const seen = new Set();
   const rows = [];
   let sheetName = '考勤异常';
+  const context = employeeMasterMatchContext();
   for (const file of files) {
     const { rows: rawRows, sheetName: currentSheet } = readSheetRows(file.fullPath, (name) => name.includes('考勤异常'));
     sheetName = currentSheet || sheetName;
     for (const row of mapAnomalyRows(rawRows)) {
+      if (!rowMatchesEmployeeMaster(row, context)) continue;
       const key = `${row.empId}|${row.date}|${row.desc}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1808,15 +1989,53 @@ function getOnboardedEmployeeNoSet() {
   return new Set(employeeMasterRows().map((employee) => asRawText(employee.employeeNo)).filter(Boolean));
 }
 
+function employeeMasterMatchContext() {
+  const employees = employeeMasterRows();
+  return {
+    employeeNos: new Set(employees.map((employee) => asRawText(employee.employeeNo)).filter(Boolean)),
+    names: new Set(employees.map((employee) => asRawText(employee.name)).filter(Boolean)),
+    phones: new Set(employees.map((employee) => asRawText(employee.phone)).filter(Boolean)),
+  };
+}
+
+function rowMatchesEmployeeMaster(row, context = employeeMasterMatchContext()) {
+  if (!row) return false;
+  if (Array.isArray(row)) {
+    return row.some((cell) => {
+      const text = asRawText(cell);
+      return context.employeeNos.has(text) || context.names.has(text) || context.phones.has(text);
+    });
+  }
+  const employeeNo = asRawText(getByAliases(row, ['员工号', '*员工号', '工号', '员工工号', 'employeeNo', 'empId', 'employeeId']));
+  const name = asRawText(getByAliases(row, ['姓名', '*姓名', '员工姓名', 'employeeName', 'name']));
+  const phone = asRawText(getByAliases(row, ['手机号', '手机号码', 'phone', 'mobile']));
+  return Boolean(
+    (employeeNo && context.employeeNos.has(employeeNo))
+    || (name && context.names.has(name))
+    || (phone && context.phones.has(phone)),
+  );
+}
+
 function filterRowsToOnboardedEmployees(rows) {
-  const employeeNos = getOnboardedEmployeeNoSet();
-  if (!employeeNos.size) return [];
-  return rows.filter((row) => {
-    if (Array.isArray(row)) {
-      return row.some((cell) => employeeNos.has(asRawText(cell)));
-    }
-    return employeeNos.has(asRawText(row.employeeNo || row.empId || row.employeeId));
-  });
+  const context = employeeMasterMatchContext();
+  if (!context.employeeNos.size && !context.names.size && !context.phones.size) return [];
+  return rows.filter((row) => rowMatchesEmployeeMaster(row, context));
+}
+
+function employeeBaseRecord(employee) {
+  return {
+    employeeNo: asText(employee.employeeNo, ''),
+    employeeName: asText(employee.name, ''),
+    name: asText(employee.name, ''),
+    dept: asText(employee.department, ''),
+    deptFullPath: asText(employee.deptFullPath, ''),
+    position: asText(employee.position, ''),
+    '员工号': asText(employee.employeeNo, ''),
+    '姓名': asText(employee.name, ''),
+    '部门': asText(employee.department, ''),
+    '部门全路径': asText(employee.deptFullPath, ''),
+    '岗位': asText(employee.position, ''),
+  };
 }
 
 function employeeMasterRows() {
@@ -1828,46 +2047,525 @@ function employeeRosterRows() {
     id: index + 1,
     name: employee.name,
     phone: asText(employee.phone, ''),
+    wecomUserId: asText(employee.wecomUserId || employee.userId, ''),
+    feishuOpenId: asText(employee.feishuOpenId || employee.openId, ''),
+    feishuUnionId: asText(employee.feishuUnionId || employee.unionId, ''),
     employeeNo: employee.employeeNo,
     dept: employee.department,
     deptFullPath: employee.deptFullPath,
     position: employee.position,
     hireDate: employee.hireDate,
-    employeeType: employee.employeeType,
-    employeeStatus: employee.employeeStatus,
+    employeeType: normalizeEmployeeType(employee.employeeType),
+    employeeStatus: normalizeEmployeeStatus(employee.employeeStatus),
     identityVerify: asText(employee.identityVerify || employee.faceStatus, '未核验'),
     managerName: employee.managerName,
     managerNo: employee.managerNo,
+    contractStartDate: asText(employee.contractStartDate, ''),
+    fundNo: asText(employee.fundNo, ''),
+    currentAddress: asText(employee.currentAddress, ''),
+    emergencyContact: asText(employee.emergencyContact, ''),
+    emergencyPhone: asText(employee.emergencyPhone, ''),
+    socialSecurityNo: asText(employee.socialSecurityNo, ''),
+    bankCard: asText(employee.bankCard, ''),
     source: employee.dataSource,
   }));
 }
 
-function employeeSummary() {
+function employeeSettingsRows() {
+  return [
+    { id: 1, setting: '档案字段设置', value: '姓名、工号、手机号、部门、岗位、入职日期、员工状态', status: '已启用' },
+    { id: 2, setting: '花名册字段权限', value: '按员工管理权限范围读取', status: '已启用' },
+    { id: 3, setting: '入职二维码', value: '默认二维码 / 再次登记', status: '已启用' },
+    { id: 4, setting: '考勤人员同步', value: '按员工号与考勤模块自动互通', status: '已启用' },
+  ];
+}
+
+function employeeDomainSnapshot() {
+  const storeUpdatedAt = asText(readStore().updatedAt, '');
+  const referenceFileForCache = getReferenceFile('员工花名册');
+  const cacheKey = `${storeUpdatedAt}|${fileCacheSignature(referenceFileForCache)}`;
+  if (employeeDomainSnapshotCache?.cacheKey === cacheKey) {
+    return employeeDomainSnapshotCache.snapshot;
+  }
+  const domain = getBackendDomain('employee');
   const employees = employeeMasterRows();
   const roster = employeeRosterRows();
+  const referenceFile = getReferenceFile('员工花名册');
+  const onboarded = getOnboardedEmployees();
   const contracts = readEmployeeContractRows('all').rows;
-  const onboard = readEmploymentRows('onboarded').rows;
-  const resigning = readEmploymentRows('resigning').rows;
-  const transferring = readEmploymentRows('transferring').rows;
-  const regularized = readEmploymentRows('regularized').rows;
-  const inTrial = roster.filter((row) => /试用/.test(row.employeeStatus)).length;
+  const onboardRows = readEmploymentRows('onboarded').rows;
+  const resigningRows = readEmploymentRows('resigning').rows;
+  const transferringRows = readEmploymentRows('transferring').rows;
+  const regularizedRows = readEmploymentRows('regularized').rows;
+  const organizations = organizationRows().rows;
+  const positions = positionRows().rows;
+  const ranks = rankRows().rows;
+  const orgByPath = new Map(organizations.map((row) => [asRawText(row.fullPath), row]));
+  const orgByName = new Map(organizations.map((row) => [asRawText(row.name), row]));
+  const positionByName = new Map(positions.map((row) => [asRawText(row.name), row]));
+  const rankByCode = new Map(ranks.map((row) => [asRawText(row.code), row]));
+  const rankByName = new Map(ranks.map((row) => [asRawText(row.name), row]));
+  const employeeNoSet = new Set(employees.map((employee) => asRawText(employee.employeeNo)).filter(Boolean));
   const active = roster.filter((row) => !/离职/.test(row.employeeStatus)).length;
-  return {
+  const inTrial = roster.filter((row) => /试用/.test(row.employeeStatus)).length;
+  const summary = {
     employeeTotal: employees.length,
     active,
     trial: inTrial,
     outsourced: roster.filter((row) => /外包|爱才|科讯/.test(row.employeeType)).length,
     fullTime: roster.filter((row) => /全职/.test(row.employeeType)).length,
     pendingOnboard: readEmploymentRows('pendingOnboard').rows.length,
-    onboarded: onboard.length,
-    resigning: resigning.length,
-    transferring: transferring.length,
-    regularized: regularized.length,
+    onboarded: onboardRows.length,
+    resigning: resigningRows.length,
+    transferring: transferringRows.length,
+    regularized: regularizedRows.length,
     contracts: contracts.length,
     contractPendingSign: contracts.filter((row) => /待|签署中|未签/.test(row.signProgress || row.contractStatus || '')).length,
     contractExpiring: readEmployeeContractRows('renewal').rows.length,
     identityUnverified: roster.filter((row) => /未/.test(row.identityVerify)).length,
     sourceFile: '参考图片/功能/员工管理',
+  };
+
+  const organizationUnlinked = employees
+    .filter((employee) => !(orgByPath.has(asRawText(employee.deptFullPath)) || orgByName.has(asRawText(employee.department))))
+    .map((employee) => ({
+      employeeNo: asText(employee.employeeNo, ''),
+      name: asText(employee.name, ''),
+      department: asText(employee.department, ''),
+      deptFullPath: asText(employee.deptFullPath, ''),
+    }));
+  const positionUnlinked = employees
+    .filter((employee) => asRawText(employee.position) && !positionByName.has(asRawText(employee.position)))
+    .map((employee) => ({
+      employeeNo: asText(employee.employeeNo, ''),
+      name: asText(employee.name, ''),
+      position: asText(employee.position, ''),
+    }));
+  const rankUnlinked = employees
+    .filter((employee) => (asRawText(employee.rankCode) || asRawText(employee.rankName))
+      && !(rankByCode.has(asRawText(employee.rankCode)) || rankByName.has(asRawText(employee.rankName))))
+    .map((employee) => ({
+      employeeNo: asText(employee.employeeNo, ''),
+      name: asText(employee.name, ''),
+      rankCode: asText(employee.rankCode, ''),
+      rankName: asText(employee.rankName, ''),
+    }));
+  const managerUnlinked = employees
+    .filter((employee) => asRawText(employee.managerNo) && !employeeNoSet.has(asRawText(employee.managerNo)))
+    .map((employee) => ({
+      employeeNo: asText(employee.employeeNo, ''),
+      name: asText(employee.name, ''),
+      managerNo: asText(employee.managerNo, ''),
+      managerName: asText(employee.managerName, ''),
+    }));
+
+  const snapshot = {
+    domain,
+    domainFlow: '组织 -> 员工 -> 考勤 -> 薪酬',
+    dependsOn: ['organization'],
+    summary,
+    upstreamFromOrganization: {
+      organizationMatchKeys: ['deptFullPath -> organization.fullPath', 'department -> organization.name'],
+      positionMatchKeys: ['position -> position.name'],
+      rankMatchKeys: ['rankCode -> rank.code', 'rankName -> rank.name'],
+      contract: '员工域必须先完成组织、岗位、职级关联，再作为考勤人员、排班和薪酬统计的主数据。',
+    },
+    dataSets: {
+      masterEmployees: {
+        sourceFile: referenceFile?.name || '本地入职员工',
+        total: employees.length,
+        storeKey: 'onboardedEmployees',
+        readRule: '先读取员工花名册，再用本地已入职员工按员工号覆盖同员工记录',
+        writeRule: '按员工号 upsert 到 onboardedEmployees',
+        outputKeys: ['employeeNo', 'name', 'department', 'deptFullPath', 'position', 'employeeStatus'],
+      },
+      roster: {
+        sourceFile: '员工主数据统一映射',
+        total: roster.length,
+        readRule: '由 masterEmployees 映射成花名册和档案库展示行',
+        outputKeys: ['employeeNo', 'name', 'dept', 'deptFullPath', 'position', 'employeeStatus'],
+      },
+      employment: {
+        sourceFile: '员工管理参考文件',
+        total: onboardRows.length + resigningRows.length + transferringRows.length + regularizedRows.length,
+        readRule: '按任职管理类型读取参考文件，当前不写入本地 Store',
+        outputKeys: ['employeeNo', 'name', 'department', 'position', 'status'],
+      },
+      contracts: {
+        sourceFile: '员工合同参考文件',
+        total: contracts.length,
+        readRule: '按合同类型读取参考文件，当前不写入本地 Store',
+        outputKeys: ['employeeNo', 'name', 'contractStatus', 'signProgress'],
+      },
+      settings: {
+        sourceFile: '系统默认员工管理设置',
+        total: employeeSettingsRows().length,
+        readRule: '当前为系统默认设置',
+        outputKeys: ['setting', 'value', 'status'],
+      },
+    },
+    outputsToAttendance: {
+      requiredKeys: ['employeeNo', 'name', 'department', 'deptFullPath', 'attendanceGroupName', 'shiftName', 'employeeStatus'],
+      storeKeysConsumedByAttendance: ['employeeSchedules', 'mobileClockRecords', 'dailyAttendance', 'monthlySummary'],
+      contract: '考勤域只能基于员工号识别人员；部门、岗位、考勤组、班次作为计算和展示口径，不能替代员工号。',
+    },
+    outputsToPayroll: {
+      requiredKeys: ['employeeNo', 'name', 'department', 'deptFullPath', 'position', 'rankCode', 'rankName'],
+      contract: '薪酬域必须先按员工号取员工主数据，再叠加考勤汇总和薪酬输入项。',
+    },
+    quality: {
+      duplicateEmployeeNos: countDuplicateValues(employees, (employee) => employee.employeeNo),
+      missingEmployeeNoTotal: employees.filter((employee) => !asRawText(employee.employeeNo)).length,
+      organizationUnlinkedTotal: organizationUnlinked.length,
+      positionUnlinkedTotal: positionUnlinked.length,
+      rankUnlinkedTotal: rankUnlinked.length,
+      managerUnlinkedTotal: managerUnlinked.length,
+      organizationUnlinkedSamples: organizationUnlinked.slice(0, 20),
+      positionUnlinkedSamples: positionUnlinked.slice(0, 20),
+      rankUnlinkedSamples: rankUnlinked.slice(0, 20),
+      managerUnlinkedSamples: managerUnlinked.slice(0, 20),
+      localOverrideTotal: onboarded.length,
+    },
+  };
+  employeeDomainSnapshotCache = { cacheKey, snapshot };
+  return snapshot;
+}
+
+function employeeSummary() {
+  const summary = employeeDomainSnapshot().summary;
+  const roster = employeeRosterRows();
+  const materials = employeeMaterialRows();
+  const materialTypes = ['身份证人像面', '身份证国徽面', '学历证书', '体检报告', '当前合同附件', '头像'];
+  const hasValue = (row, keys) => keys.some((key) => asRawText(row[key]));
+  const countEmployeesWithMaterial = (matcher) => {
+    const employeeNos = new Set(materials
+      .filter((row) => matcher(asRawText(row.materialType)))
+      .map((row) => asRawText(row.employeeNo))
+      .filter(Boolean));
+    return employeeNos.size;
+  };
+  const total = roster.length || 1;
+  return {
+    ...summary,
+    archiveOverview: {
+      employeeTotal: roster.length,
+      generatedAt: nowText(),
+      materialComplete: roster.filter((employee) => {
+        const ownedTypes = new Set(materials
+          .filter((row) => asRawText(row.employeeNo) === asRawText(employee.employeeNo))
+          .map((row) => asRawText(row.materialType)));
+        return materialTypes.slice(0, 4).every((type) => ownedTypes.has(type));
+      }).length,
+      importantComplete: roster.filter((row) => (
+        hasValue(row, ['contractStartDate'])
+        && hasValue(row, ['fundNo'])
+        && hasValue(row, ['currentAddress'])
+        && hasValue(row, ['emergencyContact', 'emergencyPhone'])
+        && hasValue(row, ['socialSecurityNo'])
+        && hasValue(row, ['bankCard'])
+      )).length,
+      materialRows: [
+        { label: '身份证(正反面)', count: countEmployeesWithMaterial((type) => /身份证/.test(type)) },
+        { label: '学历证书', count: countEmployeesWithMaterial((type) => /学历/.test(type)) },
+        { label: '体检报告', count: countEmployeesWithMaterial((type) => /体检/.test(type)) },
+        { label: '当前合同附件', count: countEmployeesWithMaterial((type) => /合同/.test(type)) },
+        { label: '头像', count: countEmployeesWithMaterial((type) => /头像/.test(type)) },
+      ].map((row) => ({ ...row, percent: roster.length ? (row.count / total) * 100 : 0 })),
+      importantRows: [
+        { label: '当前合同起始日', count: roster.filter((row) => hasValue(row, ['contractStartDate'])).length },
+        { label: '公积金账号', count: roster.filter((row) => hasValue(row, ['fundNo'])).length },
+        { label: '现住址', count: roster.filter((row) => hasValue(row, ['currentAddress'])).length },
+        { label: '紧急联系人', count: roster.filter((row) => hasValue(row, ['emergencyContact', 'emergencyPhone'])).length },
+        { label: '社保账号', count: roster.filter((row) => hasValue(row, ['socialSecurityNo'])).length },
+        { label: '工资卡号', count: roster.filter((row) => hasValue(row, ['bankCard'])).length },
+      ].map((row) => ({ ...row, percent: roster.length ? (row.count / total) * 100 : 0 })),
+    },
+  };
+}
+
+function countRowsWithoutEmployeeLink(rows, employeeNoSet) {
+  return rows.filter((row) => !rowMatchesEmployeeNo(row, employeeNoSet)).length;
+}
+
+function attendanceDomainSnapshot() {
+  const domain = getBackendDomain('attendance');
+  const employeeSnapshot = employeeDomainSnapshot();
+  const employees = employeeMasterRows();
+  const employeeNoSet = new Set(employees.map((employee) => asRawText(employee.employeeNo)).filter(Boolean));
+  const settings = {
+    groups: getGroupSettingRows(),
+    shifts: getShiftSettingRows(),
+    cardRules: getCardRuleSettingRows(),
+    mobileClock: getMobileClockSettingRows(),
+    locations: getLocationSettingRows(),
+    holidays: getHolidaySettingRows(),
+    calendars: getCalendarSettingRows(),
+    overtimeRules: getOvertimeRuleSettingRows(),
+    fieldRules: getFieldRuleSettingRows(),
+    statSchemes: getStatSchemeSettingRows(),
+    face: getSettingsFaceRows(),
+    people: employeeMasterRows().map(onboardedEmployeeToPeopleRow),
+  };
+  const stored = {
+    schedules: getStoredRows('employeeSchedules') || [],
+    mobileClockRecords: getMobileRows('mobileClockRecords', []),
+    mobileAnomalies: getMobileRows('mobileAnomalies', []),
+    mobileMakeupRequests: getMobileRows('mobileMakeupRequests', []),
+    mobileApprovalRequests: getMobileRows('mobileApprovalRequests', []),
+    dailyAttendance: getStoredRows('dailyAttendance') || [],
+    monthlySummary: getStoredRows('monthlySummary') || [],
+    attendanceAnomalies: getStoredRows('attendanceAnomalies') || [],
+    overtimeRecords: getStoredRows('overtimeRecords') || [],
+    fieldOutRecords: getStoredRows('fieldOutRecords') || [],
+    fieldTripRecords: getStoredRows('fieldTripRecords') || [],
+    leaveRecords: getStoredRows('leaveRecords') || [],
+    leaveBalances: getStoredRows('leaveBalances') || [],
+    leaveDetails: getStoredRows('leaveDetails') || [],
+    externalRecords: getStoredRows('externalRecords') || [],
+  };
+  const outputs = {
+    attendanceStats: buildLinkedAttendanceStatsRows(),
+    dailyAttendance: buildLinkedDailyRows(),
+    monthlyAttendance: buildLinkedMonthlyRows(),
+    monthlySummary: buildLinkedMonthlySummaryRows(),
+    clockRecords: getHrCoreContext().clockRecords,
+    anomalies: buildLinkedAnomalyRows(),
+    workData: buildLinkedWorkDataRows(),
+    overtime: buildLinkedOvertimeRows(),
+    fieldOut: buildLinkedFieldOutRows(),
+    fieldTrip: buildLinkedFieldTripRows(),
+    leave: buildLinkedLeaveRows(),
+    leaveBalances: buildLinkedLeaveBalanceRows(),
+    leaveDetails: buildLinkedLeaveDetailRows(),
+  };
+
+  const summary = {
+    employeeTotal: employees.length,
+    attendancePeopleTotal: settings.people.length,
+    attendanceGroupTotal: settings.groups.length,
+    shiftTotal: settings.shifts.length,
+    scheduleTotal: stored.schedules.length,
+    clockRecordTotal: outputs.clockRecords.length,
+    dailyAttendanceTotal: outputs.dailyAttendance.length,
+    monthlyAttendanceTotal: outputs.monthlyAttendance.length,
+    monthlySummaryTotal: outputs.monthlySummary.length,
+    anomalyTotal: outputs.anomalies.length,
+    leaveTotal: outputs.leave.length,
+    fieldOutTotal: outputs.fieldOut.length,
+    fieldTripTotal: outputs.fieldTrip.length,
+    externalRecordTotal: stored.externalRecords.length,
+    sourceFile: '员工主数据 + 考勤设置 + 小程序移动端 API + 本地持久化数据',
+  };
+
+  return {
+    domain,
+    domainFlow: '组织 -> 员工 -> 考勤 -> 薪酬',
+    dependsOn: ['organization', 'employee'],
+    upstreamFromEmployee: {
+      requiredKeys: employeeSnapshot.outputsToAttendance.requiredKeys,
+      identityKey: 'employeeNo',
+      contract: '考勤域必须以员工号作为唯一人员识别主键；姓名、部门、岗位、考勤组、班次只作为计算和展示口径。',
+    },
+    summary,
+    dataSets: {
+      people: {
+        sourceFile: '员工域统一主数据',
+        total: settings.people.length,
+        readRule: '由 employeeMasterRows 映射为考勤人员和人脸设置人员',
+        outputKeys: ['employeeNo', 'name', 'department', 'position', 'shiftName', 'attendanceGroupName'],
+      },
+      settings: {
+        sourceFile: '考勤设置默认值 + data-store.json 本地覆盖',
+        total: settings.groups.length + settings.shifts.length + settings.cardRules.length + settings.mobileClock.length
+          + settings.locations.length + settings.holidays.length + settings.calendars.length + settings.overtimeRules.length
+          + settings.fieldRules.length + settings.statSchemes.length,
+        storeKeys: [
+          'settingsGroups',
+          'settingsShifts',
+          'settingsCardRules',
+          'settingsMobileClock',
+          'settingsLocation',
+          'settingsHoliday',
+          'settingsCalendar',
+          'settingsOvertimeRules',
+          'settingsFieldRules',
+          'settingsStatSchemes',
+        ],
+        readRule: '优先读取本地保存的考勤设置，没有本地数据时使用系统默认设置',
+        writeRule: '各设置接口按整表 rows 保存到对应 settings* Store Key',
+      },
+      schedules: {
+        sourceFile: 'employeeSchedules 本地排班 + 考勤设置自动排班',
+        total: stored.schedules.length,
+        storeKey: 'employeeSchedules',
+        readRule: '有本地排班时优先使用本地排班，否则按员工默认班次和司历生成自动排班',
+        writeRule: '按员工号和日期保存排班，员工号必须存在于员工域',
+        outputKeys: ['employeeNo', 'employeeName', 'dept', 'date', 'shiftId', 'shiftName'],
+      },
+      clockRecords: {
+        sourceFile: 'mobileClockRecords + 原始打卡补充文件',
+        total: outputs.clockRecords.length,
+        storeKey: 'mobileClockRecords',
+        readRule: '默认读取小程序移动端打卡并按员工号过滤，也支持 source=file 读取补充文件',
+        writeRule: '后台写入时按员工号归一化到 mobileClockRecords',
+        outputKeys: ['employeeNo', 'employeeName', 'date', 'time', 'type', 'result'],
+      },
+      dailyAndMonthly: {
+        sourceFile: '员工主数据 + 排班 + 打卡 + 外部数据',
+        total: outputs.dailyAttendance.length + outputs.monthlyAttendance.length + outputs.monthlySummary.length,
+        storeKeys: ['dailyAttendance', 'monthlySummary'],
+        readRule: '默认由员工、排班、打卡实时构建，也支持 source=file 读取补充文件',
+        writeRule: '日报和月汇总可整表保存到本地 Store',
+        outputKeys: ['empId', 'name', 'dept', 'position', 'attendGroup', 'shouldWorkDays', 'actualWorkDays', 'lateMinutes'],
+      },
+      leaveAndFieldWork: {
+        sourceFile: '本地 Store + 小程序审批/补卡',
+        total: outputs.leave.length + outputs.fieldOut.length + outputs.fieldTrip.length + outputs.workData.length,
+        storeKeys: ['leaveRecords', 'fieldOutRecords', 'fieldTripRecords', 'mobileMakeupRequests'],
+        readRule: '按员工号过滤到已入职员工范围',
+        writeRule: '整表保存时必须包含员工号或可映射到员工号的字段',
+      },
+    },
+    outputsToPayroll: {
+      requiredKeys: ['empId', 'name', 'dept', 'position', 'deptFullPath', 'shouldWorkDays', 'actualWorkDays', 'absentDays', 'lateMinutes', 'normalHours', 'customMetrics'],
+      contract: '薪酬域只能消费月汇总和外部统计项，不应直接绕过考勤域读取原始打卡明细。',
+    },
+    quality: {
+      employeeNoTotal: employeeNoSet.size,
+      storedScheduleUnlinkedTotal: countRowsWithoutEmployeeLink(stored.schedules, employeeNoSet),
+      storedClockUnlinkedTotal: countRowsWithoutEmployeeLink(stored.mobileClockRecords, employeeNoSet),
+      storedDailyUnlinkedTotal: countRowsWithoutEmployeeLink(stored.dailyAttendance, employeeNoSet),
+      storedMonthlySummaryUnlinkedTotal: countRowsWithoutEmployeeLink(stored.monthlySummary, employeeNoSet),
+      storedLeaveUnlinkedTotal: countRowsWithoutEmployeeLink(stored.leaveRecords, employeeNoSet),
+      storedFieldOutUnlinkedTotal: countRowsWithoutEmployeeLink(stored.fieldOutRecords, employeeNoSet),
+      storedFieldTripUnlinkedTotal: countRowsWithoutEmployeeLink(stored.fieldTripRecords, employeeNoSet),
+      storedExternalUnlinkedTotal: countRowsWithoutEmployeeLink(stored.externalRecords, employeeNoSet),
+      duplicateScheduleKeys: countDuplicateValues(stored.schedules, (row) => `${asRawText(row.employeeNo)}|${asText(row.date, '')}`),
+    },
+  };
+}
+
+function payrollDomainSnapshot() {
+  const domain = getBackendDomain('payroll');
+  const employeeSnapshot = employeeDomainSnapshot();
+  const attendanceSnapshot = attendanceDomainSnapshot();
+  const employees = employeeMasterRows();
+  const employeeNoSet = new Set(employees.map((employee) => asRawText(employee.employeeNo)).filter(Boolean));
+  const monthlySummaryRows = buildLinkedMonthlySummaryRows();
+  const statItems = getStatItemRows();
+  const payrollStatItems = statItems.filter((item) => asText(item.module, '') === '薪资核算');
+  const enabledPayrollStatItems = payrollStatItems.filter((item) => item.enabled !== false);
+  const formulaItems = enabledPayrollStatItems.filter((item) => item.hasFormula);
+  const externalEnabledItems = statItems.filter((item) => item.enabled !== false && statItemAppliesToMonth(item) && (item.isCustom || item.externalEnabled));
+  const externalRows = buildLinkedExternalRows();
+  const period = currentDateText().slice(0, 7);
+  const externalValues = externalMetricValuesByEmployee(period);
+  const monthlyRowsWithExternal = monthlySummaryRows.filter((row) => Object.keys(row.customMetrics || {}).length > 0).length;
+
+  return {
+    domain,
+    domainFlow: '组织 -> 员工 -> 考勤 -> 薪酬',
+    dependsOn: ['organization', 'employee', 'attendance'],
+    upstreamFromEmployee: {
+      requiredKeys: employeeSnapshot.outputsToPayroll.requiredKeys,
+      identityKey: 'employeeNo',
+      contract: employeeSnapshot.outputsToPayroll.contract,
+    },
+    upstreamFromAttendance: {
+      requiredKeys: attendanceSnapshot.outputsToPayroll.requiredKeys,
+      sourceDataSet: 'monthlySummary',
+      identityKey: 'empId',
+      contract: attendanceSnapshot.outputsToPayroll.contract,
+    },
+    summary: {
+      employeeTotal: employees.length,
+      monthlySummaryTotal: monthlySummaryRows.length,
+      statItemTotal: statItems.length,
+      payrollStatItemTotal: payrollStatItems.length,
+      enabledPayrollStatItemTotal: enabledPayrollStatItems.length,
+      formulaItemTotal: formulaItems.length,
+      externalEnabledItemTotal: externalEnabledItems.length,
+      externalRecordTotal: externalRows.length,
+      externalEmployeeTotal: externalValues.size,
+      monthlyRowsWithExternal,
+      currentPeriod: period,
+      sourceFile: '员工主数据 + 考勤月汇总 + 统计项管理 + 外部数据',
+    },
+    dataSets: {
+      employeeMaster: {
+        sourceFile: '员工域统一主数据',
+        total: employees.length,
+        readRule: '薪酬必须先按员工号读取员工主数据，不能用姓名、部门或岗位作为人员主键',
+        outputKeys: ['employeeNo', 'name', 'department', 'deptFullPath', 'position', 'rankCode', 'rankName'],
+      },
+      attendanceMonthlySummary: {
+        sourceFile: '考勤域月汇总',
+        total: monthlySummaryRows.length,
+        readRule: '薪酬只消费考勤域输出的月汇总，不直接读取原始打卡明细',
+        outputKeys: attendanceSnapshot.outputsToPayroll.requiredKeys,
+      },
+      statItems: {
+        sourceFile: getStoredRows('statItems') ? '本地持久化数据 data-store.json' : '系统默认统计项配置',
+        total: statItems.length,
+        storeKey: 'statItems',
+        readRule: '统计项定义薪酬可消费的考勤基础项、公式项和外部输入项',
+        writeRule: '整表保存到 statItems',
+        outputKeys: ['name', 'module', 'category', 'enabled', 'hasFormula', 'isCustom', 'externalEnabled', 'formulas'],
+      },
+      externalRecords: {
+        sourceFile: '本地持久化数据 data-store.json',
+        total: externalRows.length,
+        storeKey: 'externalRecords',
+        readRule: '外部数据必须按员工号和期间进入月汇总 customMetrics，再供薪酬消费',
+        writeRule: '按员工号、期间、统计项和值保存到 externalRecords',
+        outputKeys: ['employeeNo', 'empId', 'period', 'attendDate', 'statItem', 'statValue'],
+      },
+      formulaTraceContract: {
+        sourceFile: '后端薪酬底层契约',
+        total: formulaItems.length,
+        readRule: '后续薪酬计算接口每个公式都应输出 expression、inputs、blockers、notes，便于复核和定位阻塞原因',
+        outputKeys: ['expression', 'inputs', 'blockers', 'notes'],
+      },
+      currentCalculationSurface: {
+        sourceFile: 'src/app/pages/SalaryCalculation.tsx',
+        total: 1,
+        readRule: '当前薪酬核算页面仍有本地样例数据和本地公式，后续迁移时必须接入本薪酬快照定义的后端输入边界',
+        outputKeys: ['payrollRows', 'calculateRow', 'formula rules'],
+      },
+    },
+    calculationBoundary: {
+      allowedInputs: [
+        'employeeMaster.employeeNo',
+        'employeeMaster.department',
+        'employeeMaster.position',
+        'employeeMaster.rankCode/rankName',
+        'attendanceMonthlySummary.shouldWorkDays',
+        'attendanceMonthlySummary.actualWorkDays',
+        'attendanceMonthlySummary.absentDays',
+        'attendanceMonthlySummary.lateMinutes',
+        'attendanceMonthlySummary.normalHours',
+        'attendanceMonthlySummary.customMetrics',
+        'externalRecords.statItem/statValue',
+      ],
+      blockedInputs: [
+        '直接读取原始打卡明细作为薪酬输入',
+        '直接用姓名匹配薪酬人员',
+        '绕过员工域直接使用页面本地人员样例作为正式薪酬人员',
+      ],
+      formulaTraceShape: {
+        expression: '公式表达式或规则说明',
+        inputs: '本次公式使用的字段和值',
+        blockers: '缺失输入、口径冲突或无法计算原因',
+        notes: '人工复核说明或规则来源',
+      },
+    },
+    quality: {
+      monthlySummaryUnlinkedTotal: countRowsWithoutEmployeeLink(monthlySummaryRows, employeeNoSet),
+      externalRecordUnlinkedTotal: countRowsWithoutEmployeeLink(externalRows, employeeNoSet),
+      duplicateExternalMetricKeys: countDuplicateValues(externalRows, (row) => `${asRawText(row.empId || row.employeeNo)}|${asText(row.period, '')}|${asText(row.statItem, '')}`),
+      disabledPayrollStatItemTotal: payrollStatItems.filter((item) => item.enabled === false).length,
+      enabledFormulaItemsWithoutFormulaTotal: enabledPayrollStatItems.filter((item) => item.hasFormula && (!Array.isArray(item.formulas) || !item.formulas.length)).length,
+    },
   };
 }
 
@@ -1888,7 +2586,105 @@ function readReferenceRows(file, sheetMatcher, options = {}) {
 
 function readEducationRows() {
   const file = getReferenceFile('员工花名册') || getReferenceFile('教育经历');
-  return readReferenceRows(file, (name) => name.includes('教育经历'));
+  const reference = readReferenceRows(file, (name) => name.includes('教育经历'));
+  const localRows = filterRowsToOnboardedEmployees(getStoredRows('employeeEducationRows') || []);
+  const embeddedRows = employeeMasterRows().flatMap((employee) => (
+    Array.isArray(employee.educationExperiences) ? employee.educationExperiences : []
+  ).map((record, index) => ({
+    ...employeeBaseRecord(employee),
+    id: asText(record.id, `education_${employee.employeeNo}_${index + 1}`),
+    '学历': asText(record.education || record['学历'], '-'),
+    '毕业院校': asText(record.school || record['毕业院校'], '-'),
+    '专业': asText(record.major || record['专业'], '-'),
+    '毕业时间': asText(record.graduationDate || record['毕业时间'], '-'),
+    source: '新增员工档案',
+  })));
+  const referenceRows = filterRowsToOnboardedEmployees(reference.rows || []);
+  const detailRows = [...localRows, ...embeddedRows, ...referenceRows];
+  const detailByEmployeeNo = new Map(detailRows.map((row) => [asRawText(row.employeeNo || row.员工号), row]));
+  const merged = employeeMasterRows().map((employee, index) => ({
+    id: `education_master_${asRawText(employee.employeeNo) || index + 1}`,
+    ...employeeBaseRecord(employee),
+    '学历': '-',
+    '毕业院校': '-',
+    '专业': '-',
+    '毕业时间': '-',
+    source: '员工主数据',
+    ...(detailByEmployeeNo.get(asRawText(employee.employeeNo)) || {}),
+  }));
+  return {
+    sourceFile: [referenceRows.length ? reference.sourceFile : '', '员工主数据', localRows.length ? '本地员工档案' : ''].filter(Boolean).join(' + '),
+    sheetName: reference.sheetName || '教育经历',
+    rows: merged.map((row, index) => ({ id: row.id || index + 1, ...row })),
+  };
+}
+
+function readWorkExperienceRows() {
+  const localRows = filterRowsToOnboardedEmployees(getStoredRows('employeeWorkExperienceRows') || []);
+  const embeddedRows = employeeMasterRows().flatMap((employee) => (
+    Array.isArray(employee.workExperiences) ? employee.workExperiences : []
+  ).map((record, index) => ({
+    ...employeeBaseRecord(employee),
+    id: asText(record.id, `work_${employee.employeeNo}_${index + 1}`),
+    '公司名称': asText(record.company || record['公司名称'], '-'),
+    '任职岗位': asText(record.jobTitle || record['任职岗位'], '-'),
+    '开始时间': asText(record.startDate || record['开始时间'], '-'),
+    '结束时间': asText(record.endDate || record['结束时间'], '-'),
+    source: '新增员工档案',
+  })));
+  const mainJobRows = readEmploymentRows('mainJobRecords').rows.map((row, index) => ({
+    id: `employment_work_${index + 1}`,
+    employeeNo: asText(row.员工号 || row.employeeNo, ''),
+    employeeName: asText(row.姓名 || row.name, ''),
+    name: asText(row.姓名 || row.name, ''),
+    dept: asText(row.部门 || row.任职部门 || row.入职末级部门, ''),
+    position: asText(row.岗位 || row.任职岗位, ''),
+    '姓名': asText(row.姓名 || row.name, ''),
+    '员工号': asText(row.员工号 || row.employeeNo, ''),
+    '部门': asText(row.部门 || row.任职部门 || row.入职末级部门, ''),
+    '岗位': asText(row.岗位 || row.任职岗位, ''),
+    '公司名称': '当前公司',
+    '任职岗位': asText(row.岗位 || row.任职岗位, ''),
+    '开始时间': asText(row.生效日期 || row.入职日期 || row.实际入职日期, ''),
+    '结束时间': asText(row.结束日期 || '', ''),
+    source: '任职记录联动',
+  })).filter((row) => row.employeeName || row.employeeNo);
+  const detailRows = [...localRows, ...embeddedRows, ...mainJobRows];
+  const detailByEmployeeNo = new Map(detailRows.map((row) => [asRawText(row.employeeNo || row.员工号), row]));
+  const merged = employeeMasterRows().map((employee, index) => ({
+    id: `work_master_${asRawText(employee.employeeNo) || index + 1}`,
+    ...employeeBaseRecord(employee),
+    '公司名称': '当前公司',
+    '任职岗位': asText(employee.position, ''),
+    '开始时间': asText(employee.hireDate, ''),
+    '结束时间': '',
+    source: '员工主数据',
+    ...(detailByEmployeeNo.get(asRawText(employee.employeeNo)) || {}),
+  }));
+  return {
+    sourceFile: '本地员工档案 + 主岗任职记录',
+    sheetName: '工作经历',
+    rows: merged.map((row, index) => ({ id: row.id || index + 1, ...row })),
+  };
+}
+
+function employeeMaterialRows() {
+  const localRows = filterRowsToOnboardedEmployees(getStoredRows('employeeMaterialRows') || []);
+  const embeddedRows = employeeMasterRows().flatMap((employee) => (
+    Array.isArray(employee.materials) ? employee.materials : []
+  ).map((record, index) => ({
+    id: asText(record.id, `material_${employee.employeeNo}_${index + 1}`),
+    employeeNo: employee.employeeNo,
+    employeeName: employee.name,
+    name: employee.name,
+    dept: employee.department,
+    position: employee.position,
+    materialType: asText(record.materialType || record.label, '员工材料'),
+    fileName: asText(record.fileName || record.name, ''),
+    uploadedAt: asText(record.uploadedAt, nowText()),
+    source: asText(record.source, '员工主数据材料'),
+  }))).filter((row) => row.fileName);
+  return [...localRows, ...embeddedRows].map((row, index) => ({ id: row.id || index + 1, ...row }));
 }
 
 const EMPLOYMENT_FILE_MAP = {
@@ -1910,7 +2706,84 @@ const EMPLOYMENT_FILE_MAP = {
   mainJobRecords: ['主岗任职记录'],
 };
 
+function employmentStoreKey(type = 'mainJobRecords') {
+  return `employeeEmploymentRows:${asRawText(type || 'mainJobRecords')}`;
+}
+
+function employeeToEmploymentOnboardedRow(employee, index) {
+  return {
+    id: `master_onboarded_${asRawText(employee.employeeNo) || index + 1}`,
+    员工号: asText(employee.employeeNo, ''),
+    姓名: asText(employee.name, ''),
+    手机号: asText(employee.phone, ''),
+    预计入职日期: asText(employee.hireDate, ''),
+    入职末级部门: asText(employee.department, ''),
+    实际入职日期: asText(employee.onboardDate || employee.hireDate, ''),
+    员工类型: normalizeEmployeeType(employee.employeeType),
+    岗位: asText(employee.position, ''),
+    备注: '',
+    更新时间: asText(employee.updatedAt, nowText()),
+    审批状态: asText(employee.reviewStatus, '已通过'),
+    员工扫码登记: '员工主数据',
+    数据来源: asText(employee.dataSource, '员工主数据'),
+    添加人: '系统',
+    添加时间: asText(employee.createdAt || employee.hireDate, ''),
+  };
+}
+
+function employeeToMainJobRecordRow(employee, index) {
+  return {
+    id: `master_main_job_${asRawText(employee.employeeNo) || index + 1}`,
+    员工号: asText(employee.employeeNo, ''),
+    姓名: asText(employee.name, ''),
+    生效日期: asText(employee.hireDate, ''),
+    末级部门: asText(employee.deptFullPath || employee.department, ''),
+    部门: asText(employee.department, ''),
+    业务分组: asText(employee.businessGroup, '-'),
+    任职类型: '入职',
+    数据来源: asText(employee.dataSource, '员工主数据'),
+    备注: '',
+    岗位: asText(employee.position, ''),
+    任职岗位: asText(employee.position, ''),
+  };
+}
+
+function filterEmploymentRowsToEmployeeMaster(rows) {
+  const context = employeeMasterMatchContext();
+  if (!context.employeeNos.size && !context.names.size && !context.phones.size) return [];
+  return rows.filter((row) => rowMatchesEmployeeMaster(row, context));
+}
+
 function readEmploymentRows(type = 'mainJobRecords') {
+  if (type === 'mainJobRecords') {
+    return {
+      sourceFile: '员工主数据',
+      sheetName: '主岗任职记录',
+      rows: employeeMasterRows().map(employeeToMainJobRecordRow),
+    };
+  }
+  if (type === 'onboarded') {
+    const rows = employeeMasterRows()
+      .filter((employee) => !/待入职|离职|放弃/.test(asRawText(employee.employeeStatus)))
+      .map(employeeToEmploymentOnboardedRow);
+    return {
+      sourceFile: '员工主数据',
+      sheetName: '已入职',
+      rows,
+    };
+  }
+  if (type === 'pendingOnboard') {
+    const rows = employeeMasterRows()
+      .filter((employee) => /待入职/.test(asRawText(employee.employeeStatus)))
+      .map(employeeToEmploymentOnboardedRow);
+    if (rows.length) {
+      return {
+        sourceFile: '员工主数据',
+        sheetName: '待入职',
+        rows,
+      };
+    }
+  }
   if (String(type).startsWith('tempStore')) {
     return {
       sourceFile: '全部调动记录 + 员工主数据',
@@ -1927,7 +2800,16 @@ function readEmploymentRows(type = 'mainJobRecords') {
   }
   const keywords = EMPLOYMENT_FILE_MAP[type] || EMPLOYMENT_FILE_MAP.mainJobRecords;
   const file = getReferenceFile(...keywords);
-  return readReferenceRows(file);
+  const reference = readReferenceRows(file);
+  const storedRows = filterEmploymentRowsToEmployeeMaster(getStoredRows(employmentStoreKey(type)) || []);
+  const storedIds = new Set(storedRows.map((row) => asRawText(row.id || row.employeeNo || row.员工号 || row.name || row.姓名)).filter(Boolean));
+  const referenceRows = filterEmploymentRowsToEmployeeMaster(reference.rows || [])
+    .filter((row) => !storedIds.has(asRawText(row.id || row.employeeNo || row.员工号 || row.name || row.姓名)));
+  return {
+    ...reference,
+    sourceFile: storedRows.length ? `${reference.sourceFile || '参考数据'} + 本地办理记录` : reference.sourceFile,
+    rows: [...storedRows, ...referenceRows],
+  };
 }
 
 function employmentDateValue(row, aliases) {
@@ -2010,6 +2892,7 @@ const CONTRACT_FILE_MAP = {
   renewal: ['到期续签'],
   signing: ['签署中'],
   signRecords: ['全部签署记录'],
+  releaseActive: ['合同解除'],
   releaseRecords: ['全部解除记录'],
 };
 
@@ -2045,12 +2928,131 @@ function normalizeContractRow(row, index) {
   };
 }
 
+function employeeToContractRow(employee, index, type = 'newSign') {
+  const employeeNo = asRawText(employee.employeeNo);
+  const startDate = extractDate(employee.contractStartDate || employee.hireDate) || currentDateText();
+  const isRelease = type === 'releaseActive' || type === 'releaseRecords';
+  const isRenewal = type === 'renewal';
+  return {
+    id: `master_contract_${type}_${employeeNo || index + 1}`,
+    name: asText(employee.name, ''),
+    employeeNo: asText(employee.employeeNo, ''),
+    dept: asText(employee.department, ''),
+    deptFullPath: asText(employee.deptFullPath, ''),
+    position: asText(employee.position, ''),
+    employeeType: normalizeEmployeeType(employee.employeeType),
+    company: '上海拉迷家具有限公司',
+    contractNo: asText(employee.contractNo, ''),
+    contractType: '固定期限劳动合同',
+    contractTerm: '3年',
+    startDate,
+    endDate: extractDate(employee.contractEndDate || '') || (isRenewal ? addDays(currentDateText(), 30) : ''),
+    contractStatus: isRelease ? '解除中' : isRenewal ? '待续签' : '待新签',
+    contractAttachment: '',
+    isCurrentContract: isRelease ? '否' : '是',
+    signMethod: '电子签',
+    signProgress: isRelease ? '解除中' : isRenewal ? '待续签' : '待新签',
+    employeeAuthStatus: '已授权',
+    dataSource: '员工主数据',
+    initiator: '系统',
+    handler: '系统',
+    initiateTime: '',
+    releaseMethod: isRelease ? '协商解除' : '',
+    releaseProgress: isRelease ? '解除中' : '',
+    releaseReason: isRelease ? '待补充' : '',
+    releaseDate: isRelease ? currentDateText() : '',
+  };
+}
+
+function generatedContractNo(row) {
+  const employeeNo = asRawText(row.employeeNo || row.员工号 || row.empId || row.name || row.employeeName).replace(/\W+/g, '');
+  const stamp = nowText().replace(/\D/g, '').slice(0, 8);
+  return `HT${stamp}${employeeNo ? `-${employeeNo}` : ''}`;
+}
+
+function normalizeStoredContractAction(action, index) {
+  const payload = action?.payload || action || {};
+  const actionName = asRawText(action?.actionName || payload.actionName || payload.action || '');
+  const sourceView = asRawText(action?.sourceView || payload.sourceView || '');
+  const releaseProgress = asRawText(payload.releaseProgress || action?.releaseProgress || '');
+  const signProgress = asRawText(payload.signProgress || action?.signProgress || '');
+  const isRelease = /解除/.test(actionName) || /合同解除/.test(sourceView) || Boolean(releaseProgress);
+  const employeeNo = asRawText(payload.employeeNo || payload.员工号 || action?.employeeNo || '');
+  const name = asRawText(payload.name || payload.employeeName || action?.employeeName || '');
+  const contractNo = asRawText(payload.contractNo || action?.contractNo || '') || (!isRelease && (actionName === '发起新签' || actionName === '发起续签') ? generatedContractNo({ employeeNo, name }) : '');
+  const fallbackProgress = isRelease ? '解除中' : actionName === '撤回' ? '企业撤回' : '签署中';
+  return {
+    id: `contract_action_${action?.id || index}`,
+    name,
+    employeeNo,
+    dept: asRawText(payload.dept || payload.department || payload.部门 || ''),
+    deptFullPath: asRawText(payload.deptFullPath || payload.部门全路径 || payload.dept || ''),
+    position: asRawText(payload.position || payload.岗位 || ''),
+    employeeType: asRawText(payload.employeeType || payload.员工类型 || ''),
+    company: asRawText(payload.company || action?.company || '') || '上海拉迷家具有限公司',
+    contractNo,
+    contractType: asRawText(payload.contractType || action?.contractType || '') || '固定期限劳动合同',
+    contractTerm: asRawText(payload.contractTerm || '') || '3年',
+    startDate: extractDate(payload.startDate || payload.hireDate || payload.入职日期 || payload.合同起始日),
+    endDate: extractDate(payload.endDate || payload.合同到期日),
+    contractStatus: asRawText(payload.contractStatus || action?.contractStatus || '') || (isRelease ? '解除中' : actionName === '撤回' ? '已撤回' : '执行中'),
+    contractAttachment: asRawText(payload.contractAttachment || ''),
+    isCurrentContract: asRawText(payload.isCurrentContract || payload.currentContract || '') || (isRelease ? '否' : '是'),
+    signMethod: asRawText(payload.signMethod || '') || '电子签',
+    signProgress: signProgress || fallbackProgress,
+    employeeAuthStatus: asRawText(payload.employeeAuthStatus || '') || '已授权',
+    dataSource: sourceView || (isRelease ? '合同解除' : '合同发起'),
+    initiator: asRawText(payload.initiator || '') || asRawText(action?.operator || '') || '系统',
+    handler: asRawText(payload.handler || '') || asRawText(action?.operator || '') || '系统',
+    initiateTime: asRawText(payload.initiateTime || action?.createTime || '') || nowText(),
+    releaseMethod: asRawText(payload.releaseMethod || '') || (isRelease ? '协商解除' : ''),
+    releaseProgress: releaseProgress || (isRelease ? (actionName === '取消解除' ? '已撤销' : '解除中') : ''),
+    releaseReason: asRawText(payload.releaseReason || '') || (isRelease ? '待补充' : ''),
+    releaseDate: extractDate(payload.releaseDate || '') || (isRelease ? nowText().slice(0, 10) : ''),
+    actionName,
+  };
+}
+
+function readStoredContractActionRows(type) {
+  const rows = (getStoredRows('employeeContractActions') || [])
+    .map(normalizeStoredContractAction)
+    .filter((row) => row.name);
+  if (type === 'releaseActive') return rows.filter((row) => /解除中|待/.test(asRawText(row.releaseProgress || row.signProgress || row.contractStatus)));
+  if (type === 'releaseRecords') return rows.filter((row) => /解除/.test(asRawText(row.actionName || row.sourceView || row.releaseProgress)));
+  if (type === 'signing') return rows.filter((row) => !/解除/.test(asRawText(row.actionName || row.sourceView || row.releaseProgress)) && /签署中|待员工填|待发起/.test(asRawText(row.signProgress || row.contractStatus)));
+  if (type === 'signRecords') return rows.filter((row) => !/解除/.test(asRawText(row.actionName || row.sourceView || row.releaseProgress)));
+  if (type === 'all') return rows.filter((row) => /发起新签|发起续签|编辑合同|保存合同|撤回|解除/.test(asRawText(row.actionName || row.sourceView)));
+  return [];
+}
+
 function readEmployeeContractRows(type = 'all') {
   const keywords = CONTRACT_FILE_MAP[type] || CONTRACT_FILE_MAP.all;
   const file = getReferenceFile(...keywords);
-  if (!file) return { sourceFile: '', sheetName: '', rows: [] };
+  const storedRows = filterRowsToOnboardedEmployees(readStoredContractActionRows(type));
+  const generatedRows = ['newSign', 'signing', 'all'].includes(type)
+    ? employeeMasterRows().map((employee, index) => employeeToContractRow(employee, index, type))
+    : type === 'renewal'
+      ? employeeMasterRows().filter((employee) => asRawText(employee.contractEndDate)).map((employee, index) => employeeToContractRow(employee, index, type))
+      : [];
+  if (!file) {
+    return {
+      sourceFile: [generatedRows.length ? '员工主数据' : '', storedRows.length ? '本地合同办理记录' : ''].filter(Boolean).join(' + '),
+      sheetName: '',
+      rows: [...storedRows, ...generatedRows],
+    };
+  }
   const { rows, sheetName } = readSheetRows(file.fullPath);
-  return { sourceFile: file.name, sheetName, rows: rows.map(normalizeContractRow).filter((row) => row.name) };
+  const storedKeys = new Set([...storedRows, ...generatedRows].map((row) => asRawText(row.contractNo || row.employeeNo || row.name)).filter(Boolean));
+  const referenceRows = rows
+    .map(normalizeContractRow)
+    .filter((row) => row.name)
+    .filter((row) => rowMatchesEmployeeMaster(row))
+    .filter((row) => !storedKeys.has(asRawText(row.contractNo || row.employeeNo || row.name)));
+  return {
+    sourceFile: [generatedRows.length ? '员工主数据' : '', referenceRows.length ? file.name : '', storedRows.length ? '本地合同办理记录' : ''].filter(Boolean).join(' + '),
+    sheetName,
+    rows: [...storedRows, ...generatedRows, ...referenceRows],
+  };
 }
 
 function employeeArchiveApprovalRows() {
@@ -2193,11 +3195,14 @@ function organizationRows() {
   }
 
   const customRows = getStoredRows('organizationStructures') || [];
+  const deletedKeys = new Set((getStoredRows('organizationDeletedStructures') || []).map((item) => asRawText(item.key || item)));
   const byCode = new Map(rows.map((row) => [asRawText(row.code), row]));
+  for (const key of deletedKeys) byCode.delete(key);
   for (const custom of customRows) {
     const normalized = normalizeOrganizationRow(custom, byCode.size, employees);
     if (normalized) {
-      byCode.set(asRawText(normalized.code), { ...normalized, ...custom, source: '本地组织管理保存' });
+      const key = asRawText(normalized.code);
+      if (!deletedKeys.has(key)) byCode.set(key, { ...normalized, ...custom, source: '本地组织管理保存' });
     }
   }
 
@@ -2329,12 +3334,38 @@ function organizationSettingsRows() {
   ];
 }
 
-function organizationSummary() {
-  const orgs = organizationRows().rows;
-  const positions = positionRows().rows;
-  const ranks = rankRows().rows;
+function countDuplicateValues(rows, getValue) {
+  const counts = new Map();
+  for (const row of rows) {
+    const value = asRawText(getValue(row));
+    if (!value) continue;
+    counts.set(value, (counts.get(value) || 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .filter(([, count]) => count > 1)
+    .map(([value, count]) => ({ value, count }));
+}
+
+function organizationDomainSnapshot() {
+  const domain = getBackendDomain('organization');
+  const organizationData = organizationRows();
+  const positionData = positionRows();
+  const rankData = rankRows();
+  const orgs = organizationData.rows;
+  const positions = positionData.rows;
+  const ranks = rankData.rows;
+  const settings = organizationSettingsRows();
   const employees = employeeRosterRows();
-  return {
+  const orgCodes = new Set(orgs.map((row) => asRawText(row.code)).filter(Boolean));
+  const orphanOrganizations = orgs
+    .filter((row) => asRawText(row.parentCode) && !orgCodes.has(asRawText(row.parentCode)))
+    .map((row) => ({
+      code: asText(row.code, ''),
+      name: asText(row.name, ''),
+      parentCode: asText(row.parentCode, ''),
+    }));
+
+  const summary = {
     organizationTotal: orgs.length,
     activeOrganizationTotal: orgs.filter((row) => !/停用|失效/.test(row.status)).length,
     positionTotal: positions.length,
@@ -2343,9 +3374,78 @@ function organizationSummary() {
     linkedEmployeeTotal: employees.length,
     sourceFile: '参考图片/功能/组织管理 + 员工主数据',
   };
+
+  return {
+    domain,
+    domainFlow: '组织 -> 员工 -> 考勤 -> 薪酬',
+    dependsOn: [],
+    summary,
+    dataSets: {
+      organizations: {
+        sourceFile: organizationData.sourceFile,
+        sheetName: organizationData.sheetName,
+        total: orgs.length,
+        storeKey: 'organizationStructures',
+        readRule: '先读取组织架构参考文件，再用本地保存的组织覆盖同编码记录',
+        writeRule: '按组织编码 upsert 到 organizationStructures',
+        outputKeys: ['code', 'name', 'fullPath', 'parentCode', 'status'],
+      },
+      positions: {
+        sourceFile: positionData.sourceFile,
+        sheetName: positionData.sheetName,
+        total: positions.length,
+        storeKey: 'organizationPositions',
+        tombstoneKey: 'organizationDeletedPositions',
+        readRule: '先读取岗位参考文件，再剔除删除标记，最后用本地保存的岗位覆盖同编码或同名称记录',
+        writeRule: '按岗位编码或岗位名称 upsert 到 organizationPositions',
+        outputKeys: ['code', 'name', 'orgs', 'sequence', 'subSequence', 'status'],
+      },
+      ranks: {
+        sourceFile: rankData.sourceFile,
+        sheetName: rankData.sheetName,
+        total: ranks.length,
+        storeKey: 'organizationRanks',
+        tombstoneKey: 'organizationDeletedRanks',
+        readRule: '先读取职级参考文件，再剔除删除标记，最后用本地保存的职级覆盖同编码或同名称记录',
+        writeRule: '按职级代码或职级名称 upsert 到 organizationRanks',
+        outputKeys: ['code', 'name', 'sequence', 'subSequence', 'grade', 'status'],
+      },
+      settings: {
+        sourceFile: getStoredRows('organizationSettings') ? '本地组织管理设置' : '系统默认组织设置',
+        sheetName: '组织管理设置',
+        total: settings.length,
+        storeKey: 'organizationSettings',
+        readRule: '有本地设置时使用本地设置，否则使用系统默认组织联动设置',
+        writeRule: '整表保存到 organizationSettings',
+        outputKeys: ['setting', 'value', 'status', 'linkedModule'],
+      },
+    },
+    outputsToEmployee: {
+      organizationMatchKeys: ['fullPath', 'name'],
+      positionMatchKeys: ['name'],
+      rankMatchKeys: ['code', 'name'],
+      contract: '员工模块必须先用组织 fullPath/name、岗位 name、职级 code/name 建立关联，再进入考勤人员、排班和薪酬统计。',
+    },
+    quality: {
+      duplicateOrganizationCodes: countDuplicateValues(orgs, (row) => row.code),
+      duplicateOrganizationFullPaths: countDuplicateValues(orgs, (row) => row.fullPath),
+      orphanOrganizations,
+      unlinkedPositionTotal: positions.filter((row) => Number(row.linkedEmployeeCount || 0) === 0).length,
+      unlinkedRankTotal: ranks.filter((row) => Number(row.linkedEmployeeCount || 0) === 0).length,
+    },
+  };
+}
+
+function organizationSummary() {
+  return organizationDomainSnapshot().summary;
 }
 
 let hrCoreCache = null;
+
+onStoreWrite(() => {
+  hrCoreCache = null;
+  employeeDomainSnapshotCache = null;
+});
 
 function pushIndexedRow(map, key, row) {
   if (!key) return;
@@ -2975,11 +4075,15 @@ function hrCoreMigrationBundle() {
   return {
     ...library,
     exportKind: 'portable-hr-core-migration-bundle',
+    domainFlow: BACKEND_DOMAIN_FLOW,
     importOrder: [
+      // 1. organization
       'organizationStructures',
       'organizationPositions',
       'organizationRanks',
+      // 2. employee
       'onboardedEmployees',
+      // 3. attendance
       'settingsGroups',
       'settingsShifts',
       'employeeSchedules',
@@ -2988,6 +4092,8 @@ function hrCoreMigrationBundle() {
       'fieldOutRecords',
       'fieldTripRecords',
       'externalRecords',
+      // 4. payroll
+      'statItems',
     ],
     writableStoreSnapshot: readStore(),
   };
@@ -3002,10 +4108,19 @@ function writeHrCoreExportFile(bundle) {
   return { filename, fullPath };
 }
 
+// Route groups follow the backend domain flow: organization -> employee -> attendance -> payroll.
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, dataDir: DATA_DIR, employeeReferenceDir: EMPLOYEE_REFERENCE_DIR, organizationReferenceDir: ORGANIZATION_REFERENCE_DIR, files: listExcelFiles().map((f) => f.name) });
+  res.json({
+    ok: true,
+    domainFlow: BACKEND_DOMAIN_FLOW.map(({ key, name, order, dependsOn }) => ({ key, name, order, dependsOn })),
+    dataDir: DATA_DIR,
+    employeeReferenceDir: EMPLOYEE_REFERENCE_DIR,
+    organizationReferenceDir: ORGANIZATION_REFERENCE_DIR,
+    files: listExcelFiles().map((f) => f.name),
+  });
 });
 
+// Shared HR core APIs bridge the ordered domains without replacing their boundaries.
 app.get('/api/hr-core/library', (_req, res) => {
   res.json(hrCoreLibrary());
 });
@@ -3034,6 +4149,65 @@ app.get('/api/hr-core/lookups', (_req, res) => {
       subSequence: asText(row.subSequence, ''),
       status: asText(row.status, ''),
       linkedEmployeeCount: Number(row.linkedEmployeeCount || 0),
+    })),
+  });
+});
+
+app.get('/api/hr-core/attendance-filters', (_req, res) => {
+  const context = getHrCoreContext();
+  const shiftEmployeeCounts = new Map();
+  for (const employee of context.employees) {
+    const shiftName = asText(employee.shiftName, '');
+    if (!shiftName) continue;
+    shiftEmployeeCounts.set(shiftName, (shiftEmployeeCounts.get(shiftName) || 0) + 1);
+  }
+  const shiftsByName = new Map();
+  for (const shift of getShiftOptions()) {
+    const name = asText(shift.name, '');
+    if (name && !shiftsByName.has(name)) {
+      shiftsByName.set(name, {
+        id: asText(shift.id, name),
+        name,
+        time: asText(shift.time, ''),
+        employeeCount: shiftEmployeeCounts.get(name) || 0,
+      });
+    }
+  }
+  for (const [name, employeeCount] of shiftEmployeeCounts.entries()) {
+    if (!shiftsByName.has(name)) shiftsByName.set(name, { id: name, name, time: '', employeeCount });
+  }
+
+  res.json({
+    ok: true,
+    generatedAt: nowText(),
+    domainFlow: '组织 -> 员工 -> 考勤',
+    departments: context.organizations
+      .filter((row) => asText(row.status, '') && !/停用|失效|删除/.test(asText(row.status, '')))
+      .map((row) => ({
+        code: asText(row.code, ''),
+        name: asText(row.name, ''),
+        fullPath: asText(row.fullPath, ''),
+        orgType: asText(row.orgType, ''),
+        linkedEmployeeCount: Number(row.linkedEmployeeCount || 0),
+        attendanceGroups: row.attendanceGroups || [],
+      })),
+    attendanceGroups: context.attendanceGroups.map((row) => ({
+      name: asText(row.name, ''),
+      employeeCount: Number(row.employeeCount || 0),
+      scheduleCount: Number(row.scheduleCount || 0),
+      clockCount: Number(row.clockCount || 0),
+    })).filter((row) => row.name),
+    shifts: Array.from(shiftsByName.values()),
+    employeeStatuses: Array.from(new Set(context.employees.map((employee) => asText(employee.status, '')).filter(Boolean))),
+    employees: context.employees.map((employee) => ({
+      employeeNo: asText(employee.employeeNo, ''),
+      name: asText(employee.name, ''),
+      department: asText(employee.organizationName, ''),
+      deptFullPath: asText(employee.organizationFullPath, ''),
+      position: asText(employee.positionName, ''),
+      employeeStatus: asText(employee.status, ''),
+      attendanceGroupName: asText(employee.attendanceGroupName, ''),
+      shiftName: asText(employee.shiftName, ''),
     })),
   });
 });
@@ -3097,6 +4271,11 @@ app.delete('/api/hr-core/employees/:employeeNo', (req, res) => {
   res.json({ ok: true, employeeNo, ...result });
 });
 
+// 1. Organization: departments, positions, ranks, and organization settings.
+app.get('/api/organization-management/foundation', (_req, res) => {
+  res.json({ ok: true, ...organizationDomainSnapshot() });
+});
+
 app.get('/api/organization-management/summary', (_req, res) => {
   res.json({ ok: true, ...organizationSummary() });
 });
@@ -3119,12 +4298,16 @@ app.post('/api/organization-management/organizations', (req, res) => {
     leader: asRawText(req.body?.leader),
     approvalManager: asRawText(req.body?.approvalManager),
     orgType: asText(req.body?.orgType, '部门'),
+    institutionNo: asText(req.body?.institutionNo, ''),
+    company: asText(req.body?.company, ''),
     status: asText(req.body?.status, '生效中'),
     effectiveDate: asText(req.body?.effectiveDate, currentDateText()),
     createdAt: asText(req.body?.createdAt, nowText()),
     remark: asText(req.body?.remark, ''),
   };
   const result = upsertStoredRow('organizationStructures', row, (item) => asRawText(item.code));
+  const deleted = getStoredRows('organizationDeletedStructures') || [];
+  setStoredRows('organizationDeletedStructures', deleted.filter((item) => asRawText(item.key || item) !== code));
   res.json({ ok: true, created: result.created, row });
 });
 
@@ -3133,7 +4316,12 @@ app.delete('/api/organization-management/organizations/:code', (req, res) => {
   const rows = getStoredRows('organizationStructures') || [];
   const nextRows = rows.filter((row) => asRawText(row.code) !== code);
   setStoredRows('organizationStructures', nextRows);
-  res.json({ ok: true, removed: rows.length - nextRows.length, remaining: nextRows.length });
+  const deleted = getStoredRows('organizationDeletedStructures') || [];
+  const nextDeleted = code && !deleted.some((item) => asRawText(item.key || item) === code)
+    ? [...deleted, { key: code, deletedAt: nowText() }]
+    : deleted;
+  setStoredRows('organizationDeletedStructures', nextDeleted);
+  res.json({ ok: true, removed: rows.length - nextRows.length, hidden: nextDeleted.length, remaining: organizationRows().rows.length });
 });
 
 app.get('/api/organization-management/positions', (_req, res) => {
@@ -3229,6 +4417,11 @@ app.put('/api/organization-management/settings', (req, res) => {
   res.json({ ok: true, sourceFile: '本地组织管理设置', sheetName: '组织管理设置', total: rows.length, rows });
 });
 
+// 2. Employee: employee records and employment data must resolve organization first.
+app.get('/api/employee-management/foundation', (_req, res) => {
+  res.json({ ok: true, ...employeeDomainSnapshot() });
+});
+
 app.get('/api/employee-management/summary', (_req, res) => {
   res.json({ ok: true, ...employeeSummary() });
 });
@@ -3248,9 +4441,103 @@ app.get('/api/employee-management/education', (_req, res) => {
   res.json({ sourceFile: data.sourceFile || '教育经历', sheetName: data.sheetName, total: data.rows.length, rows: data.rows });
 });
 
+app.post('/api/employee-management/education', (req, res) => {
+  try {
+    const result = upsertEmployeeLinkedRecord('employeeEducationRows', req.body, 'education');
+    res.json({ ok: true, created: result.created, row: result.row, total: result.rows.length });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message || '保存教育经历失败' });
+  }
+});
+
+app.get('/api/employee-management/work-experience', (_req, res) => {
+  const data = readWorkExperienceRows();
+  res.json({ sourceFile: data.sourceFile || '工作经历', sheetName: data.sheetName, total: data.rows.length, rows: data.rows });
+});
+
+app.post('/api/employee-management/work-experience', (req, res) => {
+  try {
+    const result = upsertEmployeeLinkedRecord('employeeWorkExperienceRows', req.body, 'work');
+    res.json({ ok: true, created: result.created, row: result.row, total: result.rows.length });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message || '保存工作经历失败' });
+  }
+});
+
+app.get('/api/employee-management/materials', (_req, res) => {
+  const rows = employeeMaterialRows();
+  res.json({ sourceFile: '本地员工材料上传记录 + 员工主数据材料', sheetName: '个人材料', total: rows.length, rows });
+});
+
+app.post('/api/employee-management/materials', (req, res) => {
+  try {
+    const result = upsertEmployeeLinkedRecord('employeeMaterialRows', req.body, 'material');
+    res.json({ ok: true, created: result.created, row: result.row, total: result.rows.length });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message || '保存员工材料失败' });
+  }
+});
+
 app.get('/api/employee-management/archive-approvals', (_req, res) => {
   const rows = employeeArchiveApprovalRows();
   res.json({ sourceFile: '员工花名册衍生', sheetName: '档案变更审批', total: rows.length, rows });
+});
+
+app.post('/api/employee-management/employment/:type', (req, res) => {
+  const type = asRawText(req.params.type || 'mainJobRecords');
+  const body = req.body || {};
+  const rows = getStoredRows(employmentStoreKey(type)) || [];
+  const row = {
+    id: asText(body.id, `employment_${type}_${Date.now()}`),
+    ...body,
+    数据来源: asText(body.数据来源 || body.source, '任职管理办理'),
+    添加时间: asText(body.添加时间 || body.createTime, nowText()),
+  };
+  const rowKey = asRawText(row.id || row.employeeNo || row.员工号 || row.name || row.姓名);
+  const nextRows = [row, ...rows.filter((item) => asRawText(item.id || item.employeeNo || item.员工号 || item.name || item.姓名) !== rowKey)];
+  setStoredRows(employmentStoreKey(type), nextRows);
+  res.json({ ok: true, created: true, row, total: nextRows.length });
+});
+
+app.post('/api/employee-management/status-change-approval', (req, res) => {
+  const body = req.body || {};
+  const employeeName = asText(body.employeeName || body['姓名'] || body.name, '未选择员工');
+  const employeeNo = asText(body.employeeNo || body['员工号'], '');
+  const dept = asText(body.dept || body['部门'] || body['入职末级部门'] || body['离职部门'], '');
+  const moduleLabel = asText(body.moduleLabel, '员工管理');
+  const approvalManager = asText(body.approvalManager || body['审批人'] || body['审批主管'], '');
+  const targetStatus = asText(body.targetStatus, '');
+  if (!targetStatus) {
+    return res.status(400).json({ message: '员工状态必填' });
+  }
+  const rows = getMobileRows('mobileApprovalRequests', []);
+  const request = {
+    id: `hr_status_${Date.now()}`,
+    employeeId: asText(body.employeeId || employeeNo || employeeName, employeeName),
+    employeeName,
+    employeeNo,
+    dept,
+    approvalManager,
+    approvalManagerName: approvalManager,
+    category: `${moduleLabel}状态变更`,
+    date: currentDateText(),
+    time: '',
+    reason: asText(body.reason, `申请将员工状态调整为：${targetStatus}`),
+    detail: asText(body.detail, `${moduleLabel} / ${asText(body.tabLabel, '')} / 目标状态：${targetStatus}`),
+    status: 'pending',
+    createTime: nowText(),
+    moduleKey: asText(body.moduleKey, ''),
+    moduleLabel,
+    tabKey: asText(body.tabKey, ''),
+    tabLabel: asText(body.tabLabel, ''),
+    fromStatus: asText(body.fromStatus, ''),
+    targetStatus,
+    approvalStep: '已提交上级审核',
+    managerTodoStatus: '待处理',
+    source: 'employee-management',
+  };
+  setMobileRows('mobileApprovalRequests', [request, ...rows]);
+  return res.json({ ok: true, request, message: '已提交上级审核，并同步到管理者端待处理' });
 });
 
 app.get('/api/employee-management/care', (_req, res) => {
@@ -3269,17 +4556,97 @@ app.get('/api/employee-management/employment/:type', (req, res) => {
 });
 
 app.get('/api/employee-management/contracts/:type', (req, res) => {
+  if (req.params.type === 'template') {
+    const template = getStoredRows('employeeContractTemplates')?.[0] || {
+      id: 'default-contract-template',
+      title: '员工合同标准模板',
+      company: '上海拉迷家具有限公司',
+      contractType: '固定期限劳动合同',
+      contractTerm: '3年',
+      status: '草稿',
+      version: 'V1',
+      content: '本合同模板用于员工新签、续签、电子签署等合同流程。发布后，新发起合同默认使用当前模板。',
+      updatedAt: nowText(),
+    };
+    return res.json({ ok: true, template });
+  }
   const data = readEmployeeContractRows(req.params.type);
-  res.json({ sourceFile: data.sourceFile || '员工合同', sheetName: data.sheetName, total: data.rows.length, rows: data.rows });
+  return res.json({ sourceFile: data.sourceFile || '员工合同', sheetName: data.sheetName, total: data.rows.length, rows: data.rows });
+});
+
+app.post('/api/employee-management/contracts/action', (req, res) => {
+  const body = req.body || {};
+  const actionName = asText(body.actionName || body.action, '查看');
+  const employeeName = asText(body.name || body.employeeName, '');
+  const contractNo = asText(body.contractNo, '');
+  const action = {
+    id: Date.now(),
+    actionName,
+    employeeName,
+    employeeNo: asText(body.employeeNo, ''),
+    contractNo,
+    contractType: asText(body.contractType, ''),
+    contractStatus: asText(body.contractStatus, ''),
+    signProgress: asText(body.signProgress, ''),
+    sourceView: asText(body.sourceView, ''),
+    operator: asText(body.operator, '系统'),
+    createTime: nowText(),
+    payload: body,
+  };
+  const rows = getStoredRows('employeeContractActions') || [];
+  setStoredRows('employeeContractActions', [action, ...rows]);
+  const target = employeeName || contractNo || '当前合同';
+  const message = actionName === '催办'
+    ? `已向${target}发送合同签署催办`
+    : actionName === '撤回'
+      ? `已撤回${target}的合同签署流程`
+    : actionName === '取消解除' || actionName === '取消'
+      ? `已取消${target}的合同解除流程`
+      : actionName === '发起解除'
+        ? `已发起${target}的合同解除流程`
+        : actionName === '发起新签'
+          ? `已为${target}发起新签合同`
+          : actionName === '发起续签'
+            ? `已为${target}发起续签合同`
+            : actionName === '发布模板'
+              ? '新版合同模板已发布'
+              : `已记录${target}的${actionName}操作`;
+  res.json({ ok: true, action, message });
+});
+
+app.get('/api/employee-management/contracts/template', (_req, res) => {
+  const template = getStoredRows('employeeContractTemplates')?.[0] || {
+    id: 'default-contract-template',
+    title: '员工合同标准模板',
+    company: '上海拉迷家具有限公司',
+    contractType: '固定期限劳动合同',
+    contractTerm: '3年',
+    status: '草稿',
+    version: 'V1',
+    content: '本合同模板用于员工新签、续签、电子签署等合同流程。发布后，新发起合同默认使用当前模板。',
+    updatedAt: nowText(),
+  };
+  res.json({ ok: true, template });
+});
+
+app.post('/api/employee-management/contracts/template', (req, res) => {
+  const body = req.body || {};
+  const previous = getStoredRows('employeeContractTemplates')?.[0] || {};
+  const template = {
+    ...previous,
+    ...body,
+    id: asText(body.id, 'default-contract-template'),
+    status: '已发布',
+    version: asText(body.version, `V${Date.now()}`),
+    publishedAt: nowText(),
+    updatedAt: nowText(),
+  };
+  setStoredRows('employeeContractTemplates', [template]);
+  res.json({ ok: true, template, message: '新版合同模板已发布，后续新发起合同将按此模板执行' });
 });
 
 app.get('/api/employee-management/settings', (_req, res) => {
-  const rows = [
-    { id: 1, setting: '档案字段设置', value: '姓名、工号、手机号、部门、岗位、入职日期、员工状态', status: '已启用' },
-    { id: 2, setting: '花名册字段权限', value: '按员工管理权限范围读取', status: '已启用' },
-    { id: 3, setting: '入职二维码', value: '默认二维码 / 再次登记', status: '已启用' },
-    { id: 4, setting: '考勤人员同步', value: '按员工号与考勤模块自动互通', status: '已启用' },
-  ];
+  const rows = employeeSettingsRows();
   res.json({ sourceFile: '系统配置', sheetName: '员工管理设置', total: rows.length, rows });
 });
 
@@ -3291,6 +4658,11 @@ app.get('/api/employee-management/services', (_req, res) => {
 app.get('/api/employee-management/third-party', (_req, res) => {
   const rows = thirdPartyRows();
   res.json({ sourceFile: '第三方对接配置', sheetName: '第三方对接', total: rows.length, rows });
+});
+
+// 3. Attendance: settings, schedules, clock records, leave, field work, and monthly outputs.
+app.get('/api/attendance-management/foundation', (_req, res) => {
+  res.json({ ok: true, ...attendanceDomainSnapshot() });
 });
 
 app.get('/api/settings-linkage-report', (_req, res) => {
@@ -3552,8 +4924,18 @@ app.put('/api/clock-records', (req, res) => {
 
 app.get('/api/attendance-anomalies', (_req, res) => {
   const anomalySupplement = readAnomalySupplement();
-  if (anomalySupplement) return sendFileRows(res, anomalySupplement.file, anomalySupplement.sheetName, anomalySupplement.rows);
-  return sendLinkedRows(res, 'mobileAnomalies', buildLinkedAnomalyRows());
+  const linkedRows = buildLinkedAnomalyRows();
+  const supplementRows = anomalySupplement?.rows || [];
+  const seen = new Set();
+  const rows = [...linkedRows, ...supplementRows].filter((row) => {
+    const key = `${asRawText(row.empId || row.employeeNo)}|${asText(row.date, '')}|${asText(row.anomalyDesc || row.desc || row.anomaly, '')}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return sendLinkedRows(res, anomalySupplement?.sheetName || 'mobileAnomalies', rows, {
+    sourceFile: supplementRows.length ? '员工主数据 + 小程序移动端 API + 已过滤考勤异常补充文件' : '员工主数据 + 小程序移动端 API',
+  });
 });
 
 app.put('/api/attendance-anomalies', (req, res) => {
@@ -3592,6 +4974,19 @@ app.put('/api/field-out-records', (req, res) => {
       source: asText(row.source, 'PC端申请'),
       values: Array.isArray(row.values) ? row.values.map((cell) => asText(cell, '')) : [],
       flowStatus: asText(row.flowStatus, asText(row.status, '审批中')),
+      date: asText(row.date, ''),
+      time: asText(row.time, ''),
+      location: asText(row.location, ''),
+      latitude: Number(row.latitude) || '',
+      longitude: Number(row.longitude) || '',
+      accuracy: Number(row.accuracy) || '',
+      address: asText(row.address, ''),
+      distance: Number(row.distance) || '',
+      faceVerifyId: asText(row.faceVerifyId, ''),
+      photoFileId: asText(row.photoFileId, ''),
+      photoUrl: asText(row.photoUrl, ''),
+      photoTakenAt: asText(row.photoTakenAt, ''),
+      hasPhoto: Boolean(row.hasPhoto || row.photoUrl || row.photoFileId),
     };
   });
 });
@@ -3614,6 +5009,19 @@ app.put('/api/field-trip-records', (req, res) => {
       source: asText(row.source, 'PC端申请'),
       values: Array.isArray(row.values) ? row.values.map((cell) => asText(cell, '')) : [],
       flowStatus: asText(row.flowStatus, asText(row.status, '审批中')),
+      date: asText(row.date, ''),
+      time: asText(row.time, ''),
+      location: asText(row.location, ''),
+      latitude: Number(row.latitude) || '',
+      longitude: Number(row.longitude) || '',
+      accuracy: Number(row.accuracy) || '',
+      address: asText(row.address, ''),
+      distance: Number(row.distance) || '',
+      faceVerifyId: asText(row.faceVerifyId, ''),
+      photoFileId: asText(row.photoFileId, ''),
+      photoUrl: asText(row.photoUrl, ''),
+      photoTakenAt: asText(row.photoTakenAt, ''),
+      hasPhoto: Boolean(row.hasPhoto || row.photoUrl || row.photoFileId),
     };
   });
 });
@@ -3978,8 +5386,6 @@ app.put('/api/settings-shifts', (req, res) => {
 });
 
 app.get('/api/settings-face', (_req, res) => {
-  const face = readSupplementMappedRows(['人脸管理'], null, mapFaceSettingRows);
-  if (face) return sendFileRows(res, face.file, face.sheetName, face.rows);
   return sendLinkedRows(res, 'employeeMaster', getSettingsFaceRows());
 });
 
@@ -3996,6 +5402,7 @@ app.post('/api/employees/onboard', (req, res) => {
   }
   const employee = normalizeOnboardedEmployee(req.body);
   const result = upsertStoredRow('onboardedEmployees', employee, (row) => asRawText(row.employeeNo));
+  prioritizeEmployeeInMasterKeepList(employee.employeeNo);
   return res.json({
     ok: true,
     created: result.created,
@@ -4276,6 +5683,152 @@ app.put('/api/stat-items', (req, res) => {
 });
 
 
+// 4. Payroll inputs: payroll consumes organization, employee, and attendance outputs.
+app.get('/api/payroll-management/foundation', (_req, res) => {
+  res.json({ ok: true, ...payrollDomainSnapshot() });
+});
+
+function salaryStateContainsLegacyTestValue(value) {
+  return /2222|333|效果图阶段三|管理岗-management-\d+/.test(JSON.stringify(value ?? ''));
+}
+
+function plainObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function sanitizeDeletedRuleTemplateIds(ids) {
+  if (!Array.isArray(ids)) return [];
+  return Array.from(new Set(
+    ids
+      .filter((id) => typeof id === 'string' && id.trim() && !salaryStateContainsLegacyTestValue(id))
+      .map((id) => id.trim()),
+  ));
+}
+
+function sanitizeSalaryCalculationState(rawState) {
+  const state = plainObject(rawState);
+  const manualRuleTemplates = Array.isArray(state.manualRuleTemplates)
+    ? state.manualRuleTemplates
+      .filter((template) => {
+        if (!template || typeof template !== 'object') return false;
+        return typeof template.id === 'string'
+          && template.id.startsWith('manual-')
+          && typeof template.name === 'string'
+          && typeof template.position === 'string'
+          && (template.group === '管理岗' || template.group === '销售设计岗')
+          && !salaryStateContainsLegacyTestValue(template);
+      })
+      .map((template) => ({
+        ...template,
+        name: template.name.trim() || '未命名模板',
+        position: template.position.trim(),
+        fieldCount: Number.isFinite(Number(template.fieldCount)) ? Number(template.fieldCount) : 0,
+      }))
+    : [];
+  const validManualTemplateIds = new Set(manualRuleTemplates.map((template) => template.id));
+  const departmentCategories = Array.isArray(state.departmentCategories)
+    ? state.departmentCategories
+      .filter((category) => category && typeof category.id === 'string' && typeof category.name === 'string' && category.name.trim() && !salaryStateContainsLegacyTestValue(category))
+      .map((category) => ({ id: category.id, name: category.name.trim() }))
+    : [];
+  const templateNameOverrides = Object.fromEntries(
+    Object.entries(plainObject(state.templateNameOverrides)).filter(([key, value]) => {
+      if (salaryStateContainsLegacyTestValue(key) || salaryStateContainsLegacyTestValue(value)) return false;
+      if (!key.startsWith('manual-')) return true;
+      return validManualTemplateIds.has(key);
+    }),
+  );
+  const templateAssignments = Object.fromEntries(
+    Object.entries(plainObject(state.templateAssignments))
+      .map(([templateId, assignment]) => {
+        const item = plainObject(assignment);
+        const employeeKeys = Array.isArray(item.employeeKeys) ? item.employeeKeys.filter((key) => key && !salaryStateContainsLegacyTestValue(key)) : [];
+        return [
+          templateId,
+          {
+            templateId,
+            position: typeof item.position === 'string' ? item.position : '',
+            categoryId: typeof item.categoryId === 'string' ? item.categoryId : undefined,
+            employeeKeys,
+          },
+        ];
+      })
+      .filter(([templateId, assignment]) => {
+        if (salaryStateContainsLegacyTestValue(templateId) || salaryStateContainsLegacyTestValue(assignment)) return false;
+        if (templateId.startsWith('manual-') && !validManualTemplateIds.has(templateId)) return false;
+        return assignment.employeeKeys.length > 0;
+      }),
+  );
+  const rawFieldConfigs = plainObject(state.fieldConfigs);
+  const deletedFieldConfigKeys = new Set(Object.entries(rawFieldConfigs).filter(([, value]) => plainObject(value).deleted).map(([key]) => key));
+  const formulaDrafts = Object.fromEntries(
+    Object.entries(plainObject(state.formulaDrafts)).filter(([key, value]) => !deletedFieldConfigKeys.has(key) && !salaryStateContainsLegacyTestValue(key) && !salaryStateContainsLegacyTestValue(value)),
+  );
+  const fieldConfigs = Object.fromEntries(
+    Object.entries(rawFieldConfigs).filter(([key, value]) => !salaryStateContainsLegacyTestValue(key) && !salaryStateContainsLegacyTestValue(value)),
+  );
+  const peopleDataOverrides = Object.fromEntries(
+    Object.entries(plainObject(state.peopleDataOverrides)).filter(([key, value]) => !salaryStateContainsLegacyTestValue(key) && !salaryStateContainsLegacyTestValue(value)),
+  );
+  const cleanState = {
+    schemaVersion: typeof state.schemaVersion === 'string' ? state.schemaVersion : undefined,
+    manualRuleTemplates,
+    departmentCategories,
+    templateNameOverrides,
+    deletedRuleTemplateIds: sanitizeDeletedRuleTemplateIds(state.deletedRuleTemplateIds),
+    templateAssignments,
+    peopleDataOverrides,
+    formulaDrafts,
+    fieldConfigs,
+    updatedAt: typeof state.updatedAt === 'string' ? state.updatedAt : undefined,
+  };
+  return Object.fromEntries(Object.entries(cleanState).filter(([, value]) => value !== undefined));
+}
+
+app.get('/api/salary-calculation/state', (_req, res) => {
+  const rawState = readStore().salaryCalculationState || {};
+  const {
+    rows,
+    confirmedAssignmentView,
+    templatePreviewView,
+    activeView,
+    activeGroup,
+    activePosition,
+    ...state
+  } = sanitizeSalaryCalculationState(rawState);
+  res.json({
+    ok: true,
+    sourceFile: state.updatedAt ? '本地薪酬核算记录 data-store.json' : '暂无薪酬核算记录',
+    state,
+  });
+});
+
+app.put('/api/salary-calculation/state', (req, res) => {
+  const payload = req.body?.state && typeof req.body.state === 'object' ? req.body.state : req.body;
+  const {
+    rows,
+    confirmedAssignmentView,
+    templatePreviewView,
+    activeView,
+    activeGroup,
+    activePosition,
+    ...persistablePayload
+  } = payload || {};
+  const store = readStore();
+  const state = {
+    ...sanitizeSalaryCalculationState(persistablePayload),
+    updatedAt: new Date().toISOString(),
+  };
+  store.salaryCalculationState = state;
+  store.updatedAt = state.updatedAt;
+  writeStore(store);
+  res.json({
+    ok: true,
+    sourceFile: '本地薪酬核算记录 data-store.json',
+    state,
+  });
+});
+
 app.get('/api/external-records', (_req, res) => {
   return sendLinkedRows(res, 'externalRecords', buildLinkedExternalRows());
 });
@@ -4494,12 +6047,116 @@ function readMobileUsers() {
   const configured = process.env.MOBILE_ENABLE_TEST_USERS === 'true'
     ? readJsonFile(MOBILE_TEST_USERS_FILE, null)
     : [];
-  const persisted = getOnboardedEmployees();
+  const byEmployeeNo = new Map();
+  for (const employee of getReferenceRosterEmployees()) {
+    byEmployeeNo.set(asRawText(employee.employeeNo), employee);
+  }
+  for (const employee of getOnboardedEmployees().map(normalizeOnboardedEmployee)) {
+    const employeeNo = asRawText(employee.employeeNo);
+    byEmployeeNo.set(employeeNo, { ...(byEmployeeNo.get(employeeNo) || {}), ...employee });
+  }
   const users = [
     ...(Array.isArray(configured) ? configured : []),
-    ...persisted,
+    ...Array.from(byEmployeeNo.values()),
   ];
   return users.map(normalizeMobileEmployee);
+}
+
+function normalizeAccountProvider(provider) {
+  const raw = asRawText(provider).toLowerCase();
+  if (['feishu', 'lark', 'fs'].includes(raw)) return 'feishu';
+  return 'wecom';
+}
+
+function externalIdMatches(value, target) {
+  return Boolean(asRawText(value) && asRawText(target) && asRawText(value) === asRawText(target));
+}
+
+function employeeMatchesExternalIdentity(employee, provider, externalUserId) {
+  const externalId = asRawText(externalUserId);
+  if (!externalId) return false;
+  if (provider === 'feishu') {
+    return [
+      employee.feishuOpenId,
+      employee.feishuUnionId,
+      employee.feishuUserId,
+      employee.openId,
+      employee.unionId,
+    ].some((value) => externalIdMatches(value, externalId));
+  }
+  return [
+    employee.wecomUserId,
+    employee.wecomUserID,
+    employee.wecomId,
+    employee.userId,
+  ].some((value) => externalIdMatches(value, externalId));
+}
+
+function accountBindingRows() {
+  return getStoredRows('mobileAccountBindings') || [];
+}
+
+function approvedAccountBinding(provider, externalUserId) {
+  const normalizedProvider = normalizeAccountProvider(provider);
+  const externalId = asRawText(externalUserId);
+  return accountBindingRows().find((row) => (
+    normalizeAccountProvider(row.provider) === normalizedProvider
+    && asRawText(row.externalUserId) === externalId
+    && approvalStatusText(row.status) === '已通过'
+  )) || null;
+}
+
+function findMobileEmployeeByExternalIdentity(provider, externalUserId) {
+  const normalizedProvider = normalizeAccountProvider(provider);
+  const externalId = asRawText(externalUserId);
+  if (!externalId) return null;
+  const users = readMobileUsers();
+  const prebound = users.find((employee) => employeeMatchesExternalIdentity(employee, normalizedProvider, externalId));
+  if (prebound) return prebound;
+  const binding = approvedAccountBinding(normalizedProvider, externalId);
+  if (!binding) return null;
+  return users.find((employee) => asRawText(employee.employeeNo) === asRawText(binding.employeeNo)) || null;
+}
+
+function createOrUpdateAccountBinding(input = {}) {
+  const provider = normalizeAccountProvider(input.provider);
+  const externalUserId = asRawText(input.externalUserId);
+  if (!externalUserId) return null;
+  const rows = accountBindingRows();
+  const targetEmployeeNo = asRawText(input.employeeNo);
+  const existing = rows.find((row) => (
+    normalizeAccountProvider(row.provider) === provider
+    && asRawText(row.externalUserId) === externalUserId
+    && (!targetEmployeeNo || asRawText(row.employeeNo) === targetEmployeeNo)
+  ));
+  const next = {
+    ...(existing || {}),
+    id: existing?.id || `binding_${Date.now()}_${stableShortHash(`${provider}-${externalUserId}`)}`,
+    provider,
+    externalUserId,
+    employeeNo: targetEmployeeNo,
+    employeeName: asText(input.employeeName, existing?.employeeName || ''),
+    dept: asText(input.dept, existing?.dept || ''),
+    phone: asRawText(input.phone || existing?.phone),
+    name: asText(input.name, existing?.name || ''),
+    status: asText(input.status, existing?.status || 'pending'),
+    reason: asText(input.reason, existing?.reason || '账号绑定申请'),
+    source: asText(input.source, existing?.source || 'mobile'),
+    createTime: existing?.createTime || nowText(),
+    reviewTime: asText(input.reviewTime, existing?.reviewTime || ''),
+  };
+  const nextRows = existing
+    ? rows.map((row) => (asRawText(row.id) === asRawText(existing.id) ? next : row))
+    : [next, ...rows];
+  setStoredRows('mobileAccountBindings', nextRows);
+  return next;
+}
+
+function uniqueEmployeeByPhone(phone) {
+  const normalizedPhone = asRawText(phone);
+  if (!normalizedPhone) return { employee: null, count: 0 };
+  const matches = readMobileUsers().filter((employee) => asRawText(employee.phone) === normalizedPhone);
+  return { employee: matches.length === 1 ? matches[0] : null, count: matches.length };
 }
 
 function getDefaultMobileEmployee() {
@@ -4511,8 +6168,11 @@ function getDefaultMobileEmployee() {
 function findMobileEmployee(criteria = {}) {
   const employeeNo = asRawText(criteria.employeeNo || criteria.empNo);
   const userId = asRawText(criteria.userId);
+  const provider = normalizeAccountProvider(criteria.provider);
+  const externalUserId = asRawText(criteria.externalUserId);
   const users = readMobileUsers();
   return users.find((user) => employeeNo && user.employeeNo === employeeNo)
+    || findMobileEmployeeByExternalIdentity(provider, externalUserId || userId)
     || users.find((user) => userId && user.userId === userId)
     || null;
 }
@@ -4790,12 +6450,41 @@ app.post('/api/wecom/login', async (req, res) => {
     return res.status(400).json({ message: '缺少企业微信登录code' });
   }
   const requestedEmployeeNo = asRawText(req.body?.employeeNo);
+  const provider = normalizeAccountProvider(req.body?.provider || 'wecom');
+  const phone = asRawText(req.body?.phone);
   try {
     if (isWecomStrictMode()) {
       const verifiedUserId = await getWecomLoginUserId(code);
-      const employee = findMobileEmployee({ userId: verifiedUserId });
+      const employee = findMobileEmployee({ provider: 'wecom', externalUserId: verifiedUserId, userId: verifiedUserId });
       if (!employee) {
-        return res.status(403).json({ message: `企业微信 UserID ${verifiedUserId} 未绑定员工，请先在后台人脸管理录入` });
+        if (phone) {
+          const matched = uniqueEmployeeByPhone(phone);
+          if (matched.employee) {
+            const binding = createOrUpdateAccountBinding({
+              provider: 'wecom',
+              externalUserId: verifiedUserId,
+              employeeNo: matched.employee.employeeNo,
+              employeeName: matched.employee.name,
+              dept: matched.employee.department,
+              phone,
+              status: '已通过',
+              reason: '首次登录手机号自动匹配',
+              source: 'phone-auto-match',
+            });
+            return res.json({
+              token: tokenForEmployee(matched.employee),
+              employee: matched.employee,
+              binding,
+              authMode: WECOM_AUTH_MODE,
+            });
+          }
+        }
+        return res.status(403).json({
+          message: `企业微信 UserID ${verifiedUserId} 未绑定员工，请先完成账号绑定`,
+          bindingRequired: true,
+          provider: 'wecom',
+          externalUserId: verifiedUserId,
+        });
       }
       return res.json({
         token: tokenForEmployee(employee),
@@ -4805,7 +6494,43 @@ app.post('/api/wecom/login', async (req, res) => {
     }
 
     const requestedUserId = asRawText(req.body?.userId);
-    const employee = findMobileEmployee({ employeeNo: requestedEmployeeNo, userId: requestedUserId }) || getDefaultMobileEmployee();
+    const requestedExternalUserId = asRawText(req.body?.externalUserId || requestedUserId);
+    const employee = findMobileEmployee({
+      employeeNo: requestedEmployeeNo,
+      provider,
+      externalUserId: requestedExternalUserId,
+      userId: requestedUserId,
+    }) || (requestedExternalUserId ? null : getDefaultMobileEmployee());
+    if (!employee && requestedExternalUserId && phone) {
+      const matched = uniqueEmployeeByPhone(phone);
+      if (matched.employee) {
+        const binding = createOrUpdateAccountBinding({
+          provider,
+          externalUserId: requestedExternalUserId,
+          employeeNo: matched.employee.employeeNo,
+          employeeName: matched.employee.name,
+          dept: matched.employee.department,
+          phone,
+          status: '已通过',
+          reason: '首次登录手机号自动匹配',
+          source: 'phone-auto-match',
+        });
+        return res.json({
+          token: tokenForEmployee(matched.employee),
+          employee: matched.employee,
+          binding,
+          authMode: WECOM_AUTH_MODE,
+        });
+      }
+    }
+    if (!employee && requestedExternalUserId) {
+      return res.status(403).json({
+        message: `${provider === 'feishu' ? '飞书' : '企业微信'}账号未绑定员工，请先完成账号绑定`,
+        bindingRequired: true,
+        provider,
+        externalUserId: requestedExternalUserId,
+      });
+    }
     if (!employee) {
       return res.status(404).json({ message: '当前没有可登录员工，请先在后台人脸管理录入员工' });
     }
@@ -4821,6 +6546,79 @@ app.post('/api/wecom/login', async (req, res) => {
     console.error('[wecom-login]', error);
     return res.status(502).json({ message: error.message || '企业微信登录失败' });
   }
+});
+
+app.post('/api/mobile/account-binding', (req, res) => {
+  const provider = normalizeAccountProvider(req.body?.provider || 'wecom');
+  const externalUserId = asRawText(req.body?.externalUserId || req.body?.userId);
+  const phone = asRawText(req.body?.phone);
+  const requestedEmployeeNo = asRawText(req.body?.employeeNo);
+  const requestedName = asRawText(req.body?.name || req.body?.employeeName);
+  if (!externalUserId) {
+    return res.status(400).json({ message: '缺少外部账号ID，无法提交绑定' });
+  }
+  if (!phone) {
+    return res.status(400).json({ message: '手机号必填' });
+  }
+
+  const existingEmployee = findMobileEmployeeByExternalIdentity(provider, externalUserId);
+  if (existingEmployee) {
+    return res.json({
+      ok: true,
+      bindingStatus: 'approved',
+      token: tokenForEmployee(existingEmployee),
+      employee: existingEmployee,
+      message: '账号已绑定',
+    });
+  }
+
+  const phoneMatch = uniqueEmployeeByPhone(phone);
+  if (phoneMatch.employee && (!requestedEmployeeNo || asRawText(phoneMatch.employee.employeeNo) === requestedEmployeeNo)) {
+    const binding = createOrUpdateAccountBinding({
+      provider,
+      externalUserId,
+      employeeNo: phoneMatch.employee.employeeNo,
+      employeeName: phoneMatch.employee.name,
+      dept: phoneMatch.employee.department,
+      phone,
+      status: '已通过',
+      reason: '首次登录手机号自动匹配',
+      source: 'phone-auto-match',
+    });
+    return res.json({
+      ok: true,
+      bindingStatus: 'approved',
+      token: tokenForEmployee(phoneMatch.employee),
+      employee: phoneMatch.employee,
+      binding,
+      message: '手机号匹配成功，账号已绑定',
+    });
+  }
+
+  const target = requestedEmployeeNo
+    ? findMobileEmployee({ employeeNo: requestedEmployeeNo })
+    : readMobileUsers().find((employee) => requestedName && asRawText(employee.name) === requestedName);
+  const reason = phoneMatch.count > 1
+    ? '手机号匹配到多个员工，需管理员确认'
+    : '手机号未自动匹配，需管理员确认';
+  const binding = createOrUpdateAccountBinding({
+    provider,
+    externalUserId,
+    employeeNo: target?.employeeNo || requestedEmployeeNo,
+    employeeName: target?.name || requestedName,
+    dept: target?.department || '',
+    phone,
+    name: requestedName,
+    status: 'pending',
+    reason,
+    source: 'first-login-review',
+  });
+  return res.status(202).json({
+    ok: true,
+    bindingStatus: 'pending',
+    binding,
+    message: '已提交管理员审核，审核通过后可重新登录',
+  });
 });
 
 app.get('/api/mobile/me', (req, res) => {
@@ -4997,6 +6795,161 @@ app.post('/api/mobile/clock', (req, res) => {
   });
 });
 
+function fieldRecordDate(row, kind) {
+  if (row?.date) return asText(row.date, currentDateText());
+  const values = Array.isArray(row?.values) ? row.values : [];
+  const raw = kind === 'trip' ? asText(values[3], '') : asText(values[3], '');
+  const match = raw.match(/20\d{2}[-/]\d{1,2}[-/]\d{1,2}/);
+  return match ? match[0].replace(/\//g, '-') : currentDateText();
+}
+
+function fieldRecordTime(row, kind) {
+  if (row?.time) return asText(row.time, '');
+  const values = Array.isArray(row?.values) ? row.values : [];
+  const raw = kind === 'trip' ? asText(values[7] || values[3], '') : asText(values[8] || values[3], '');
+  const match = raw.match(/\b\d{1,2}:\d{2}\b/);
+  return match ? match[0].padStart(5, '0') : '';
+}
+
+function mapFieldRowsForMobile(rows, kind, employee) {
+  return rows
+    .filter((row) => asRawText(row.empId) === asRawText(employee.employeeNo))
+    .map((row) => {
+      const values = Array.isArray(row.values) ? row.values : [];
+      const isTrip = kind === 'trip';
+      return {
+        id: row.id,
+        kind,
+        label: isTrip ? '出差' : '外出',
+        date: fieldRecordDate(row, kind),
+        time: fieldRecordTime(row, kind),
+        status: asText(row.status, ''),
+        effect: asText(row.effect, ''),
+        flowStatus: asText(row.flowStatus, asText(row.status, '')),
+        source: asText(row.source, isTrip ? asText(values[0], '') : asText(values[2], '')),
+        location: asText(row.location, isTrip ? asText(values[2], '') : asText(values[6], '')),
+        recordText: isTrip ? asText(values[4], '') : asText(values[6], ''),
+        reason: isTrip ? asText(values[6], '') : asText(values[7], ''),
+        duration: isTrip ? asText(values[5], '') : asText(values[5], ''),
+        startTime: isTrip ? asText(values[3], '') : asText(values[3], ''),
+        endTime: isTrip ? asText(values[3], '') : asText(values[4], ''),
+        route: isTrip ? asText(values[2], '') : '',
+        tripType: isTrip ? asText(values[1], '') : '',
+        hasPhoto: Boolean(row.hasPhoto || row.photoUrl),
+        photoUrl: asText(row.photoUrl, ''),
+        latitude: row.latitude,
+        longitude: row.longitude,
+        accuracy: row.accuracy,
+      };
+    })
+    .sort((a, b) => String(b.date + b.time).localeCompare(String(a.date + a.time)));
+}
+
+app.post('/api/mobile/field-clock', (req, res) => {
+  const employee = requireRequestEmployee(req, res);
+  if (!employee) return;
+  const kind = req.body?.kind === 'trip' ? 'trip' : req.body?.kind === 'out' ? 'out' : '';
+  if (!kind) {
+    return res.status(400).json({ message: 'kind必须是out或trip' });
+  }
+  const latitude = Number(req.body?.latitude);
+  const longitude = Number(req.body?.longitude);
+  const accuracy = Number(req.body?.accuracy || 0);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return res.status(400).json({ message: '缺少有效定位坐标' });
+  }
+  if (!req.body?.faceVerifyId) {
+    return res.status(400).json({ message: '缺少拍照核验结果' });
+  }
+
+  const office = getEmployeeOffice(employee);
+  const serverTime = nowText();
+  const date = currentDateText();
+  const time = serverTime.slice(11, 16);
+  const address = asText(req.body?.address, office.address || office.name);
+  const distance = Math.round(distanceInMeters({ latitude, longitude }, office));
+  const id = Date.now();
+  const source = asText(req.body?.source, '移动端打卡');
+  const photoMeta = getMobileRows('mobileFacePhotos', []).find((item) => asText(item.photoFileId, '') === asText(req.body?.photoFileId, ''));
+  const photoUrl = photoMeta?.photoUrl ? publicUrl(req, photoMeta.photoUrl) : asText(req.body?.photoUrl, '');
+  const recordText = `${kind === 'trip' ? '出差打卡' : '外出打卡'} ${time} ${address}，距${office.name}${distance}m`;
+  const baseRow = {
+    id,
+    status: '已通过',
+    name: employee.name,
+    empId: employee.employeeNo,
+    dept: employee.department,
+    deptPath: employee.deptFullPath || employee.department,
+    effect: '已生效',
+    source,
+    flowStatus: '已通过',
+    date,
+    time,
+    latitude,
+    longitude,
+    accuracy,
+    address,
+    location: address,
+    distance,
+    faceVerifyId: req.body.faceVerifyId,
+    photoFileId: asText(req.body?.photoFileId, ''),
+    photoUrl,
+    photoTakenAt: asText(photoMeta?.takenAt, serverTime),
+    hasPhoto: Boolean(photoUrl || req.body?.photoFileId),
+  };
+
+  if (kind === 'trip') {
+    const rows = getStoredRows('fieldTripRecords') || [];
+    setStoredRows('fieldTripRecords', [{
+      ...baseRow,
+      values: [
+        source,
+        '往返',
+        address,
+        `${date} ~ ${date}`,
+        recordText,
+        '1天',
+        '移动端出差打卡',
+        serverTime,
+        serverTime,
+      ],
+    }, ...rows]);
+  } else {
+    const rows = getStoredRows('fieldOutRecords') || [];
+    setStoredRows('fieldOutRecords', [{
+      ...baseRow,
+      values: [
+        employee.name,
+        employee.employeeNo,
+        source,
+        serverTime.slice(0, 16),
+        serverTime.slice(0, 16),
+        '移动端打卡',
+        recordText,
+        '移动端外出打卡',
+        serverTime,
+      ],
+    }, ...rows]);
+  }
+
+  return res.json({
+    id,
+    serverTime: time,
+    kind,
+    photoUrl,
+    message: `${kind === 'trip' ? '出差打卡' : '外出打卡'}成功`,
+  });
+});
+
+app.get('/api/mobile/field-records', (req, res) => {
+  const employee = requireRequestEmployee(req, res);
+  if (!employee) return;
+  const outRows = mapFieldRowsForMobile(getStoredRows('fieldOutRecords') || [], 'out', employee);
+  const tripRows = mapFieldRowsForMobile(getStoredRows('fieldTripRecords') || [], 'trip', employee);
+  const rows = [...outRows, ...tripRows].sort((a, b) => String(b.date + b.time).localeCompare(String(a.date + a.time)));
+  res.json({ total: rows.length, rows });
+});
+
 app.get('/api/mobile/clock-records', (req, res) => {
   const employee = requireRequestEmployee(req, res);
   if (!employee) return;
@@ -5162,4 +7115,14 @@ app.listen(PORT, HOST, () => {
     console.log(`[data-server] local: http://localhost:${PORT}`);
   }
   console.log(`[data-server] data dir: ${DATA_DIR}`);
+  setTimeout(() => {
+    const startedAt = Date.now();
+    try {
+      employeeMasterRows();
+      employeeDomainSnapshot();
+      console.log(`[data-server] employee cache warmed in ${Date.now() - startedAt}ms`);
+    } catch (error) {
+      console.warn(`[data-server] employee cache warm failed: ${error?.message || error}`);
+    }
+  }, 10);
 });

@@ -9,6 +9,13 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json();
 }
 
+export type BackendHealthResponse = {
+  ok?: boolean;
+  status?: string;
+  dataDir?: string;
+  domainFlow?: string;
+};
+
 export type DataResponse<T> = {
   sourceFile: string;
   sheetName?: string;
@@ -16,14 +23,38 @@ export type DataResponse<T> = {
   rows: T[];
 };
 
+export type DomainFoundationSnapshot = {
+  ok?: boolean;
+  domain?: {
+    key?: string;
+    name?: string;
+    order?: number;
+    dependsOn?: string[];
+  };
+  domainFlow?: string;
+  dependsOn?: string[];
+  summary?: Record<string, unknown>;
+  quality?: Record<string, unknown>;
+  upstreamFromOrganization?: Record<string, unknown>;
+  upstreamFromEmployee?: Record<string, unknown>;
+  outputsToEmployee?: Record<string, unknown>;
+  outputsToAttendance?: Record<string, unknown>;
+  dataSets?: Record<string, unknown>;
+};
+
 function limitDataResponse<T>(response: DataResponse<T>): DataResponse<T> {
   const rows = response.rows || [];
   return { ...response, total: rows.length, rows };
 }
 
+export async function fetchBackendHealth() {
+  return requestJson<BackendHealthResponse>('/api/health');
+}
+
 export type AttendanceEmployee = {
   name: string;
   empId: string;
+  employeeStatus?: string;
   attendGroup: string;
   dept: string;
   deptFull?: string;
@@ -46,6 +77,7 @@ export type DailyAttendanceEmployee = {
   name: string;
   confirmStatus: '已确认' | '未确认';
   empId: string;
+  employeeStatus?: string;
   date: string;
   dept: string;
   position: string;
@@ -66,6 +98,7 @@ export type DailyAttendanceEmployee = {
 export type MonthlyAttendanceEmployee = {
   name: string;
   empId: string;
+  employeeStatus?: string;
   dept: string;
   position: string;
   attendGroup: string;
@@ -80,6 +113,7 @@ export type MonthlySummaryEmployee = {
   name: string;
   lockStatus: '已锁定' | '未锁定';
   empId: string;
+  employeeStatus?: string;
   dept: string;
   position: string;
   hireDate: string;
@@ -204,6 +238,7 @@ export type OnboardEmployeePayload = {
   shiftId?: string;
   shiftName?: string;
   faceStatus?: string;
+  [key: string]: unknown;
 };
 
 export type StatItemRecord = {
@@ -332,6 +367,9 @@ export type EmployeeRosterRecord = {
   id: number;
   name: string;
   phone: string;
+  wecomUserId?: string;
+  feishuOpenId?: string;
+  feishuUnionId?: string;
   employeeNo: string;
   dept: string;
   deptFullPath: string;
@@ -468,6 +506,41 @@ export type HrCoreLookupResponse = {
 
 export async function fetchHrCoreLookups() {
   return requestJson<HrCoreLookupResponse>('/api/hr-core/lookups');
+}
+
+export type AttendanceFilterEmployee = {
+  employeeNo: string;
+  name: string;
+  department: string;
+  deptFullPath: string;
+  position: string;
+  employeeStatus: string;
+  attendanceGroupName: string;
+  shiftName: string;
+};
+
+export type AttendanceFilterOption = {
+  name: string;
+  employeeCount?: number;
+  linkedEmployeeCount?: number;
+  fullPath?: string;
+  code?: string;
+  time?: string;
+};
+
+export type AttendanceFilterOptionsResponse = {
+  ok: boolean;
+  generatedAt: string;
+  domainFlow: string;
+  departments: Array<AttendanceFilterOption & { orgType?: string; attendanceGroups?: string[] }>;
+  attendanceGroups: AttendanceFilterOption[];
+  shifts: AttendanceFilterOption[];
+  employeeStatuses: string[];
+  employees: AttendanceFilterEmployee[];
+};
+
+export async function fetchAttendanceFilterOptions() {
+  return requestJson<AttendanceFilterOptionsResponse>('/api/hr-core/attendance-filters');
 }
 
 export async function fetchAttendanceEmployees() {
@@ -803,6 +876,38 @@ export async function onboardEmployee(payload: OnboardEmployeePayload) {
   });
 }
 
+export async function saveEmployeeEducation(record: EmployeeGenericRecord) {
+  return requestJson<{ ok: boolean; created: boolean; row: EmployeeGenericRecord; total: number }>('/api/employee-management/education', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(record),
+  });
+}
+
+export async function fetchEmployeeWorkExperience() {
+  return limitDataResponse(await requestJson<DataResponse<EmployeeGenericRecord>>('/api/employee-management/work-experience'));
+}
+
+export async function saveEmployeeWorkExperience(record: EmployeeGenericRecord) {
+  return requestJson<{ ok: boolean; created: boolean; row: EmployeeGenericRecord; total: number }>('/api/employee-management/work-experience', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(record),
+  });
+}
+
+export async function fetchEmployeeMaterials() {
+  return limitDataResponse(await requestJson<DataResponse<EmployeeGenericRecord>>('/api/employee-management/materials'));
+}
+
+export async function saveEmployeeMaterial(record: EmployeeGenericRecord) {
+  return requestJson<{ ok: boolean; created: boolean; row: EmployeeGenericRecord; total: number }>('/api/employee-management/materials', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(record),
+  });
+}
+
 export async function deleteOnboardedEmployees(employeeNos: string[]) {
   return requestJson<{ ok: boolean; removed: number; remaining: number; employeeNos?: string[] }>('/api/employees', {
     method: 'DELETE',
@@ -872,8 +977,44 @@ export async function fetchEmployeeEmployment(type: string) {
   return limitDataResponse(await requestJson<DataResponse<EmployeeGenericRecord>>(`/api/employee-management/employment/${encodeURIComponent(type)}`));
 }
 
+export async function saveEmployeeEmployment(type: string, record: EmployeeGenericRecord) {
+  return requestJson<{ ok: boolean; created: boolean; row: EmployeeGenericRecord; total: number }>(`/api/employee-management/employment/${encodeURIComponent(type)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(record),
+  });
+}
+
+export async function submitEmployeeStatusChangeApproval(record: EmployeeGenericRecord) {
+  return requestJson<{ ok: boolean; request: EmployeeGenericRecord; message: string }>('/api/employee-management/status-change-approval', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(record),
+  });
+}
+
 export async function fetchEmployeeContracts(type: string) {
   return limitDataResponse(await requestJson<DataResponse<EmployeeContractRecord>>(`/api/employee-management/contracts/${encodeURIComponent(type)}`));
+}
+
+export async function submitEmployeeContractAction(record: EmployeeGenericRecord) {
+  return requestJson<{ ok: boolean; action: EmployeeGenericRecord; message: string }>('/api/employee-management/contracts/action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(record),
+  });
+}
+
+export async function fetchEmployeeContractTemplate() {
+  return requestJson<{ ok: boolean; template: EmployeeGenericRecord }>('/api/employee-management/contracts/template');
+}
+
+export async function publishEmployeeContractTemplate(record: EmployeeGenericRecord) {
+  return requestJson<{ ok: boolean; template: EmployeeGenericRecord; message: string }>('/api/employee-management/contracts/template', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(record),
+  });
 }
 
 export async function fetchEmployeeSettings() {
@@ -888,8 +1029,16 @@ export async function fetchEmployeeThirdParty() {
   return limitDataResponse(await requestJson<DataResponse<EmployeeGenericRecord>>('/api/employee-management/third-party'));
 }
 
+export async function fetchEmployeeFoundation() {
+  return requestJson<DomainFoundationSnapshot>('/api/employee-management/foundation');
+}
+
 export async function fetchOrganizationSummary() {
   return requestJson<OrganizationSummary & { ok: boolean }>('/api/organization-management/summary');
+}
+
+export async function fetchOrganizationFoundation() {
+  return requestJson<DomainFoundationSnapshot>('/api/organization-management/foundation');
 }
 
 export async function fetchOrganizations() {
@@ -905,7 +1054,7 @@ export async function saveOrganization(row: Partial<OrganizationRecord>) {
 }
 
 export async function deleteOrganization(code: string) {
-  return requestJson<{ ok: boolean; removed: number; remaining: number }>(`/api/organization-management/organizations/${encodeURIComponent(code)}`, {
+  return requestJson<{ ok: boolean; removed: number; hidden?: number; remaining: number }>(`/api/organization-management/organizations/${encodeURIComponent(code)}`, {
     method: 'DELETE',
   });
 }
@@ -932,6 +1081,14 @@ export async function fetchOrganizationRanks() {
   return limitDataResponse(await requestJson<DataResponse<OrganizationRankRecord>>('/api/organization-management/ranks'));
 }
 
+export async function fetchAttendanceFoundation() {
+  return requestJson<DomainFoundationSnapshot>('/api/attendance-management/foundation');
+}
+
+export async function fetchPayrollFoundation() {
+  return requestJson<DomainFoundationSnapshot>('/api/payroll-management/foundation');
+}
+
 export async function saveOrganizationRank(row: Partial<OrganizationRankRecord>) {
   return requestJson<{ ok: boolean; created: boolean; row: OrganizationRankRecord }>('/api/organization-management/ranks', {
     method: 'POST',
@@ -955,5 +1112,30 @@ export async function saveOrganizationSettings(rows: OrganizationSettingRecord[]
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rows }),
+  });
+}
+
+export type SalaryCalculationState = {
+  schemaVersion?: string;
+  manualRuleTemplates?: unknown[];
+  departmentCategories?: unknown[];
+  templateNameOverrides?: Record<string, string>;
+  deletedRuleTemplateIds?: string[];
+  templateAssignments?: Record<string, unknown>;
+  peopleDataOverrides?: Record<string, unknown>;
+  formulaDrafts?: Record<string, string>;
+  fieldConfigs?: Record<string, unknown>;
+  updatedAt?: string;
+};
+
+export async function fetchSalaryCalculationState() {
+  return requestJson<{ ok: boolean; sourceFile: string; state: SalaryCalculationState }>('/api/salary-calculation/state');
+}
+
+export async function saveSalaryCalculationState(state: SalaryCalculationState) {
+  return requestJson<{ ok: boolean; sourceFile: string; state: SalaryCalculationState }>('/api/salary-calculation/state', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ state }),
   });
 }

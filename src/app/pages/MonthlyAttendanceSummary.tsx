@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { fetchMonthlySummaryEmployees, fetchStatItems, saveMonthlySummaryEmployees, type MonthlySummaryEmployee as RealMonthEmployee, type StatItemRecord } from '../api/realData';
+import { useAttendanceFilterDirectory } from '../shared/domain/attendanceFilters';
+import { downloadAttendanceXlsx } from '../shared/export/attendanceExport';
 
 import {
   Calendar,
@@ -778,6 +780,7 @@ function ModalFormRow({
 
 export default function MonthlyAttendanceSummary() {
   const { colors } = useTheme();
+  const attendanceFilters = useAttendanceFilterDirectory();
 
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -924,9 +927,11 @@ export default function MonthlyAttendanceSummary() {
 
   const filteredRows = useMemo(() => {
     return rows.filter(row => {
-      if (employeeSearch && !`${row.name}${row.empId}`.includes(employeeSearch)) return false;
-      if (deptFilter !== 'all' && row.dept !== deptFilter) return false;
-      if (attendGroupFilter !== 'all' && row.attendGroup !== attendGroupFilter) return false;
+      if (!attendanceFilters.matchesLinkedFilters(row, {
+        keyword: employeeSearch,
+        dept: deptFilter === 'all' ? '' : deptFilter,
+        attendGroup: attendGroupFilter === 'all' ? '' : attendGroupFilter,
+      })) return false;
       if (lockFilter !== 'all' && row.lockStatus !== lockFilter) return false;
       if (confirmFilter !== 'all' && row.confirmStatus !== confirmFilter) return false;
       if (hideResigned && row.resignDate) return false;
@@ -940,7 +945,7 @@ export default function MonthlyAttendanceSummary() {
       if (summaryTab === 'hire' && !row.hireDate.startsWith(`${year}-${String(month + 1).padStart(2, '0')}`)) return false;
       return true;
     });
-  }, [rows, employeeSearch, deptFilter, attendGroupFilter, lockFilter, confirmFilter, hideResigned, bizGroupFilter, hireStatusFilter, summaryTab, year, month]);
+  }, [attendanceFilters, rows, employeeSearch, deptFilter, attendGroupFilter, lockFilter, confirmFilter, hideResigned, bizGroupFilter, hireStatusFilter, summaryTab, year, month]);
 
   const sortedRows = useMemo(() => {
     const list = [...filteredRows];
@@ -960,7 +965,8 @@ export default function MonthlyAttendanceSummary() {
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const pageRows = sortedRows.slice((page - 1) * pageSize, page * pageSize);
   const allSelected = pageRows.length > 0 && pageRows.every(row => selectedRows.has(row.id));
-  const someSelected = selectedRows.size > 0 && !allSelected;
+  const someSelected = pageRows.some(row => selectedRows.has(row.id)) && !allSelected;
+  const exportDisabled = sortedRows.length === 0;
 
   const stickyOffsets: number[] = [];
   let offset = 38;
@@ -992,11 +998,12 @@ export default function MonthlyAttendanceSummary() {
   };
 
   const toggleAllRows = () => {
-    if (allSelected) {
-      setSelectedRows(new Set());
-      return;
-    }
-    setSelectedRows(new Set(pageRows.map(row => row.id)));
+    setSelectedRows(current => {
+      const next = new Set(current);
+      if (allSelected) pageRows.forEach(row => next.delete(row.id));
+      else pageRows.forEach(row => next.add(row.id));
+      return next;
+    });
   };
 
   const toggleRow = (id: number) => {
@@ -1107,24 +1114,15 @@ export default function MonthlyAttendanceSummary() {
       return value === null || value === undefined || value === '' ? '-' : String(value);
     }));
 
-    const escapeCsv = (value: string) => {
-      const escaped = value.replace(/"/g, '""');
-      return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
-    };
-
-    const csv = [headers, ...dataRows]
-      .map(row => row.map(cell => escapeCsv(cell)).join(','))
-      .join('\n');
-
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `月考勤汇总-${year}-${String(month + 1).padStart(2, '0')}${selectedRows.size > 0 ? '-选中人员' : '-筛选结果'}.csv`;
-    link.click();
-    window.URL.revokeObjectURL(url);
-
-    appendOperationLog(`导出成功：${selectedRows.size > 0 ? '选中人员' : '当前筛选'} ${exportRows.length} 条`);
+    void downloadAttendanceXlsx({
+      fileName: `月考勤汇总-${year}-${String(month + 1).padStart(2, '0')}${selectedRows.size > 0 ? '-选中人员' : '-筛选结果'}.xlsx`,
+      sheetName: '月考勤汇总',
+      headers,
+      rows: dataRows,
+      saveAs: true,
+    }).then(ok => {
+      if (ok) appendOperationLog(`导出成功：${selectedRows.size > 0 ? '选中人员' : '当前筛选'} ${exportRows.length} 条`);
+    });
   }, [appendOperationLog, month, orderedCols, selectedRows, sortedRows, year]);
 
   const renderCell = (row: MonthEmployee, col: ColDef): React.ReactNode => {
@@ -1238,7 +1236,7 @@ export default function MonthlyAttendanceSummary() {
 
           <FilterSelect
             label="部门"
-            options={[{ label: '请选择', value: 'all' }, ...DEPT_OPTIONS.map(item => ({ label: item, value: item }))]}
+            options={[{ label: '请选择', value: 'all' }, ...(attendanceFilters.departmentOptions.length ? attendanceFilters.departmentOptions : DEPT_OPTIONS).map(item => ({ label: item, value: item }))]}
             value={deptFilter}
             onChange={setDeptFilter}
             colors={colors}
@@ -1254,7 +1252,7 @@ export default function MonthlyAttendanceSummary() {
 
           <FilterSelect
             label="考勤组"
-            options={[{ label: '请选择', value: 'all' }, ...ATTEND_GROUPS.map(item => ({ label: item, value: item }))]}
+            options={[{ label: '请选择', value: 'all' }, ...(attendanceFilters.attendanceGroupOptions.length ? attendanceFilters.attendanceGroupOptions : ATTEND_GROUPS).map(item => ({ label: item, value: item }))]}
             value={attendGroupFilter}
             onChange={setAttendGroupFilter}
             colors={colors}
@@ -1278,54 +1276,30 @@ export default function MonthlyAttendanceSummary() {
             colors={colors}
             width={132}
           />
+          <button
+            onClick={handleExport}
+            disabled={exportDisabled}
+            style={{
+              height: 32,
+              border: 'none',
+              borderRadius: 4,
+              background: exportDisabled ? colors.inputBorder : colors.primary,
+              color: exportDisabled ? colors.textMuted : colors.primaryText,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '0 10px',
+              cursor: exportDisabled ? 'not-allowed' : 'pointer',
+              fontSize: 13,
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <Download size={14}/>导出Excel
+          </button>
 
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button onClick={resetFilters} style={outlineBtn(colors)}>重置</button>
-            <button style={primaryBtn(colors)}>查询</button>
-            <button
-              onClick={() => setShowMoreFilter(v => !v)}
-              style={{ ...outlineBtn(colors), color: showMoreFilter ? colors.primary : colors.text, borderColor: showMoreFilter ? colors.primary : colors.inputBorder }}
-            >
-              更多筛选
-              <ChevronDown size={11} style={{ transform: showMoreFilter ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-            </button>
-          </div>
         </div>
-
-        {showMoreFilter && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, paddingTop: 10, borderTop: `1px dashed ${colors.divider}`, flexWrap: 'wrap' }}>
-            <FilterSelect
-              label="业务分组"
-              options={BIZ_GROUP_OPTIONS.map(item => ({ label: item, value: item }))}
-              value={bizGroupFilter}
-              onChange={setBizGroupFilter}
-              colors={colors}
-              width={150}
-            />
-            <FilterSelect
-              label="入职状态"
-              options={HIRE_STATUS_OPTIONS.map(item => ({ label: item, value: item }))}
-              value={hireStatusFilter}
-              onChange={setHireStatusFilter}
-              colors={colors}
-              width={136}
-            />
-            <div style={{ ...inputShell(colors, false), minWidth: 250 }}>
-              <span style={{ fontSize: '12px', color: colors.text }}>考勤周期</span>
-              <span style={{ fontSize: '12px', color: colors.text, marginLeft: 4 }}>{monthStart}</span>
-              <span style={{ fontSize: '12px', color: colors.textMuted }}>→</span>
-              <span style={{ fontSize: '12px', color: colors.text }}>{monthEnd}</span>
-            </div>
-          </div>
-        )}
       </div>
-
-      {(sourceFile || loadError) && (
-        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>
-          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
-          {loadError ? ` ${loadError}` : ''}
-        </div>
-      )}
 
       {operationLogs.length > 0 && (
         <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}>
@@ -1387,120 +1361,6 @@ export default function MonthlyAttendanceSummary() {
             </button>
           );
         })}
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexWrap: 'wrap', flexShrink: 0 }}>
-        <ActionDropdown
-          label="按考勤"
-          items={[
-            {
-              label: '核算当前筛选范围',
-              action: () => {
-                setCalcScope('filtered');
-                setShowCalcModal(true);
-              },
-            },
-            {
-              label: '核算选中记录',
-              action: () => {
-                if (selectedRows.size === 0) return;
-                setCalcScope('selected');
-                setShowCalcModal(true);
-              },
-              disabled: selectedRows.size === 0,
-            },
-          ]}
-          primary
-          colors={colors}
-        />
-
-        <button onClick={() => selectedRows.size > 0 && setConfirmType('lock')} style={outlineBtn(colors, selectedRows.size === 0)}>
-          <Lock size={12} />锁定
-        </button>
-        <button onClick={() => selectedRows.size > 0 && setConfirmType('unlock')} style={outlineBtn(colors, selectedRows.size === 0)}>
-          <Unlock size={12} />解锁
-        </button>
-        <button onClick={() => selectedRows.size > 0 && setConfirmType('confirm')} style={outlineBtn(colors, selectedRows.size === 0)}>
-          <Check size={12} />考勤确认
-        </button>
-        <button onClick={() => setShowImportModal(true)} style={outlineBtn(colors)}>
-          <Upload size={12} />导入
-        </button>
-        <button onClick={handleExport} style={outlineBtn(colors)}>
-          <Download size={12} />导出
-        </button>
-
-        <button onClick={() => selectedRows.size > 0 && setConfirmType('delete')} style={outlineBtn(colors, selectedRows.size === 0)}>
-          <Trash2 size={12} />删除
-        </button>
-
-        <div ref={moreActionRef} style={{ position: 'relative' }}>
-          <button onClick={() => setShowMoreAction(v => !v)} style={outlineBtn(colors)}>
-            更多
-            <MoreHorizontal size={12} />
-          </button>
-          {showMoreAction && (
-            <div style={{ ...dropdownBox(colors), minWidth: 150 }}>
-              {moreActionItems.map(item => (
-                <div
-                  key={item.label}
-                  onClick={() => {
-                    if (item.disabled) return;
-                    item.action?.();
-                    setShowMoreAction(false);
-                  }}
-                  style={{
-                    ...dropdownItem(colors, false),
-                    padding: '8px 14px',
-                    color: item.disabled ? colors.textMuted : colors.text,
-                    cursor: item.disabled ? 'not-allowed' : 'pointer',
-                    opacity: item.disabled ? 0.5 : 1,
-                  }}
-                  onMouseEnter={event => {
-                    if (!item.disabled) (event.currentTarget as HTMLElement).style.backgroundColor = colors.tableRowHover;
-                  }}
-                  onMouseLeave={event => {
-                    if (!item.disabled) (event.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
-                  }}
-                >
-                  {item.label}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-          {selectedRows.size > 0 && <span style={{ fontSize: '12px', color: colors.textMuted }}>已选 {selectedRows.size} 条</span>}
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>
-            <input type="checkbox" checked={hideResigned} onChange={event => setHideResigned(event.target.checked)} style={{ accentColor: colors.primary }} />
-            不看离职人员
-          </label>
-          <button style={{ ...iconSquareBtn(colors), width: 28, height: 28 }}>
-            <SlidersHorizontal size={13} />
-          </button>
-          <div ref={settingsRef} style={{ position: 'relative' }}>
-            <button
-              onClick={() => setShowSettings(v => !v)}
-              style={{ ...iconSquareBtn(colors), width: 28, height: 28, color: showSettings ? colors.primary : colors.textMuted, borderColor: showSettings ? colors.primary : colors.inputBorder }}
-            >
-              <Settings2 size={13} />
-            </button>
-            {showSettings && (
-              <ColumnSettingsPanel
-                colors={colors}
-                colOrder={columnOrder}
-                frozenCount={frozenCount}
-                onClose={() => setShowSettings(false)}
-                onApply={(nextOrder, nextFrozen) => {
-                  setColumnOrder(nextOrder);
-                  setFrozenCount(nextFrozen);
-                  setShowSettings(false);
-                }}
-              />
-            )}
-          </div>
-        </div>
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', backgroundColor: colors.cardBg, borderTop: `1px solid ${colors.cardBorder}` }}>

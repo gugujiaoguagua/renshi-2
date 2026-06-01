@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
 import { fetchLeaveBalances, fetchLeaveDetails, fetchLeaveRecords, fetchLeaveSchemes, fetchLeaveTypes, fetchSettingsPeople, saveLeaveDetails, saveLeaveRecords, saveLeaveSchemes, saveLeaveTypes } from '../api/realData';
+import { useAttendanceFilterDirectory } from '../shared/domain/attendanceFilters';
+import { downloadAttendanceXlsx } from '../shared/export/attendanceExport';
+import { ConfirmDialog } from '../shared/ui/ConfirmDialog';
 import { monthRange } from '../utils/date';
 import {
   AlertCircle,
@@ -10,6 +13,7 @@ import {
   ChevronUp,
   FileText,
   HelpCircle,
+  Download,
   Search,
   Settings2,
   Users,
@@ -19,6 +23,12 @@ type LeaveView = 'record' | 'balance' | 'detail' | 'type' | 'scheme';
 type MenuItem = { label: string; hint?: string };
 type TabConfig = { key: LeaveView; label: string; path: string };
 type SortConfig = { index: number; direction: 'asc' | 'desc' };
+type ConfirmConfig = {
+  title: string;
+  message: React.ReactNode;
+  confirmLabel?: string;
+  onConfirm: () => void | Promise<void>;
+};
 type PlainRow = Array<string | number | boolean>;
 type EmployeeOption = { name: string; employeeNo: string; department: string; deptFullPath: string };
 type LeaveRecordDraft = {
@@ -72,11 +82,7 @@ type LeaveSchemeDraft = {
 };
 
 const ROUTE_TABS: TabConfig[] = [
-  { key: 'record', label: '请假记录', path: '/attendance/leave' },
-  { key: 'balance', label: '假期余额', path: '/attendance/leave-balance' },
-  { key: 'detail', label: '假期额度明细', path: '/attendance/leave-detail' },
   { key: 'type', label: '假期类型设置', path: '/attendance/leave-type' },
-  { key: 'scheme', label: '假期方案设置', path: '/attendance/leave-scheme' },
 ];
 
 const LEAVE_RECORD_COLUMNS = ['记录状态', '申请人', '申请人员工号', '申请人部门', '部门全路径', '发起人', '发起人员工号', '发起类型', '假期类型', '开始时间', '结束时间', '请假时长', '请假事由', '发起时间', '完成时间', '当前流程状态', '操作'];
@@ -513,6 +519,7 @@ function LeaveRecordView({
   onToggleMenu: () => void;
   onCloseMenu: () => void;
 }) {
+  const attendanceFilters = useAttendanceFilterDirectory();
   const [statusFilter, setStatusFilter] = useState('all');
   const [tableRows, setTableRows] = useState<Array<Array<React.ReactNode>>>(LEAVE_RECORD_ROWS);
   const [dateRange, setDateRange] = useState(monthRange());
@@ -529,6 +536,7 @@ function LeaveRecordView({
   const [showRecordModal, setShowRecordModal] = useState(false);
   const [editingRow, setEditingRow] = useState<Array<React.ReactNode> | null>(null);
   const [recordDraft, setRecordDraft] = useState<LeaveRecordDraft>(() => defaultLeaveRecordDraft([], TYPE_ROWS.filter(row => row.enabled).map(row => row.name)));
+  const [confirmDelete, setConfirmDelete] = useState<ConfirmConfig | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -568,7 +576,7 @@ function LeaveRecordView({
     const startDate = String(row[9] || '').slice(0, 10);
     const matchForm = (!dateRange.start || startDate >= dateRange.start)
       && (!dateRange.end || startDate <= dateRange.end)
-      && (!deptFilter || row[3] === deptFilter)
+      && attendanceFilters.matchesDepartment({ applicant: String(row[1] ?? ''), applicantId: String(row[2] ?? ''), applicantDept: String(row[3] ?? ''), deptFullPath: String(row[4] ?? '') }, deptFilter)
       && (!applicantKeyword || String(row[1]).toLowerCase().includes(applicantKeyword) || String(row[2]).toLowerCase().includes(applicantKeyword))
       && (!initiatorKeyword || String(row[5]).toLowerCase().includes(initiatorKeyword) || String(row[6]).toLowerCase().includes(initiatorKeyword))
       && (!leaveTypeFilter || row[8] === leaveTypeFilter)
@@ -610,7 +618,16 @@ function LeaveRecordView({
     link.click();
     window.URL.revokeObjectURL(url);
   };
-  const deleteRows = () => commitLeaveRecords(current => current.filter(row => !rows.includes(row)));
+  const deleteRows = () => {
+    setConfirmDelete({
+      title: '删除请假记录',
+      message: `确认删除当前筛选出的 ${rows.length} 条请假记录？删除后请假记录表会立即更新。`,
+      onConfirm: () => {
+        commitLeaveRecords(current => current.filter(row => !rows.includes(row)));
+        setConfirmDelete(null);
+      },
+    });
+  };
   const openAddLeaveRecord = (label = '添加请假记录') => {
     const startType = label.includes('发起') || label.includes('批量') ? '员工发起' : '管理员发起';
     setEditingRow(null);
@@ -623,8 +640,14 @@ function LeaveRecordView({
     setShowRecordModal(true);
   };
   const clearLeaveRecords = () => {
-    if (!window.confirm('确认清空当前筛选出的请假记录？')) return;
-    commitLeaveRecords(current => current.filter(row => !rows.includes(row)));
+    setConfirmDelete({
+      title: '清空请假记录',
+      message: `确认清空当前筛选出的 ${rows.length} 条请假记录？清空后请假记录表会立即更新。`,
+      onConfirm: () => {
+        commitLeaveRecords(current => current.filter(row => !rows.includes(row)));
+        setConfirmDelete(null);
+      },
+    });
   };
   const editLeaveRecord = (row: Array<React.ReactNode>) => {
     setEditingRow(row);
@@ -676,7 +699,7 @@ function LeaveRecordView({
       <div style={filterBar(colors)}>
         <div style={filterRowStyle}>
           <DateRangeField label="请假日期" colors={colors} required width={248} value={dateRange} onChange={setDateRange} />
-          <SelectField label="部门" placeholder="请选择" colors={colors} width={154} options={['产品运营部','工艺开发部','研发设计一部']} value={deptFilter} onChange={setDeptFilter} />
+          <SelectField label="部门" placeholder="请选择" colors={colors} width={154} options={attendanceFilters.departmentOptions.length ? attendanceFilters.departmentOptions : ['产品运营部','工艺开发部','研发设计一部']} value={deptFilter} onChange={setDeptFilter} />
           <SearchField label="申请人" placeholder="请输入或选择人员" colors={colors} width={182} showUserIcon value={applicantFilter} onChange={setApplicantFilter} />
           <SearchField label="发起人" placeholder="请输入或选择员工号" colors={colors} width={182} showUserIcon value={initiatorFilter} onChange={setInitiatorFilter} />
           <SelectField label="假期类型" placeholder="请选择" colors={colors} width={154} options={['年假','病假','事假']} value={leaveTypeFilter} onChange={setLeaveTypeFilter} />
@@ -738,6 +761,16 @@ function LeaveRecordView({
           onChange={updateRecordDraft}
           onCancel={() => setShowRecordModal(false)}
           onSave={saveRecordDraft}
+        />
+      ) : null}
+      {confirmDelete ? (
+        <ConfirmDialog
+          colors={colors}
+          title={confirmDelete.title}
+          message={confirmDelete.message}
+          confirmLabel={confirmDelete.confirmLabel}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={confirmDelete.onConfirm}
         />
       ) : null}
 
@@ -1042,6 +1075,7 @@ function LeaveDetailView({
   onToggleMenu: () => void;
   onCloseMenu: () => void;
 }) {
+  const attendanceFilters = useAttendanceFilterDirectory();
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [detailRows, setDetailRows] = useState<Array<Array<React.ReactNode>>>([]);
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
@@ -1092,7 +1126,7 @@ function LeaveDetailView({
     return (!keyword || String(row[0] ?? '').toLowerCase().includes(keyword) || String(row[1] ?? '').toLowerCase().includes(keyword))
       && (!leaveTypeFilter || row[6] === leaveTypeFilter)
       && (!cycleFilter || row[5] === cycleFilter)
-      && (!deptFilter || row[2] === deptFilter);
+      && attendanceFilters.matchesDepartment({ name: String(row[0] ?? ''), employeeNo: String(row[1] ?? ''), dept: String(row[2] ?? '') }, deptFilter);
   });
   const sortedDetailRows = !sortConfig
     ? filteredDetailRows
@@ -1177,7 +1211,7 @@ function LeaveDetailView({
           <SelectField label="假期类型" placeholder="请选择" colors={colors} width={154} options={leaveTypeOptions} value={leaveTypeFilter} onChange={setLeaveTypeFilter} />
           <SelectField label="周期" placeholder="请选择周期" colors={colors} width={154} options={Array.from(new Set(detailRows.map(row => String(row[5] ?? '')).filter(Boolean)))} value={cycleFilter} onChange={setCycleFilter} />
           <SearchField label="员工" placeholder="请输入姓名或工号" colors={colors} width={182} showUserIcon value={employeeQuery} onChange={setEmployeeQuery} />
-          <SelectField label="部门" placeholder="请选择" colors={colors} width={154} options={Array.from(new Set(employeeOptions.map(employee => employee.department).filter(Boolean)))} value={deptFilter} onChange={setDeptFilter} />
+          <SelectField label="部门" placeholder="请选择" colors={colors} width={154} options={attendanceFilters.departmentOptions.length ? attendanceFilters.departmentOptions : Array.from(new Set(employeeOptions.map(employee => employee.department).filter(Boolean)))} value={deptFilter} onChange={setDeptFilter} />
           <CheckboxGroup label="员工状态" items={['在职', '离职', '冻结员工']} colors={colors} />
           <div style={actionRightStyle}>
             <button onClick={resetDetailFilters} style={outlineBtn(colors)}>重置</button>
@@ -1339,6 +1373,7 @@ function LeaveTypeView({
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [editingTypeRow, setEditingTypeRow] = useState<LeaveTypeRow | null>(null);
   const [typeDraft, setTypeDraft] = useState<LeaveTypeDraft>(() => defaultLeaveTypeDraft());
+  const [confirmDelete, setConfirmDelete] = useState<ConfirmConfig | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetchLeaveTypes()
@@ -1387,8 +1422,22 @@ function LeaveTypeView({
     setShowTypeModal(true);
   };
   const deleteLeaveType = (row: LeaveTypeRow) => {
-    if (!window.confirm(`确认删除假期类型「${row.name}」？`)) return;
-    commitLeaveTypes(current => current.filter(item => item.name !== row.name));
+    setConfirmDelete({
+      title: '删除假期类型',
+      message: `确认删除假期类型「${row.name}」？删除后该假期类型将不再被新的请假和假期方案选择。`,
+      onConfirm: () => {
+        commitLeaveTypes(current => current.filter(item => item.name !== row.name));
+        setConfirmDelete(null);
+      },
+    });
+  };
+  const toggleLeaveTypeEnabled = (row: LeaveTypeRow) => {
+    commitLeaveTypes(current => current.map(item => item.name === row.name ? {
+      ...item,
+      enabled: !item.enabled,
+      editor: '后台维护',
+      editedAt: currentDateTimeText(),
+    } : item));
   };
   const updateTypeDraft = (key: keyof LeaveTypeDraft, value: string | boolean) => {
     setTypeDraft(current => {
@@ -1422,48 +1471,49 @@ function LeaveTypeView({
     setPaidFilter('');
     setSortConfig(null);
   };
+  const exportTypeRows = () => {
+    void downloadAttendanceXlsx({
+      fileName: '假期类型设置.xlsx',
+      sheetName: '假期类型设置',
+      headers: LEAVE_TYPE_COLUMNS.slice(0, -1),
+      rows: sortedTypeRows.map(({ row }) => [
+        '☰',
+        row.name,
+        row.short,
+        row.enabled ? '是' : '否',
+        row.unit,
+        row.paid,
+        row.negative,
+        row.note,
+        row.before,
+        row.reason,
+        row.attachment,
+        row.attachmentNote,
+        row.creator,
+        row.createdAt,
+        row.editor,
+        row.editedAt,
+      ]),
+      emptyMessage: '暂无可导出的假期类型',
+      saveAs: true,
+    });
+  };
+  const exportDisabled = sortedTypeRows.length === 0;
 
   return (
     <>
-      <InfoBanner
-        colors={colors}
-        messages={[
-          '设置假期单位、带薪和累计方式后，员工在申请假期前需按配置发放余额。',
-        ]}
-      />
-
       <div style={filterBar(colors)}>
         <div style={filterRowStyle}>
           <SearchField label="假期类型名称" placeholder="请输入" colors={colors} width={200} value={typeNameFilter} onChange={setTypeNameFilter} />
           <SelectField label="是否启用" placeholder="请选择" colors={colors} width={138} options={['是', '否']} value={enabledFilter} onChange={setEnabledFilter} />
           <SelectField label="计假单位" placeholder="请选择" colors={colors} width={138} options={['按天请假', '按小时请假']} value={unitFilter} onChange={setUnitFilter} />
           <SelectField label="是否带薪" placeholder="请选择" colors={colors} width={138} options={['是', '否']} value={paidFilter} onChange={setPaidFilter} />
-          <div style={actionRightStyle}>
-            <button onClick={resetTypeFilters} style={outlineBtn(colors)}>重置</button>
-            <button style={primaryBtn(colors)}>查询</button>
-            <button onClick={onToggleMore} style={toggleBtn(colors, showMore)}>
-              更多筛选
-              {showMore ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-            </button>
-          </div>
         </div>
-        {showMore && (
-          <div style={moreRowStyle(colors)}>
-            <SelectField label="余额可为负" placeholder="请选择" colors={colors} width={138} />
-            <SelectField label="事前可申请" placeholder="请选择" colors={colors} width={138} />
-            <SelectField label="附件必传" placeholder="请选择" colors={colors} width={138} />
-          </div>
-        )}
       </div>
 
       <div style={toolbarStyle(colors)}>
         <button onClick={addLeaveType} style={primaryBtn(colors)}>新增假期类型</button>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button onClick={() => window.alert('使用指引\n1. 新增假期类型后会立即加入列表。\n2. 修改可调整假期类型名称。\n3. 删除前会二次确认。')} style={linkBtn(colors)}>
-            <HelpCircle size={12} />
-            使用指引
-          </button>
-        </div>
+        <button onClick={exportTypeRows} disabled={exportDisabled} style={exportBtn(colors, exportDisabled)}><Download size={14}/>导出Excel</button>
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', backgroundColor: colors.cardBg }}>
@@ -1498,7 +1548,7 @@ function LeaveTypeView({
                 <td style={td(colors)}>☰</td>
                 <td style={td(colors)}>{row.name}</td>
                 <td style={td(colors)}>{row.short}</td>
-                <td style={td(colors)}><TogglePill enabled={row.enabled} /></td>
+                <td style={td(colors)}><TogglePill enabled={row.enabled} onClick={() => toggleLeaveTypeEnabled(row)} /></td>
                 <td style={td(colors)}>{row.unit}</td>
                 <td style={td(colors)}>{row.paid}</td>
                 <td style={td(colors)}>{row.negative}</td>
@@ -1528,6 +1578,16 @@ function LeaveTypeView({
           onChange={updateTypeDraft}
           onCancel={() => setShowTypeModal(false)}
           onSave={saveTypeDraft}
+        />
+      ) : null}
+      {confirmDelete ? (
+        <ConfirmDialog
+          colors={colors}
+          title={confirmDelete.title}
+          message={confirmDelete.message}
+          confirmLabel={confirmDelete.confirmLabel}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={confirmDelete.onConfirm}
         />
       ) : null}
     </>
@@ -1635,6 +1695,7 @@ function LeaveSchemeView({
   const [showSchemeModal, setShowSchemeModal] = useState(false);
   const [editingSchemeRow, setEditingSchemeRow] = useState<Array<React.ReactNode> | null>(null);
   const [schemeDraft, setSchemeDraft] = useState<LeaveSchemeDraft>(() => defaultLeaveSchemeDraft(TYPE_ROWS.filter(row => row.enabled).map(row => row.name)));
+  const [confirmDelete, setConfirmDelete] = useState<ConfirmConfig | null>(null);
   useEffect(() => {
     let cancelled = false;
     Promise.all([fetchLeaveSchemes(), fetchLeaveTypes()])
@@ -1670,8 +1731,14 @@ function LeaveSchemeView({
     setShowSchemeModal(true);
   };
   const deleteScheme = (row: Array<React.ReactNode>) => {
-    if (!window.confirm(`确认删除假期方案「${row[0]}」？`)) return;
-    commitLeaveSchemes(current => current.filter(item => item !== row));
+    setConfirmDelete({
+      title: '删除假期方案',
+      message: `确认删除假期方案「${row[0]}」？删除后该方案会从假期方案表移除。`,
+      onConfirm: () => {
+        commitLeaveSchemes(current => current.filter(item => item !== row));
+        setConfirmDelete(null);
+      },
+    });
   };
   const filteredSchemeRows = schemeRows.filter(row => {
     const keyword = schemeNameFilter.trim().toLowerCase();
@@ -1764,6 +1831,16 @@ function LeaveSchemeView({
           onChange={updateSchemeDraft}
           onCancel={() => setShowSchemeModal(false)}
           onSave={saveSchemeDraft}
+        />
+      ) : null}
+      {confirmDelete ? (
+        <ConfirmDialog
+          colors={colors}
+          title={confirmDelete.title}
+          message={confirmDelete.message}
+          confirmLabel={confirmDelete.confirmLabel}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={confirmDelete.onConfirm}
         />
       ) : null}
     </>
@@ -2150,11 +2227,22 @@ function CheckboxGroup({ label, items, colors }: { label: string; items: string[
   );
 }
 
-function TogglePill({ enabled }: { enabled?: boolean }) {
-  return (
+function TogglePill({ enabled, onClick }: { enabled?: boolean; onClick?: () => void }) {
+  const content = (
     <span style={{ width: 24, height: 14, borderRadius: 999, backgroundColor: enabled ? '#3A78FF' : '#C7CEDA', position: 'relative', display: 'inline-flex', alignItems: 'center', transition: 'all 0.2s' }}>
       <span style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: '#fff', position: 'absolute', left: enabled ? 12 : 2, top: 2, transition: 'all 0.2s' }} />
     </span>
+  );
+  if (!onClick) return content;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={enabled ? '停用假期类型' : '启用假期类型'}
+      style={{ border: 'none', background: 'transparent', padding: 0, margin: 0, display: 'inline-flex', cursor: 'pointer' }}
+    >
+      {content}
+    </button>
   );
 }
 
@@ -2203,6 +2291,24 @@ function primaryBtn(colors: any): React.CSSProperties {
 
 function outlineBtn(colors: any): React.CSSProperties {
   return { height: 30, padding: '0 14px', border: `1px solid ${colors.inputBorder}`, borderRadius: 4, backgroundColor: 'transparent', color: colors.text, fontSize: '12px', cursor: 'pointer' };
+}
+
+function exportBtn(colors: any, disabled = false): React.CSSProperties {
+  return {
+    height: 32,
+    border: 'none',
+    borderRadius: 4,
+    background: disabled ? colors.inputBorder : colors.primary,
+    color: disabled ? colors.textMuted : (colors.primaryText || '#fff'),
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '0 10px',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 13,
+    fontWeight: 600,
+    whiteSpace: 'nowrap',
+  };
 }
 
 function disabledBtn(colors: any): React.CSSProperties {

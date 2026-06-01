@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { fetchAttendanceEmployees, type AttendanceEmployee } from '../api/realData';
+import { useAttendanceFilterDirectory } from '../shared/domain/attendanceFilters';
+import { downloadAttendanceXlsx } from '../shared/export/attendanceExport';
 import { todayISO } from '../utils/date';
 import {
   Calendar, Search, RefreshCw, ChevronDown, Settings2,
-  ChevronLeft, ChevronRight, X, ChevronUp, RotateCcw,
+  ChevronLeft, ChevronRight, X, ChevronUp, RotateCcw, Download,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────
@@ -57,7 +59,7 @@ const DEFAULT_VISIBLE = ALL_COLUMNS
   .map(c => c.key);
 
 type Employee = {
-  name: string; empId: string; attendGroup: string; dept: string;
+  name: string; empId: string; employeeStatus?: string; attendGroup: string; dept: string; deptFull?: string;
   shift: string; type: string; attendance: string; status: string;
   anomaly: string; leave: string; fieldTrip: string;
   cin1: string; cout1: string; cin2: string; cout2: string;
@@ -315,6 +317,7 @@ function SimpleDropdown({ label, options, value, onChange, colors }: { label: st
 // ─────────────────────────────────────────────
 export default function AttendanceStats() {
   const { colors } = useTheme();
+  const attendanceFilters = useAttendanceFilterDirectory();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [sourceFile, setSourceFile] = useState('');
   const [loadError, setLoadError] = useState('');
@@ -330,6 +333,7 @@ export default function AttendanceStats() {
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [activeStatFilter, setActiveStatFilter] = useState<string | null>(null);
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const colPanelRef = useRef<HTMLDivElement>(null);
 
   const loadAttendance = useCallback(async () => {
@@ -351,16 +355,21 @@ export default function AttendanceStats() {
   }, [loadAttendance]);
 
   const filterDepts = useMemo(
-    () => Array.from(new Set(employees.map(emp => emp.dept).filter(Boolean))).map((label, index) => ({ id: `dept-${index + 1}`, label })),
-    [employees]
+    () => (attendanceFilters.departmentOptions.length ? attendanceFilters.departmentOptions : Array.from(new Set(employees.map(emp => emp.dept).filter(Boolean))))
+      .map((label, index) => ({ id: `dept-${index + 1}`, label })),
+    [attendanceFilters.departmentOptions, employees]
   );
   const filterAttendGroups = useMemo(
-    () => Array.from(new Set(employees.map(emp => (emp.attendGroup || emp.dept)).filter(Boolean))),
-    [employees]
+    () => attendanceFilters.attendanceGroupOptions.length ? attendanceFilters.attendanceGroupOptions : Array.from(new Set(employees.map(emp => (emp.attendGroup || emp.dept)).filter(Boolean))),
+    [attendanceFilters.attendanceGroupOptions, employees]
   );
   const filterShifts = useMemo(
-    () => Array.from(new Set(employees.map(emp => emp.shift).filter(Boolean))),
-    [employees]
+    () => attendanceFilters.shiftOptions.length ? attendanceFilters.shiftOptions : Array.from(new Set(employees.map(emp => emp.shift).filter(Boolean))),
+    [attendanceFilters.shiftOptions, employees]
+  );
+  const employmentStatusOptions = useMemo(
+    () => Array.from(new Set(['已入职', '未入职', ...attendanceFilters.employeeStatusOptions].filter(Boolean))),
+    [attendanceFilters.employeeStatusOptions],
   );
 
   // Column settings panel
@@ -388,7 +397,14 @@ export default function AttendanceStats() {
   };
 
   const updateDraftFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
-    setDraftFilters(prev => ({ ...prev, [key]: value }));
+    setDraftFilters(prev => {
+      const next = { ...prev, [key]: value };
+      setAppliedFilters(next);
+      return next;
+    });
+    setSelectedRowIds(new Set());
+    setCurrentPage(1);
+    setJumpPage('');
   };
 
   const applyFilters = () => {
@@ -401,6 +417,7 @@ export default function AttendanceStats() {
     setDraftFilters(DEFAULT_FILTERS);
     setAppliedFilters(DEFAULT_FILTERS);
     setActiveStatFilter(null);
+    setSelectedRowIds(new Set());
     setCurrentPage(1);
     setJumpPage('');
   };
@@ -410,6 +427,7 @@ export default function AttendanceStats() {
     setCurrentPage(1);
     setJumpPage('');
     setShowColPanel(false);
+    setSelectedRowIds(new Set());
     loadAttendance();
   };
 
@@ -436,21 +454,20 @@ export default function AttendanceStats() {
   };
 
   const baseFilteredEmployees = employees.filter(emp => {
-    const keyword = appliedFilters.empSearch.trim().toLowerCase();
-    const matchesKeyword = !keyword || emp.name.toLowerCase().includes(keyword) || emp.empId.toLowerCase().includes(keyword);
-    const matchesDept = !appliedFilters.dept || emp.dept === appliedFilters.dept;
-    const matchesAttendGroup = !appliedFilters.attendGroup || (emp.attendGroup || emp.dept) === appliedFilters.attendGroup;
-    const matchesShift = !appliedFilters.shift || emp.shift === appliedFilters.shift;
-    const matchesEmploymentStatus = !appliedFilters.employmentStatus
-      || (appliedFilters.employmentStatus === '已入职' ? Boolean(emp.empId) : !emp.empId);
-    return matchesKeyword && matchesDept && matchesAttendGroup && matchesShift && matchesEmploymentStatus;
+    return attendanceFilters.matchesLinkedFilters(emp, {
+      dept: appliedFilters.dept,
+      attendGroup: appliedFilters.attendGroup,
+      shift: appliedFilters.shift,
+      employeeStatus: appliedFilters.employmentStatus,
+      keyword: appliedFilters.empSearch,
+    });
   });
 
   const matchesStatFilter = (emp: Employee) => {
     if (!activeStatFilter || activeStatFilter === 'all') return true;
     if (activeStatFilter === 'pending') return !['已出勤', '未出勤', '迟到', '旷工', '休息'].includes(emp.status);
     if (activeStatFilter === 'present') return emp.status === '已出勤';
-    if (activeStatFilter === 'absent') return emp.status === '未出勤';
+    if (activeStatFilter === 'absent') return emp.status === '未出勤' || emp.status === '未打卡' || emp.attendance === '未出勤';
     if (activeStatFilter === 'late') return emp.status === '迟到' || emp.anomaly.includes('迟到');
     if (activeStatFilter === 'absentWork') return emp.status === '旷工' || emp.anomaly.includes('旷工');
     if (activeStatFilter === 'rest') return emp.status === '休息' || emp.attendance === '休息';
@@ -470,6 +487,7 @@ export default function AttendanceStats() {
   const filteredEmployees = baseFilteredEmployees.filter(matchesStatFilter);
   const applyStatFilter = (key: string) => {
     setActiveStatFilter(current => current === key ? null : key);
+    setSelectedRowIds(new Set());
     setCurrentPage(1);
     setJumpPage('');
   };
@@ -478,14 +496,14 @@ export default function AttendanceStats() {
   const countStatus = (status: string) => countWhere(emp => emp.status === status);
 
   const presentCount = countStatus('已出勤');
-  const absentCount = countStatus('未出勤');
+  const absentCount = countWhere(emp => emp.status === '未出勤' || emp.status === '未打卡' || emp.attendance === '未出勤');
   const lateCount = countStatus('迟到');
   const absentWorkCount = countStatus('旷工');
   const restCount = countStatus('休息');
   const unplannedCount = countWhere(emp => emp.type === '未排班');
   const cardCount = countWhere(emp => (emp.cin1 && emp.cin1 !== '-') || (emp.cout1 && emp.cout1 !== '-'));
   const workedCount = countWhere(emp => emp.attendance === '已出勤');
-  const pendingCount = countWhere(emp => !['已出勤', '未出勤', '迟到', '旷工', '休息'].includes(emp.status));
+  const pendingCount = countWhere(emp => !['已出勤', '未出勤', '未打卡', '迟到', '旷工', '休息'].includes(emp.status));
 
   const statRow1 = [
     { key: 'all', label: '在勤人数', value: baseFilteredEmployees.length, color: STAT_ROW1_COLORS.text },
@@ -572,6 +590,27 @@ export default function AttendanceStats() {
   const visibleColDefs = ALL_COLUMNS.filter(c => visibleCols.includes(c.key));
 
   const pagedEmployees = sortedEmployees.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const exportDisabled = isLoading || sortedEmployees.length === 0;
+  const getRowId = (emp: Employee) => emp.empId || `${emp.name}-${emp.dept}-${emp.attendGroup}`;
+  const pageRowIds = pagedEmployees.map(getRowId);
+  const allPageSelected = pageRowIds.length > 0 && pageRowIds.every(id => selectedRowIds.has(id));
+  const somePageSelected = pageRowIds.some(id => selectedRowIds.has(id)) && !allPageSelected;
+  const togglePageSelection = () => {
+    setSelectedRowIds(current => {
+      const next = new Set(current);
+      if (allPageSelected) pageRowIds.forEach(id => next.delete(id));
+      else pageRowIds.forEach(id => next.add(id));
+      return next;
+    });
+  };
+  const toggleRowSelection = (rowId: string) => {
+    setSelectedRowIds(current => {
+      const next = new Set(current);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  };
 
   const handleJump = () => {
     const targetPage = Number.parseInt(jumpPage, 10);
@@ -583,24 +622,20 @@ export default function AttendanceStats() {
     setJumpPage('');
   };
 
-  const exportValue = (value: string) => {
-    const escapedValue = value.replace(/"/g, '""');
-    return /[",\n]/.test(escapedValue) ? `"${escapedValue}"` : escapedValue;
-  };
-
   const handleExport = () => {
+    if (exportDisabled) return;
+    const selectedRows = selectedRowIds.size
+      ? sortedEmployees.filter(emp => selectedRowIds.has(getRowId(emp)))
+      : sortedEmployees;
     const headers = visibleColDefs.map(col => col.label);
-    const rows = sortedEmployees.map(emp => visibleColDefs.map(col => `${(emp as any)[col.key] ?? '-'}`));
-    const csvContent = [headers, ...rows]
-      .map(row => row.map(cell => exportValue(cell)).join(','))
-      .join('\n');
-    const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = '考勤统计.csv';
-    link.click();
-    window.URL.revokeObjectURL(url);
+    const rows = selectedRows.map(emp => visibleColDefs.map(col => `${(emp as any)[col.key] ?? '-'}`));
+    void downloadAttendanceXlsx({
+      fileName: `实时考勤统计-${new Date().toISOString().slice(0, 10)}-${selectedRowIds.size ? '选中记录' : '筛选结果'}.xlsx`,
+      sheetName: '实时统计',
+      headers,
+      rows,
+      saveAs: true,
+    });
   };
 
   const getCellValue = (emp: Employee, key: string): React.ReactNode => {
@@ -647,43 +682,31 @@ export default function AttendanceStats() {
             <Search size={12} style={{ color: colors.textMuted, flexShrink: 0 }} />
           </div>
 
-          <SimpleDropdown label="已入" options={['已入职', '未入职']} value={draftFilters.employmentStatus} onChange={value => updateDraftFilter('employmentStatus', value)} colors={colors} />
-
+          <SimpleDropdown label="已入" options={employmentStatusOptions} value={draftFilters.employmentStatus} onChange={value => updateDraftFilter('employmentStatus', value)} colors={colors} />
           <button
-            onClick={handleRefresh}
+            onClick={handleExport}
+            disabled={exportDisabled}
             style={{
-              width: '30px', height: '30px', display: 'flex', alignItems: 'center',
-              justifyContent: 'center', border: `1px solid ${colors.inputBorder}`,
-              borderRadius: '4px', backgroundColor: 'transparent', cursor: 'pointer', color: colors.textMuted,
+              height: 32,
+              border: 'none',
+              borderRadius: 4,
+              background: exportDisabled ? colors.inputBorder : colors.primary,
+              color: exportDisabled ? colors.textMuted : colors.primaryText,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '0 10px',
+              cursor: exportDisabled ? 'not-allowed' : 'pointer',
+              fontSize: 13,
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
             }}
-            title="刷新"
           >
-            <RotateCcw size={13} />
+            <Download size={14}/>导出Excel
           </button>
 
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
-            <button onClick={resetFilters} style={outlineBtn(colors)}>重置</button>
-            <button onClick={applyFilters} style={primaryBtn(colors)}>查询</button>
-          </div>
         </div>
       </div>
-
-      {(sourceFile || loadError || isLoading) && (
-        <div style={{
-          margin: '8px 16px 0',
-          padding: '8px 12px',
-          borderRadius: 6,
-          backgroundColor: '#FFFBEB',
-          border: '1px solid #FCD34D',
-          fontSize: '12px',
-          color: '#92400E',
-          flexShrink: 0,
-        }}>
-          {isLoading ? '正在加载真实数据… ' : ''}
-          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
-          {loadError ? ` ${loadError}` : ''}
-        </div>
-      )}
 
       {/* ── Stats row 1 ────────────────────────── */}
       <div style={{
@@ -705,65 +728,19 @@ export default function AttendanceStats() {
         })}
       </div>
 
-      {/* ── Stats row 2 (勤务 / 异常 / 加班) ─── */}
-      <div style={{
-        backgroundColor: colors.cardBg,
-        borderBottom: `1px solid ${colors.cardBorder}`,
-        padding: '6px 16px', flexShrink: 0,
-        display: 'flex', alignItems: 'center', gap: '0', flexWrap: 'wrap',
-      }}>
-        {statRow2Groups.map((group, gi) => (
-          <React.Fragment key={gi}>
-            {gi > 0 && (
-              <div style={{ width: '1px', height: '20px', backgroundColor: colors.divider, margin: '0 16px' }} />
-            )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <span style={{ fontSize: '11px', color: colors.textMuted, whiteSpace: 'nowrap' }}>{group.label}:</span>
-              {group.items.map((item, ii) => {
-                const active = activeStatFilter === item.key;
-                return (
-                  <div key={ii} onClick={() => applyStatFilter(item.key)} style={{ display: 'flex', alignItems: 'baseline', gap: '3px', cursor: 'pointer', padding: '2px 5px', borderRadius: 4, backgroundColor: active ? `${colors.primary}12` : 'transparent' }}>
-                    <span style={{ fontSize: '11px', color: active ? colors.primary : colors.textMuted }}>{item.label}(</span>
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: active || (item as any).highlight ? colors.primary : colors.text }}>
-                      {item.value}
-                    </span>
-                    <span style={{ fontSize: '11px', color: active ? colors.primary : colors.textMuted }}>)</span>
-                  </div>
-                );
-              })}
-            </div>
-          </React.Fragment>
-        ))}
-      </div>
-
-      {/* ── Toolbar ────────────────────────────── */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: '8px',
-        padding: '7px 16px', backgroundColor: colors.cardBg,
-        borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0,
-      }}>
-        <button style={primaryBtn(colors)} onClick={handleExport}>导出</button>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          {/* Refresh */}
-          <button style={iconBtn(colors)} title="刷新" onClick={handleRefresh}><RefreshCw size={13} /></button>
-          {/* Column settings */}
-          <button
-            style={{ ...iconBtn(colors), borderColor: showColPanel ? colors.primary : colors.inputBorder, color: showColPanel ? colors.primary : colors.textMuted }}
-            title="表头设置"
-            onClick={openColPanel}
-          >
-            <Settings2 size={13} />
-          </button>
-        </div>
-      </div>
-
       {/* ── Table area ─────────────────────────── */}
       <div style={{ flex: 1, overflow: 'auto', backgroundColor: colors.cardBg, position: 'relative' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
           <thead>
             <tr style={{ backgroundColor: colors.tableHeaderBg, position: 'sticky', top: 0, zIndex: 10 }}>
               <th style={th(colors)}>
-                <input type="checkbox" style={{ accentColor: colors.primary }} />
+                <input
+                  type="checkbox"
+                  checked={allPageSelected}
+                  ref={el => { if (el) el.indeterminate = somePageSelected; }}
+                  onChange={togglePageSelection}
+                  style={{ accentColor: colors.primary }}
+                />
               </th>
               {visibleColDefs.map(col => (
                 <th
@@ -788,19 +765,27 @@ export default function AttendanceStats() {
             </tr>
           </thead>
           <tbody>
-            {pagedEmployees.map((emp, i) => (
+            {pagedEmployees.map((emp, i) => {
+              const rowId = getRowId(emp);
+              const selected = selectedRowIds.has(rowId);
+              return (
               <tr
-                key={i}
+                key={rowId || i}
                 style={{
-                  backgroundColor: i % 2 === 0 ? colors.cardBg : colors.tableStripe,
+                  backgroundColor: selected ? `${colors.primary}0D` : i % 2 === 0 ? colors.cardBg : colors.tableStripe,
                   borderBottom: `1px solid ${colors.tableBorder}`,
                   transition: 'background 0.12s',
                 }}
-                onMouseEnter={e => (e.currentTarget.style.backgroundColor = colors.tableRowHover)}
-                onMouseLeave={e => (e.currentTarget.style.backgroundColor = i % 2 === 0 ? colors.cardBg : colors.tableStripe)}
+                onMouseEnter={e => { if (!selected) e.currentTarget.style.backgroundColor = colors.tableRowHover; }}
+                onMouseLeave={e => { if (!selected) e.currentTarget.style.backgroundColor = i % 2 === 0 ? colors.cardBg : colors.tableStripe; }}
               >
                 <td style={td(colors)}>
-                  <input type="checkbox" style={{ accentColor: colors.primary }} />
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => toggleRowSelection(rowId)}
+                    style={{ accentColor: colors.primary }}
+                  />
                 </td>
                 {visibleColDefs.map(col => (
                   <td key={col.key} style={{
@@ -813,7 +798,8 @@ export default function AttendanceStats() {
                   </td>
                 ))}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -824,6 +810,7 @@ export default function AttendanceStats() {
         padding: '7px 16px', backgroundColor: colors.cardBg,
         borderTop: `1px solid ${colors.cardBorder}`, gap: '6px', flexShrink: 0,
       }}>
+        {selectedRowIds.size > 0 && <span style={{ fontSize: '12px', color: colors.textMuted, marginRight: '8px' }}>已选{selectedRowIds.size}条</span>}
         <span style={{ fontSize: '12px', color: colors.textMuted, marginRight: '4px' }}>共{totalCount}条</span>
         <button style={pageBtn(colors, false)} onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
           <ChevronLeft size={13} />

@@ -6,6 +6,8 @@ import {
   saveAttendanceAnomalies,
   type AttendanceAnomalyRecord as RealAnomalyRecord,
 } from '../api/realData';
+import { useAttendanceFilterDirectory } from '../shared/domain/attendanceFilters';
+import { downloadAttendanceXlsx } from '../shared/export/attendanceExport';
 
 import { useLocation } from 'react-router';
 import {
@@ -82,6 +84,21 @@ function useClickOutside(ref: React.RefObject<HTMLElement | null>, cb: () => voi
 }
 const pBtn = (c: any): React.CSSProperties => ({ padding: '5px 14px', fontSize: '12px', border: 'none', borderRadius: 4, cursor: 'pointer', backgroundColor: c.primary, color: '#fff', whiteSpace: 'nowrap' });
 const oBtn = (c: any, a?: boolean, d?: boolean): React.CSSProperties => ({ padding: '5px 12px', fontSize: '12px', borderRadius: 4, cursor: a === false ? 'not-allowed' : 'pointer', backgroundColor: 'transparent', whiteSpace: 'nowrap', border: `1px solid ${d ? '#FCA5A5' : a ? c.primary : c.inputBorder}`, color: d ? '#DC2626' : a ? c.primary : c.text, opacity: a === false ? 0.45 : 1 });
+const exportBtn = (c: any, disabled = false): React.CSSProperties => ({
+  height: 32,
+  border: 'none',
+  borderRadius: 4,
+  background: disabled ? c.inputBorder : c.primary,
+  color: disabled ? c.textMuted : (c.primaryText || '#fff'),
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '0 10px',
+  cursor: disabled ? 'not-allowed' : 'pointer',
+  fontSize: 13,
+  fontWeight: 600,
+  whiteSpace: 'nowrap',
+});
 
 function matchDateRange(date: string, start: string, end: string) {
   if (start && date < start) return false;
@@ -262,6 +279,7 @@ function ColSettingsModal({ cols, onClose, onApply, colors }: {
 
 // ─── 考勤异常 View ─────────────────────────────
 function AnomalyAttendance({ colors }: { colors: any }) {
+  const attendanceFilters = useAttendanceFilterDirectory();
   const [empSearch, setEmpSearch] = useState('');
   const [activeCard, setActiveCard] = useState<string | null>(null);
   const [showMore, setShowMore] = useState(false);
@@ -353,10 +371,8 @@ function AnomalyAttendance({ colors }: { colors: any }) {
     if (!matchKeyword) return false;
 
     if (!matchDateRange(r.date, appliedDateStart, appliedDateEnd)) return false;
-    if (appliedDeptFilter && r.dept !== appliedDeptFilter) return false;
-
-    const rowAttendGroup = ATTEND_GROUP_BY_DEPT[r.dept] || '';
-    if (appliedAttendGroupFilter && rowAttendGroup !== appliedAttendGroupFilter) return false;
+    if (!attendanceFilters.matchesDepartment(r, appliedDeptFilter)) return false;
+    if (appliedAttendGroupFilter && !attendanceFilters.matchesLinkedFilters(r, { attendGroup: appliedAttendGroupFilter })) return false;
 
     if (appliedAnomalyTypeFilter && appliedAnomalyTypeFilter !== '全部' && r.type !== appliedAnomalyTypeFilter) return false;
 
@@ -492,6 +508,8 @@ function AnomalyAttendance({ colors }: { colors: any }) {
   }, [persistRows, remarkTargetIds, rows]);
 
 
+  const exportDisabled = filteredRows.length === 0;
+
   const handleExport = useCallback(() => {
     const exportRows = selected.size > 0
       ? filteredRows.filter(row => selected.has(row.id))
@@ -503,12 +521,7 @@ function AnomalyAttendance({ colors }: { colors: any }) {
     }
 
     const headers = ['姓名', '工号', '部门', '日期', '异常类型', '异常说明', '提醒状态', '核销状态', '备注', '备注时间'];
-    const escapeCsv = (value: string) => {
-      const escaped = value.replace(/"/g, '""');
-      return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
-    };
-
-    const csvRows = exportRows.map(row => [
+    const xlsxRows = exportRows.map(row => [
       row.name,
       row.empId,
       row.dept,
@@ -521,14 +534,14 @@ function AnomalyAttendance({ colors }: { colors: any }) {
       row.remarkUpdatedAt || '',
     ]);
 
-    const csv = [headers, ...csvRows].map(line => line.map(cell => escapeCsv(String(cell))).join(',')).join('\n');
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `考勤异常-${new Date().toISOString().slice(0, 10)}-${selected.size > 0 ? '选中记录' : '筛选结果'}.csv`;
-    link.click();
-    window.URL.revokeObjectURL(url);
+    void downloadAttendanceXlsx({
+      fileName: `考勤异常-${new Date().toISOString().slice(0, 10)}-${selected.size > 0 ? '选中记录' : '筛选结果'}.xlsx`,
+      sheetName: '考勤异常',
+      headers,
+      rows: xlsxRows,
+      emptyMessage: '暂无可导出的异常记录',
+      saveAs: true,
+    });
   }, [filteredRows, selected]);
 
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
@@ -600,48 +613,9 @@ function AnomalyAttendance({ colors }: { colors: any }) {
             <input value={empSearch} onChange={e => setEmpSearch(e.target.value)} placeholder="输入姓名或工号"
               style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1, minWidth: 60 }}/>
           </div>
-          <button onClick={() => setShowMore(v => !v)} style={{ ...oBtn(colors, showMore), display: 'flex', alignItems: 'center', gap: 4 }}>
-            更多筛选 {showMore ? <ChevronUp size={11}/> : <ChevronDown size={11}/>}
-          </button>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button onClick={handleReset} style={oBtn(colors)}>重置</button>
-            <button onClick={handleQuery} style={pBtn(colors)}>查询</button>
-          </div>
-
         </div>
-        {showMore && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg }}>
-              <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>部门:</span>
-              <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text }}>
-                <option value="">全部</option>
-                {DEPT_OPTIONS.map(option => <option key={option} value={option}>{option}</option>)}
-              </select>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg }}>
-              <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>考勤组:</span>
-              <select value={attendGroupFilter} onChange={e => setAttendGroupFilter(e.target.value)} style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text }}>
-                <option value="">全部</option>
-                {ATTEND_GROUPS.map(option => <option key={option} value={option}>{option}</option>)}
-              </select>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg }}>
-              <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>异常类型:</span>
-              <select value={anomalyTypeFilter} onChange={e => setAnomalyTypeFilter(e.target.value)} style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text }}>
-                {ANOMALY_TYPES.map(option => <option key={option} value={option}>{option}</option>)}
-              </select>
-            </div>
-          </div>
-        )}
 
       </div>
-      {(sourceFile || loadError) && (
-        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>
-          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
-          {loadError ? ` ${loadError}` : ''}
-        </div>
-      )}
-
       {/* Stat cards */}
       <div style={{ display: 'flex', gap: 10, padding: '12px 16px', flexShrink: 0, flexWrap: 'wrap' }}>
         {STAT_CARDS.map(card => (
@@ -670,7 +644,7 @@ function AnomalyAttendance({ colors }: { colors: any }) {
         <button onClick={() => setShowReminder(true)} style={{ ...oBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}>
           <Settings2 size={12}/>提醒设置
         </button>
-        <button onClick={handleExport} style={{ ...oBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}><Download size={12}/>导出</button>
+        <button onClick={handleExport} disabled={exportDisabled} style={exportBtn(colors, exportDisabled)}><Download size={14}/>导出Excel</button>
         {selected.size > 0 && <span style={{ fontSize: '12px', color: colors.textMuted }}>已选 {selected.size} 条</span>}
       </div>
 
@@ -950,29 +924,7 @@ function AnomalyBusiness({ colors }: { colors: any }) {
               </button>
             ))}
           </div>
-          <button onClick={() => setShowMore(v => !v)} style={{ ...oBtn(colors, showMore), display: 'flex', alignItems: 'center', gap: 4 }}>
-            更多筛选 {showMore ? <ChevronUp size={11}/> : <ChevronDown size={11}/>}
-          </button>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button onClick={() => { setStatusTab('pending'); setSelected(new Set()); setPage(1); }} style={oBtn(colors)}>重置</button>
-            <button style={pBtn(colors)}>查询</button>
-          </div>
         </div>
-        {showMore && (
-          <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg }}>
-              <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>业务日期:</span>
-              <input type="date" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, width: 108 }}/>
-              <span style={{ fontSize: '12px', color: colors.textMuted }}>—</span>
-              <input type="date" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, width: 108 }}/>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg, minWidth: 140 }}>
-              <span style={{ fontSize: '12px', color: colors.textMuted }}>员工:</span>
-              <Search size={11} style={{ color: colors.textMuted }}/>
-              <input placeholder="姓名或工号" style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }}/>
-            </div>
-          </div>
-        )}
       </div>
       {/* Action bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0, flexWrap: 'wrap' }}>
@@ -983,12 +935,6 @@ function AnomalyBusiness({ colors }: { colors: any }) {
           <Trash2 size={12}/>删除
         </button>
 
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-          {selected.size > 0 && <span style={{ fontSize: '12px', color: colors.textMuted }}>已选 {selected.size} 条</span>}
-          <button onClick={() => setShowColSettings(true)} style={{ ...oBtn(colors, showColSettings), display: 'flex', alignItems: 'center', gap: 4 }}>
-            <Settings2 size={12}/>表头设置
-          </button>
-        </div>
       </div>
       {/* Table */}
       <div style={{ flex: 1, overflow: 'auto', backgroundColor: colors.cardBg }}>

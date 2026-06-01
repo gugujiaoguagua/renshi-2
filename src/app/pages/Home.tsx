@@ -1,32 +1,111 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
+import { downloadAttendanceXlsx } from '../shared/export/attendanceExport';
 import { currentDateLabel, currentWeekdayLabel, monthEndISO, monthStartISO } from '../utils/date';
-import { BarChart2, AlertTriangle, Clock, Coffee, MapPin, Calendar, Umbrella, Settings, TrendingUp, Users, FileText } from 'lucide-react';
+import { BarChart2, AlertTriangle, MapPin, Calendar, Umbrella, Settings, Download } from 'lucide-react';
+import { fetchAttendanceEmployees, type AttendanceEmployee } from '../api/realData';
 
 const quickCards = [
   { icon: <BarChart2 size={22} />, title: '实时统计', desc: '查看今日考勤实时数据', path: '/attendance/stats', color: '#AA2B3A' },
   { icon: <AlertTriangle size={22} />, title: '考勤异常', desc: '处理员工考勤异常记录', path: '/attendance/anomaly', color: '#D97706' },
-  { icon: <Clock size={22} />, title: '打卡记录', desc: '查看员工打卡明细', path: '/attendance/clock-records', color: '#2563EB' },
-  { icon: <Coffee size={22} />, title: '加班管理', desc: '管理员工加班记录', path: '/attendance/overtime', color: '#7C3AED' },
   { icon: <MapPin size={22} />, title: '外勤管理', desc: '外出及出差记录', path: '/attendance/field-out', color: '#059669' },
   { icon: <Calendar size={22} />, title: '排班管理', desc: '员工排班与调班', path: '/attendance/schedule', color: '#0EA5E9' },
-  { icon: <Umbrella size={22} />, title: '假期管理', desc: '请假申请与假期余额', path: '/attendance/leave', color: '#EC4899' },
-  { icon: <Settings size={22} />, title: '考勤设置', desc: '配置考勤规则与方案', path: '/attendance/settings', color: '#64748B' },
+  { icon: <Umbrella size={22} />, title: '假期类型设置', desc: '维护假期类型与规则', path: '/attendance/leave-type', color: '#EC4899' },
+  { icon: <Settings size={22} />, title: '考勤组管理', desc: '配置考勤规则与方案', path: '/attendance/settings/groups', color: '#64748B' },
 ];
 
-const stats = [
-  { label: '今日应出勤', value: '0', unit: '人', change: '0', positive: true },
-  { label: '已出勤', value: '0', unit: '人', change: '0', positive: true },
-  { label: '考勤异常', value: '0', unit: '条', change: '0', positive: true },
-  { label: '未打卡', value: '0', unit: '人', change: '0', positive: true },
-];
+function hasClockValue(value: string) {
+  return Boolean(value && value !== '-');
+}
+
+function isActiveEmployee(emp: AttendanceEmployee) {
+  return !['待入职', '未入职', '已离职', '离职'].includes(String(emp.employeeStatus || ''));
+}
+
+function isRestEmployee(emp: AttendanceEmployee) {
+  return emp.status === '休息' || emp.attendance === '休息';
+}
+
+function isPresentEmployee(emp: AttendanceEmployee) {
+  return emp.attendance === '已出勤'
+    || emp.status === '已出勤'
+    || emp.status === '正常'
+    || hasClockValue(emp.cin1)
+    || hasClockValue(emp.cout1)
+    || hasClockValue(emp.cin2)
+    || hasClockValue(emp.cout2)
+    || hasClockValue(emp.cin3)
+    || hasClockValue(emp.cout3);
+}
+
+function isMissingClockEmployee(emp: AttendanceEmployee) {
+  return emp.status === '未打卡'
+    || emp.attendance === '未出勤'
+    || String(emp.anomaly || '').includes('未打卡')
+    || String(emp.anomaly || '').includes('缺卡');
+}
+
+function isAnomalyEmployee(emp: AttendanceEmployee) {
+  const status = String(emp.status || '');
+  const anomaly = String(emp.anomaly || '');
+  return ['迟到', '旷工', '早退', '异常', '未打卡', '未排班'].some((keyword) => status.includes(keyword) || anomaly.includes(keyword))
+    || (anomaly && anomaly !== '-');
+}
 
 export default function Home() {
   const { colors } = useTheme();
   const navigate = useNavigate();
+  const [attendanceRows, setAttendanceRows] = useState<AttendanceEmployee[]>([]);
+  const [isLoadingStats, setIsLoadingStats] = useState(true);
+  const [statsError, setStatsError] = useState('');
   const monthStartLabel = monthStartISO().replace(/-/g, '年').replace(/年(\d{2})年/, '年$1月') + '日';
   const monthEndLabel = monthEndISO().replace(/-/g, '年').replace(/年(\d{2})年/, '年$1月') + '日';
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingStats(true);
+    fetchAttendanceEmployees()
+      .then((res) => {
+        if (cancelled) return;
+        setAttendanceRows(res.rows || []);
+        setStatsError('');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAttendanceRows([]);
+        setStatsError('真实数据连接失败');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingStats(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const stats = useMemo(() => {
+    const activeRows = attendanceRows.filter(isActiveEmployee);
+    const shouldRows = activeRows.filter((emp) => !isRestEmployee(emp));
+    const presentCount = shouldRows.filter(isPresentEmployee).length;
+    const anomalyCount = shouldRows.filter(isAnomalyEmployee).length;
+    const missingClockCount = shouldRows.filter(isMissingClockEmployee).length;
+    return [
+      { label: '今日应出勤', value: String(shouldRows.length), unit: '人', note: statsError || (isLoadingStats ? '读取中' : '实时数据'), positive: !statsError },
+      { label: '已出勤', value: String(presentCount), unit: '人', note: statsError || (isLoadingStats ? '读取中' : '实时数据'), positive: !statsError },
+      { label: '考勤异常', value: String(anomalyCount), unit: '条', note: statsError || (isLoadingStats ? '读取中' : '实时数据'), positive: !statsError },
+      { label: '未打卡', value: String(missingClockCount), unit: '人', note: statsError || (isLoadingStats ? '读取中' : '实时数据'), positive: !statsError },
+    ];
+  }, [attendanceRows, isLoadingStats, statsError]);
+  const handleExport = () => {
+    void downloadAttendanceXlsx({
+      fileName: `考勤首页统计-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      sheetName: '首页统计',
+      headers: ['指标', '数值', '单位', '说明'],
+      rows: stats.map(item => [item.label, item.value, item.unit, item.note]),
+      allowEmpty: true,
+    });
+  };
 
   return (
     <div style={{ padding: '20px 24px', overflow: 'auto' }}>
@@ -56,6 +135,12 @@ export default function Home() {
         <div style={{ flexShrink: 0, textAlign: 'right' }}>
           <div style={{ color: '#F1E6D8', fontSize: '12px', marginBottom: '4px', opacity: 0.8 }}>当前考勤周期</div>
           <div style={{ color: '#fff', fontSize: '14px', fontWeight: 500 }}>{monthStartLabel} — {monthEndLabel}</div>
+          <button
+            onClick={handleExport}
+            style={{ marginTop: 12, padding: '6px 12px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.35)', background: 'rgba(255,255,255,0.12)', color: '#fff', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}
+          >
+            <Download size={13}/>导出Excel
+          </button>
         </div>
       </div>
 
@@ -77,7 +162,7 @@ export default function Home() {
               <span style={{ fontSize: '12px', color: colors.textMuted }}>{s.unit}</span>
             </div>
             <div style={{ fontSize: '11px', color: s.positive ? '#059669' : '#EF4444', marginTop: '4px' }}>
-              {s.change} 较昨日
+              {s.note}
             </div>
           </div>
         ))}

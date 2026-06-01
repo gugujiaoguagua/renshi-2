@@ -51,6 +51,9 @@ import {
   type OrganizationPositionRecord,
   type OrganizationRankRecord,
 } from '../api/realData';
+import { isRemovedOrganizationSection } from '../shared/navigation/visibilityPolicy';
+import { DomainLinkagePanel } from '../shared/domain/DomainLinkagePanel';
+import { downloadAttendanceXlsx, textCell, type XlsxCellValue } from '../shared/export/attendanceExport';
 
 type ModalMode = 'add' | 'edit' | 'detail' | 'importOrg' | 'exportOrg' | 'batchEdit' | 'changeDetail' | 'fieldDrawer' | 'orgTypeEdit' | 'orgTypeDelete' | 'orgTypeSort' | 'positionEdit' | 'positionDelete' | 'rankEdit' | 'rankDelete' | 'servicePanel' | 'staffingApply' | 'expandLevel' | 'collapseLevel' | null;
 type PageMode = 'organizations' | 'orgTypes' | 'changeRecords' | 'snapshots' | 'disabledOrgs' | 'settings' | 'architecture' | 'architectureSort' | 'positions' | 'positionImport' | 'ranks' | 'jobTitles' | 'staffing';
@@ -239,8 +242,14 @@ function csvCell(value: unknown) {
 }
 
 function toOrgCsv(rows: OrganizationRecord[]) {
-  const headers = ['组织编码', '组织名称', '组织全路径', '上级组织编码', '组织类型', '组织负责人', '审批主管', '直属成员', '成员总数', '状态'];
-  const lines = rows.map(row => [
+  const lines = toOrgExportRows(rows).map(row => row.map(csvCell).join(','));
+  return `\uFEFF${ORG_EXPORT_HEADERS.map(csvCell).join(',')}\n${lines.join('\n')}`;
+}
+
+const ORG_EXPORT_HEADERS = ['组织编码', '组织名称', '组织全路径', '上级组织编码', '组织类型', '组织负责人', '审批主管', '直属成员', '成员总数', '状态'];
+
+function toOrgExportRows(rows: OrganizationRecord[]): XlsxCellValue[][] {
+  return rows.map(row => [
     row.code,
     row.name,
     row.fullPath,
@@ -251,8 +260,7 @@ function toOrgCsv(rows: OrganizationRecord[]) {
     row.directMemberCount ?? 0,
     row.employeeCount ?? 0,
     row.status || '',
-  ].map(csvCell).join(','));
-  return `\uFEFF${headers.map(csvCell).join(',')}\n${lines.join('\n')}`;
+  ].map(textCell));
 }
 
 function downloadTextFile(filename: string, content: string) {
@@ -313,30 +321,21 @@ function moveItem<T>(items: T[], from: number, to: number) {
 function initialOrganizationPageMode(): PageMode {
   if (typeof window === 'undefined') return 'organizations';
   const section = window.location.pathname.split('/').filter(Boolean)[1];
-  if (section === 'architecture') return 'architecture';
   if (section === 'positions') return 'positions';
   if (section === 'position-import') return 'positionImport';
   if (section === 'ranks') return 'ranks';
-  if (section === 'job-titles') return 'jobTitles';
-  if (section === 'staffing') return 'staffing';
-  if (section === 'settings') return 'settings';
+  if (isRemovedOrganizationSection(section)) return 'organizations';
   const tab = new URLSearchParams(window.location.search).get('tab');
-  const allowed: PageMode[] = ['organizations', 'architecture', 'positions', 'positionImport', 'ranks', 'jobTitles', 'staffing', 'settings'];
+  const allowed: PageMode[] = ['organizations', 'positions', 'positionImport', 'ranks'];
   return allowed.includes(tab as PageMode) ? (tab as PageMode) : 'organizations';
 }
 
 function organizationPathForMode(mode: PageMode) {
   const pathByMode: Partial<Record<PageMode, string>> = {
     organizations: '/organization',
-    architecture: '/organization/architecture',
-    architectureSort: '/organization/architecture',
     positions: '/organization/positions',
     positionImport: '/organization/position-import',
     ranks: '/organization/ranks',
-    jobTitles: '/organization/job-titles',
-    staffing: '/organization/staffing',
-    settings: '/organization/settings',
-    orgTypes: '/organization/settings',
   };
   return pathByMode[mode] || '/organization';
 }
@@ -378,6 +377,7 @@ export default function OrganizationManagementPage() {
   const [fieldSettings, setFieldSettings] = useState<FieldSetting[]>(INITIAL_FIELDS);
   const [fieldDraft, setFieldDraft] = useState<FieldSetting>(EMPTY_FIELD);
   const [fieldDrawerTitle, setFieldDrawerTitle] = useState('新增字段');
+  const [positionOriginalKey, setPositionOriginalKey] = useState('');
   const toolbarMenuRef = useRef<HTMLDivElement | null>(null);
   const moreMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -520,9 +520,14 @@ export default function OrganizationManagementPage() {
       return;
     }
     const parent = rowsByCode.get(form.parentCode);
-    const fullPath = form.fullPath.trim().replace(/\/$/, '') || (parent ? `${parent.fullPath}/${name}` : `上海拉迷家具有限公司/${name}`);
+    const fullPath = parent
+      ? `${parent.fullPath}/${name}`
+      : name === '上海拉迷家具有限公司'
+        ? name
+        : `上海拉迷家具有限公司/${name}`;
+    const nextCode = form.code.trim() || undefined;
     await saveOrganization({
-      code: form.code.trim(),
+      code: nextCode,
       name,
       fullPath,
       parentCode: form.parentCode,
@@ -531,22 +536,31 @@ export default function OrganizationManagementPage() {
       approvalManager: form.approvalManager,
       effectiveDate: form.effectiveDate,
       institutionNo: form.institutionNo,
+      company: form.company,
       remark: form.remark,
       status: form.status,
     });
+    if (modalMode === 'edit' && activeOrg?.code && nextCode && activeOrg.code !== nextCode) {
+      await deleteOrganization(activeOrg.code);
+    }
     setModalMode(null);
-    setNotice('保存成功，组织架构已刷新');
+    setNotice('保存成功，组织、员工、考勤、薪酬引用的组织口径已刷新');
     await loadRows();
   };
 
   const deleteOrg = async (org: OrganizationRecord) => {
-    if (!org.source?.includes('本地')) {
-      setNotice('真实导出的组织不能在本地删除；本地新增组织可以删除。');
-      return;
-    }
     await deleteOrganization(org.code);
     setRowMenuCode('');
-    setNotice('删除成功，组织架构已刷新');
+    setSelectedCodes(current => current.filter(code => code !== org.code));
+    setNotice(`已删除/隐藏 ${org.name}，员工、考勤、薪酬关联会按剩余组织重新计算`);
+    await loadRows();
+  };
+
+  const disableOrg = async (org: OrganizationRecord) => {
+    const nextStatus = org.status && !org.status.includes('停用') ? '已停用' : '生效中';
+    await saveOrganization({ ...org, status: nextStatus });
+    setRowMenuCode('');
+    setNotice(`${org.name} 已${nextStatus === '已停用' ? '停用' : '启用'}，下游关联会按当前组织状态刷新`);
     await loadRows();
   };
 
@@ -558,8 +572,31 @@ export default function OrganizationManagementPage() {
     setExpandedCodes(current => ({ ...current, [code]: !current[code] }));
   };
 
-  const bulkAction = (label: string) => {
-    setNotice(selectedCodes.length ? `${label}：已选择 ${selectedCodes.length} 个组织` : `${label}：请先勾选组织`);
+  const bulkDisableOrganizations = async () => {
+    const selectedRows = rows.filter(row => selectedCodes.includes(row.code));
+    if (!selectedRows.length) {
+      showSelectionTip('批量停用');
+      return;
+    }
+    for (const row of selectedRows) {
+      await saveOrganization({ ...row, status: '已停用' });
+    }
+    setNotice(`已批量停用 ${selectedRows.length} 个组织，员工、考勤、薪酬关联会按当前组织状态刷新`);
+    await loadRows();
+  };
+
+  const bulkDeleteOrganizations = async () => {
+    const selectedRows = rows.filter(row => selectedCodes.includes(row.code));
+    if (!selectedRows.length) {
+      showSelectionTip('批量删除');
+      return;
+    }
+    for (const row of selectedRows) {
+      await deleteOrganization(row.code);
+    }
+    setSelectedCodes([]);
+    setNotice(`已批量删除/隐藏 ${selectedRows.length} 个组织，下游关联会按剩余组织重新计算`);
+    await loadRows();
   };
 
   const openToolbarModal = (mode: ModalMode) => {
@@ -664,6 +701,7 @@ export default function OrganizationManagementPage() {
   };
 
   const openPositionEditor = (position?: OrganizationPositionRecord) => {
+    setPositionOriginalKey(position ? String(position.code || position.name || '') : '');
     setPositionDraft({
       code: position?.code || '',
       name: position?.name || '',
@@ -690,8 +728,13 @@ export default function OrganizationManagementPage() {
       orgs: splitValueList(positionDraft.orgText),
       companies: splitValueList(positionDraft.companyText),
     } as Partial<OrganizationPositionRecord>);
+    const nextKey = positionDraft.code.trim() || positionDraft.name.trim();
+    if (positionOriginalKey && nextKey && positionOriginalKey !== nextKey) {
+      await deleteOrganizationPosition(positionOriginalKey);
+    }
     setModalMode(null);
-    setNotice('岗位已保存，并重新读取岗位真实数据');
+    setPositionOriginalKey('');
+    setNotice('岗位已保存，员工、考勤、薪酬引用的岗位口径已刷新');
     await loadPositions();
   };
 
@@ -716,6 +759,22 @@ export default function OrganizationManagementPage() {
     await loadPositions();
   };
 
+  const bulkDisablePositions = async (positions: OrganizationPositionRecord[]) => {
+    for (const position of positions) {
+      await saveOrganizationPosition({ ...position, status: '已停用' });
+    }
+    setNotice(`已批量停用 ${positions.length} 个岗位，员工、考勤、薪酬关联会按当前岗位状态刷新`);
+    await loadPositions();
+  };
+
+  const bulkDeletePositions = async (positions: OrganizationPositionRecord[]) => {
+    for (const position of positions) {
+      await deleteOrganizationPosition(position.code || position.name);
+    }
+    setNotice(`已批量删除/隐藏 ${positions.length} 个岗位，员工、考勤、薪酬关联会按剩余岗位重新计算`);
+    await loadPositions();
+  };
+
   const importPositions = async (importRows: Partial<OrganizationPositionRecord>[]) => {
     let saved = 0;
     for (const row of importRows) {
@@ -724,6 +783,39 @@ export default function OrganizationManagementPage() {
       saved += 1;
     }
     await loadPositions();
+    return saved;
+  };
+
+  const importRanks = async (importRows: Partial<OrganizationRankRecord>[]) => {
+    let saved = 0;
+    for (const row of importRows) {
+      if (!row.code || !row.name) continue;
+      await saveOrganizationRank(row);
+      saved += 1;
+    }
+    await loadRanks();
+    return saved;
+  };
+
+  const importOrganizations = async (importRows: Partial<OrganizationRecord>[]) => {
+    let saved = 0;
+    const currentByCode = new Map(rows.map(row => [row.code, row]));
+    for (const row of importRows) {
+      if (!row.name) continue;
+      const parent = currentByCode.get(String(row.parentCode || ''));
+      const name = String(row.name || '').trim();
+      const fullPath = row.fullPath && String(row.fullPath).includes('/')
+        ? String(row.fullPath)
+        : parent
+          ? `${parent.fullPath}/${name}`
+          : name === '上海拉迷家具有限公司'
+            ? name
+            : `上海拉迷家具有限公司/${name}`;
+      const result = await saveOrganization({ ...row, name, fullPath });
+      if (result.row?.code) currentByCode.set(result.row.code, { ...(result.row as OrganizationRecord), id: currentByCode.size + 1 });
+      saved += 1;
+    }
+    await loadRows();
     return saved;
   };
 
@@ -776,14 +868,10 @@ export default function OrganizationManagementPage() {
   return (
     <div style={{ flex: 1, minHeight: '100%', background: colors.appBg, display: 'grid', gridTemplateColumns: '146px minmax(0,1fr)', overflow: 'hidden' }}>
       <aside style={{ background: colors.sidebarBg, borderRight: `1px solid ${colors.sidebarBorder}`, color: colors.sidebarText, overflowY: 'auto' }}>
-        <SideGroup active={['organizations', 'architecture', 'architectureSort', 'changeRecords', 'snapshots', 'disabledOrgs', 'orgTypes'].includes(pageMode)} />
+        <SideGroup active={['organizations', 'changeRecords', 'snapshots', 'disabledOrgs', 'orgTypes'].includes(pageMode)} />
         <SideItem active={['organizations', 'changeRecords', 'snapshots', 'disabledOrgs', 'orgTypes'].includes(pageMode)} label="组织架构" onClick={() => openSubPage('organizations')} />
-        <SideItem active={pageMode === 'architecture' || pageMode === 'architectureSort'} label="架构图" onClick={() => openSubPage('architecture')} />
-        <SideGroup active={pageMode === 'staffing'} icon={<Columns3 size={17} />} label="编制管理" onClick={() => openSubPage('staffing')} />
         <SideGroup active={pageMode === 'positions' || pageMode === 'positionImport'} icon={<Building2 size={17} />} label="岗位管理" onClick={() => openSubPage('positions')} />
         <SideGroup active={pageMode === 'ranks'} icon={<ListTree size={17} />} label="职级管理" onClick={() => openSubPage('ranks')} />
-        <SideGroup active={pageMode === 'jobTitles'} icon={<BriefcaseBusiness size={17} />} label="职位管理" onClick={() => openSubPage('jobTitles')} />
-        <SideGroup active={pageMode === 'settings'} icon={<Settings size={17} />} label="组织管理设置" onClick={() => openSubPage('settings')} />
       </aside>
 
       <section style={{ minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -805,11 +893,11 @@ export default function OrganizationManagementPage() {
                   ) : null}
                 </div>
                 <div style={{ position: 'relative' }}>
-                  <Button onClick={() => showSelectionTip('批量停用')}>批量停用</Button>
+                  <Button onClick={bulkDisableOrganizations}>批量停用</Button>
                   {bulkTip === '批量停用' ? <FloatingTip>请先勾选要停用的组织</FloatingTip> : null}
                 </div>
                 <div style={{ position: 'relative' }}>
-                  <Button onClick={() => showSelectionTip('批量删除')}>批量删除</Button>
+                  <Button onClick={bulkDeleteOrganizations}>批量删除</Button>
                   {bulkTip === '批量删除' ? <FloatingTip>请先勾选要删除的组织</FloatingTip> : null}
                 </div>
                 <div ref={moreMenuRef} style={{ position: 'relative' }}>
@@ -824,7 +912,6 @@ export default function OrganizationManagementPage() {
                 </div>
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
                   <SearchBox value={query} onChange={setQuery} />
-                  <Button onClick={() => openSubPage('settings')}><Settings size={14} />组织基础设置</Button>
                   <SegmentedIcon active={viewMode === 'table'} onClick={() => setViewMode('table')}><Grid2X2 size={14} /></SegmentedIcon>
                   <SegmentedIcon active={viewMode === 'card'} onClick={() => setViewMode('card')}><Columns3 size={14} /></SegmentedIcon>
                 </div>
@@ -832,6 +919,7 @@ export default function OrganizationManagementPage() {
 
               {notice ? <div style={{ color: colors.primary, fontSize: 12, padding: '0 0 8px' }}>{notice}</div> : null}
               {error ? <div style={{ color: colors.primary, fontSize: 12, padding: '0 0 8px' }}>真实数据连接失败：{error}</div> : null}
+              <DomainLinkagePanel focus="organization" />
 
               {loading ? (
                 <div style={{ color: colors.textMuted, fontSize: 13, padding: 18 }}>正在加载真实组织架构...</div>
@@ -890,12 +978,12 @@ export default function OrganizationManagementPage() {
                                   <MoreHorizontal size={17} />
                                 </button>
                                 {rowMenuCode === row.code ? (
-                                  <DropMenu right={0} top={24}>
-                                    <DropItem label="新增组织" onClick={() => openAdd(row)} />
-                                    <DropItem label="停用" onClick={() => setNotice(`${row.name} 已加入停用操作测试队列`)} />
-                                    <DropItem label="删除" onClick={() => deleteOrg(row)} />
-                                    <DropItem label="调整排序" onClick={() => setNotice(`${row.name} 可进行排序调整`)} />
-                                  </DropMenu>
+                                    <DropMenu right={0} top={24}>
+                                      <DropItem label="新增组织" onClick={() => openAdd(row)} />
+                                    <DropItem label={row.status && row.status.includes('停用') ? '启用' : '停用'} onClick={() => disableOrg(row)} />
+                                      <DropItem label="删除" onClick={() => deleteOrg(row)} />
+                                      <DropItem label="调整排序" onClick={() => setNotice(`${row.name} 可进行排序调整`)} />
+                                    </DropMenu>
                                 ) : null}
                               </div>
                             </Cell>
@@ -921,11 +1009,11 @@ export default function OrganizationManagementPage() {
           ) : pageMode === 'architectureSort' ? (
             <ArchitectureSortPage rows={rows} loading={loading} error={error} onBack={() => openSubPage('architecture')} onSave={() => { setNotice('架构图排序已保存到当前会话'); openSubPage('architecture'); }} />
           ) : pageMode === 'positions' ? (
-            <PositionManagementPage rows={positionRows} loading={positionsLoading} error={positionsError} onReload={loadPositions} onCreate={() => openPositionEditor()} onImport={() => openSubPage('positionImport')} onEdit={openPositionEditor} onDisable={disablePosition} onDelete={openPositionDelete} onNotice={setNotice} />
+            <PositionManagementPage rows={positionRows} loading={positionsLoading} error={positionsError} onReload={loadPositions} onCreate={() => openPositionEditor()} onImport={() => openSubPage('positionImport')} onEdit={openPositionEditor} onDisable={disablePosition} onDelete={openPositionDelete} onBulkDisable={bulkDisablePositions} onBulkDelete={bulkDeletePositions} onNotice={setNotice} />
           ) : pageMode === 'positionImport' ? (
             <PositionImportPage rows={positionRows} onBack={() => openSubPage('positions')} onImportRows={importPositions} onDone={(message) => { setNotice(message); openSubPage('positions'); loadPositions(); }} />
           ) : pageMode === 'ranks' ? (
-            <RankManagementPage rows={rankRows} loading={ranksLoading} error={ranksError} onReload={loadRanks} onCreate={() => openRankEditor()} onEdit={openRankEditor} onDisable={disableRank} onDelete={openRankDelete} onNotice={setNotice} />
+            <RankManagementPage rows={rankRows} loading={ranksLoading} error={ranksError} onReload={loadRanks} onCreate={() => openRankEditor()} onImportRows={importRanks} onEdit={openRankEditor} onDisable={disableRank} onDelete={openRankDelete} onNotice={setNotice} />
           ) : pageMode === 'jobTitles' ? (
             <JobTitleManagementPage />
           ) : pageMode === 'staffing' ? (
@@ -959,23 +1047,32 @@ export default function OrganizationManagementPage() {
         />
       ) : null}
 
-      {modalMode === 'importOrg' ? <ImportOrganizationModal onClose={() => setModalMode(null)} onDone={(message) => { setModalMode(null); setNotice(message); }} /> : null}
+      {modalMode === 'importOrg' ? <ImportOrganizationModal onImportRows={importOrganizations} onClose={() => setModalMode(null)} onDone={(message) => { setModalMode(null); setNotice(message); }} /> : null}
       {modalMode === 'exportOrg' ? (
         <OrganizationSelectModal
           rows={rows}
           selectedCodes={exportSelectedCodes}
           onChange={setExportSelectedCodes}
           onClose={() => setModalMode(null)}
-          onConfirm={() => {
+          onConfirm={async () => {
             const exportRows = exportSelectedCodes.length ? rows.filter(row => exportSelectedCodes.includes(row.code)) : rows;
-            downloadTextFile('组织架构信息导出.csv', toOrgCsv(exportRows));
-            setSelectedCodes(exportSelectedCodes);
-            setModalMode(null);
-            setNotice(exportSelectedCodes.length ? `已选择 ${exportSelectedCodes.length} 个组织用于导出` : '未选择组织，默认导出全部组织');
+            const ok = await downloadAttendanceXlsx({
+              fileName: `组织架构-${exportSelectedCodes.length ? '选中记录' : '全部组织'}.xlsx`,
+              sheetName: '组织架构',
+              headers: ORG_EXPORT_HEADERS,
+              rows: toOrgExportRows(exportRows),
+              emptyMessage: '暂无可导出的组织数据',
+              saveAs: true,
+            });
+            if (ok) {
+              setSelectedCodes(exportSelectedCodes);
+              setModalMode(null);
+              setNotice(exportSelectedCodes.length ? `已导出选中组织 ${exportRows.length} 条` : `已导出全部组织 ${exportRows.length} 条`);
+            }
           }}
         />
       ) : null}
-      {modalMode === 'batchEdit' ? <BatchEditImportModal onClose={() => setModalMode(null)} onDone={(message) => { setModalMode(null); setNotice(message); }} /> : null}
+      {modalMode === 'batchEdit' ? <BatchEditImportModal rows={rows} onImportRows={importOrganizations} onClose={() => setModalMode(null)} onDone={(message) => { setModalMode(null); setNotice(message); }} /> : null}
       {modalMode === 'changeDetail' && activeChange ? <ChangeDetailModal record={activeChange} onClose={() => setModalMode(null)} /> : null}
       {modalMode === 'fieldDrawer' ? <FieldDrawer title={fieldDrawerTitle} field={fieldDraft} onChange={(field) => setFieldDraft(field)} onClose={() => setModalMode(null)} onSave={saveFieldDraft} /> : null}
       {modalMode === 'orgTypeEdit' && orgTypeDraft ? <OrganizationTypeEditModal type={orgTypeDraft} onChange={setOrgTypeDraft} onClose={() => setModalMode(null)} onSave={saveOrgTypeDraft} /> : null}
@@ -1013,10 +1110,23 @@ function SideItem({ active, label, onClick }: { active?: boolean; label: string;
   );
 }
 
-function Button({ children, primary, onClick }: { children: React.ReactNode; primary?: boolean; onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void }) {
+function Button({
+  children,
+  primary,
+  exportButton,
+  disabled,
+  onClick,
+}: {
+  children: React.ReactNode;
+  primary?: boolean;
+  exportButton?: boolean;
+  disabled?: boolean;
+  onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
+}) {
   const { colors } = useTheme();
+  const isPrimary = Boolean(primary || exportButton);
   return (
-    <button type="button" onClick={onClick} style={{ height: 32, padding: '0 14px', borderRadius: 4, border: primary ? 'none' : `1px solid ${colors.inputBorder}`, background: primary ? colors.primary : colors.inputBg, color: primary ? colors.primaryText : colors.text, fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+    <button type="button" disabled={disabled} onClick={onClick} style={{ height: 32, padding: exportButton ? '0 10px' : '0 14px', borderRadius: 4, border: isPrimary ? 'none' : `1px solid ${colors.inputBorder}`, background: disabled ? colors.inputBorder : isPrimary ? colors.primary : colors.inputBg, color: disabled ? colors.textMuted : isPrimary ? colors.primaryText : colors.text, fontSize: exportButton ? 13 : 13, fontWeight: exportButton ? 600 : 400, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: disabled ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', opacity: disabled ? 0.72 : 1 }}>
       {children}
     </button>
   );
@@ -1050,12 +1160,12 @@ function SegmentedIcon({ children, active, onClick }: { children: React.ReactNod
 
 function Header({ children, width }: { children?: React.ReactNode; width: number }) {
   const { colors } = useTheme();
-  return <th style={{ width, height: 38, padding: '0 12px', textAlign: 'left', color: colors.text, fontSize: 13, fontWeight: 600, borderRight: `1px solid ${colors.tableBorder}` }}>{children}</th>;
+  return <th style={{ width, minHeight: 38, padding: '8px 12px', textAlign: 'left', color: colors.text, fontSize: 13, fontWeight: 600, borderRight: `1px solid ${colors.tableBorder}`, whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.35, verticalAlign: 'middle' }}>{children}</th>;
 }
 
 function StickyHeader({ children, width }: { children?: React.ReactNode; width: number }) {
   const { colors } = useTheme();
-  return <th style={{ width, height: 38, padding: '0 12px', textAlign: 'left', color: colors.text, fontSize: 13, fontWeight: 600, borderLeft: `1px solid ${colors.tableBorder}`, position: 'sticky', right: 0, zIndex: 4, background: colors.tableHeaderBg, boxShadow: '-8px 0 14px rgba(31,43,69,0.08)' }}>{children}</th>;
+  return <th style={{ width, minHeight: 38, padding: '8px 12px', textAlign: 'left', color: colors.text, fontSize: 13, fontWeight: 600, borderLeft: `1px solid ${colors.tableBorder}`, position: 'sticky', right: 0, zIndex: 4, background: colors.tableHeaderBg, boxShadow: '-8px 0 14px rgba(31,43,69,0.08)', whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.35, verticalAlign: 'middle' }}>{children}</th>;
 }
 
 function Cell({ children, center, wrap }: { children?: React.ReactNode; center?: boolean; wrap?: boolean }) {
@@ -1152,14 +1262,28 @@ function RadioCard({ checked, title, desc, onClick }: { checked: boolean; title:
   );
 }
 
-function ImportOrganizationModal({ onClose, onDone }: { onClose: () => void; onDone: (message: string) => void }) {
+function ImportOrganizationModal({ onImportRows, onClose, onDone }: { onImportRows: (rows: Partial<OrganizationRecord>[]) => Promise<number>; onClose: () => void; onDone: (message: string) => void }) {
   const { colors } = useTheme();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [mode, setMode] = useState<'full' | 'normal'>('full');
-  const handleFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const [importing, setImporting] = useState(false);
+  const handleFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    onDone(`已选择 ${file.name}，组织导入任务已进入校验流程`);
+    setImporting(true);
+    try {
+      const parsedRows = await parseOrganizationWorkbook(file, mode);
+      if (!parsedRows.length) {
+        onDone(`${file.name} 未识别到可导入的组织数据`);
+        return;
+      }
+      const saved = await onImportRows(parsedRows);
+      onDone(`已导入 ${saved} 条组织数据，组织、员工、考勤、薪酬关联口径已刷新。`);
+    } catch (err: any) {
+      onDone(`组织导入失败：${String(err?.message || err)}`);
+    } finally {
+      setImporting(false);
+    }
   };
   return (
     <ModalShell title="导入组织" width={596} onClose={onClose}>
@@ -1177,7 +1301,7 @@ function ImportOrganizationModal({ onClose, onDone }: { onClose: () => void; onD
         </div>
         <input ref={fileRef} type="file" accept=".xls,.xlsx,.csv" onChange={handleFile} style={{ display: 'none' }} />
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
-          <Button primary onClick={() => fileRef.current?.click()}>选择文件导入</Button>
+          <Button primary onClick={() => fileRef.current?.click()}>{importing ? '导入中...' : '选择文件导入'}</Button>
         </div>
         <div style={{ marginTop: 14, textAlign: 'center', color: colors.textMuted, fontSize: 12 }}>文件不能超过5M，支持Excel2003以上版本</div>
       </div>
@@ -1185,27 +1309,41 @@ function ImportOrganizationModal({ onClose, onDone }: { onClose: () => void; onD
   );
 }
 
-function BatchEditImportModal({ onClose, onDone }: { onClose: () => void; onDone: (message: string) => void }) {
+function BatchEditImportModal({ rows, onImportRows, onClose, onDone }: { rows: OrganizationRecord[]; onImportRows: (rows: Partial<OrganizationRecord>[]) => Promise<number>; onClose: () => void; onDone: (message: string) => void }) {
   const { colors } = useTheme();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [showHelp, setShowHelp] = useState(true);
-  const handleFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const [importing, setImporting] = useState(false);
+  const handleFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    onDone(`已选择 ${file.name}，批量修改导入任务已进入校验流程`);
+    setImporting(true);
+    try {
+      const parsedRows = await parseOrganizationWorkbook(file, 'normal');
+      if (!parsedRows.length) {
+        onDone(`${file.name} 未识别到可修改的组织数据`);
+        return;
+      }
+      const saved = await onImportRows(parsedRows);
+      onDone(`已批量修改 ${saved} 条组织数据，组织、员工、考勤、薪酬关联口径已刷新。`);
+    } catch (err: any) {
+      onDone(`批量修改导入失败：${String(err?.message || err)}`);
+    } finally {
+      setImporting(false);
+    }
   };
   return (
     <ModalShell title="导入修改" width={596} onClose={onClose}>
       <div style={{ padding: '46px 28px 26px', minHeight: 300, color: colors.text, fontSize: 13 }}>
         <div style={{ textAlign: 'center', lineHeight: 2 }}>
           导出后，在表格中批量修改并保存，完成后点击下方再次导入
-          <button type="button" onClick={() => downloadTextFile('组织批量修改模板.csv', '组织编码,组织名称,组织类型,组织负责人,审批主管,机构号,备注\n')} style={linkButton(colors)}>
+          <button type="button" onClick={() => downloadTextFile('组织批量修改模板.csv', toOrgCsv(rows))} style={linkButton(colors)}>
             <Download size={13} />导出
           </button>
         </div>
         <input ref={fileRef} type="file" accept=".xls,.xlsx,.csv" onChange={handleFile} style={{ display: 'none' }} />
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
-          <Button primary onClick={() => fileRef.current?.click()}>选择文件导入</Button>
+          <Button primary onClick={() => fileRef.current?.click()}>{importing ? '导入中...' : '选择文件导入'}</Button>
         </div>
         <div style={{ marginTop: 14, textAlign: 'center', color: colors.textMuted, fontSize: 12 }}>文件不能超过5M，支持Excel2003以上版本</div>
         {showHelp ? (
@@ -1224,10 +1362,44 @@ function BatchEditImportModal({ onClose, onDone }: { onClose: () => void; onDone
   );
 }
 
-function OrganizationSelectModal({ rows, selectedCodes, onChange, onClose, onConfirm }: { rows: OrganizationRecord[]; selectedCodes: string[]; onChange: (codes: string[]) => void; onClose: () => void; onConfirm: () => void }) {
+async function parseOrganizationWorkbook(file: File, mode: 'full' | 'normal'): Promise<Partial<OrganizationRecord>[]> {
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+  const sheetName = workbook.SheetNames.find(name => name.includes('组织')) || workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  const matrix = XLSX.utils.sheet_to_json<Array<string | number | boolean | Date>>(sheet, { defval: '', raw: false, header: 1 });
+  const headerIndex = Math.max(0, matrix.findIndex(row => row.some(cell => String(cell).includes('组织名称'))));
+  const headers = (matrix[headerIndex] || []).map(cell => String(cell || '').trim());
+  return matrix.slice(headerIndex + 1).map(row => {
+    const code = workbookCell(headers, row, ['组织编码', '编码']);
+    const name = workbookCell(headers, row, ['组织名称', '名称']);
+    const parentCode = workbookCell(headers, row, ['上级组织编码', '上级编码']);
+    const fullPathFromFile = workbookCell(headers, row, ['组织全路径', '全路径', '部门全路径']);
+    if (!name && !code && !fullPathFromFile) return null;
+    const finalName = name || fullPathFromFile.split('/').filter(Boolean).pop() || '';
+    const fullPath = mode === 'full'
+      ? (fullPathFromFile || `上海拉迷家具有限公司/${finalName}`)
+      : (fullPathFromFile || (parentCode ? finalName : `上海拉迷家具有限公司/${finalName}`));
+    return {
+      code,
+      name: finalName,
+      fullPath,
+      parentCode,
+      orgType: workbookCell(headers, row, ['组织类型', '类型']) || '部门',
+      leader: workbookCell(headers, row, ['组织负责人', '负责人']),
+      approvalManager: workbookCell(headers, row, ['审批主管']),
+      institutionNo: workbookCell(headers, row, ['机构号']),
+      effectiveDate: workbookCell(headers, row, ['生效日期']) || today(),
+      remark: workbookCell(headers, row, ['备注']),
+      status: workbookCell(headers, row, ['状态']) || '生效中',
+    } as Partial<OrganizationRecord>;
+  }).filter((row): row is Partial<OrganizationRecord> => Boolean(row?.name));
+}
+
+function OrganizationSelectModal({ rows, selectedCodes, onChange, onClose, onConfirm }: { rows: OrganizationRecord[]; selectedCodes: string[]; onChange: (codes: string[]) => void; onClose: () => void; onConfirm: () => void | Promise<void> }) {
   const { colors } = useTheme();
   const [search, setSearch] = useState('');
-  const [showChildren, setShowChildren] = useState(false);
+  const [showChildren, setShowChildren] = useState(true);
   const selectedSet = useMemo(() => new Set(selectedCodes), [selectedCodes]);
   const root = rows.find(row => !row.parentCode) || rows[0];
   const treeRows = useMemo(() => {
@@ -1248,7 +1420,7 @@ function OrganizationSelectModal({ rows, selectedCodes, onChange, onClose, onCon
     onChange(rows.map(row => row.code));
   };
   return (
-    <ModalShell title="选择组织" width={596} onClose={onClose} footer={<><Button onClick={onClose}>取消</Button><Button primary onClick={onConfirm}>确定</Button></>}>
+    <ModalShell title="选择组织" width={596} onClose={onClose} footer={<><Button onClick={onClose}>取消</Button><Button exportButton onClick={onConfirm}><Download size={14} />导出Excel</Button></>}>
       <div style={{ height: 404, display: 'grid', gridTemplateColumns: '1fr 1fr', color: colors.text, fontSize: 13 }}>
         <div style={{ padding: 14, borderRight: `1px solid ${colors.tableBorder}` }}>
           <div style={{ position: 'relative', marginBottom: 8 }}>
@@ -1439,8 +1611,9 @@ function OrganizationTypesPage({ types, onBack, onAdd, onReorder, onEdit, onTogg
   );
 }
 
-function RankManagementPage({ rows, loading, error, onReload, onCreate, onEdit, onDisable, onDelete, onNotice }: { rows: OrganizationRankRecord[]; loading: boolean; error: string; onReload: () => void; onCreate: () => void; onEdit: (row: OrganizationRankRecord) => void; onDisable: (row: OrganizationRankRecord) => void; onDelete: (row: OrganizationRankRecord) => void; onNotice: (message: string) => void }) {
+function RankManagementPage({ rows, loading, error, onReload, onCreate, onImportRows, onEdit, onDisable, onDelete, onNotice }: { rows: OrganizationRankRecord[]; loading: boolean; error: string; onReload: () => void; onCreate: () => void; onImportRows: (rows: Partial<OrganizationRankRecord>[]) => Promise<number>; onEdit: (row: OrganizationRankRecord) => void; onDisable: (row: OrganizationRankRecord) => void; onDelete: (row: OrganizationRankRecord) => void; onNotice: (message: string) => void }) {
   const { colors } = useTheme();
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [filters, setFilters] = useState({ code: '', name: '', statuses: ['已启用'] as string[], companies: [] as string[], grade: '', desc: '', minPeople: '', maxPeople: '', blankCode: false, blankName: false, blankGrade: false });
   const [selected, setSelected] = useState<number[]>([]);
   const [openDropdown, setOpenDropdown] = useState<'code' | 'name' | 'status' | 'grade' | null>(null);
@@ -1448,14 +1621,15 @@ function RankManagementPage({ rows, loading, error, onReload, onCreate, onEdit, 
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [sequenceQuery, setSequenceQuery] = useState('');
   const [activeSequence, setActiveSequence] = useState('全部');
+  const [importing, setImporting] = useState(false);
   const codeTokens = useMemo(() => filters.code.split(/[;；,\s]+/).map(item => item.trim()).filter(Boolean), [filters.code]);
   const nameTokens = useMemo(() => filters.name.split(/[;；,\s]+/).map(item => item.trim()).filter(Boolean), [filters.name]);
   const statusOptions = useMemo(() => uniqueValues(rows.map(row => row.status || '已启用'), ['已启用', '已停用']), [rows]);
   const companyOptions = useMemo(() => uniqueValues(rows.flatMap(row => splitValueList(row.company)), ['上海拉迷家具有限公司']), [rows]);
   const gradeOptions = useMemo(() => uniqueValues(rows.map(row => row.grade || '未填写'), ['未填写']), [rows]);
-  const sequenceOptions = useMemo(() => uniqueValues(rows.map(row => row.sequence || '未填写'), ['全部', '专业通道', '管理通道', '未填写']), [rows]);
+  const sequenceOptions = useMemo(() => uniqueValues(rows.map(row => sequenceBucket(row.sequence)), ['全部', '专业通道', '管理通道', '未填写']), [rows]);
   const filtered = useMemo(() => rows.filter(row => {
-    const sequence = row.sequence || '未填写';
+    const sequence = sequenceBucket(row.sequence);
     const grade = row.grade || '未填写';
     const count = Number(row.employeeCount ?? row.linkedEmployeeCount ?? 0);
     if (filters.blankCode && row.code) return false;
@@ -1490,14 +1664,40 @@ function RankManagementPage({ rows, loading, error, onReload, onCreate, onEdit, 
     setActiveSequence('全部');
   };
   const setValue = (key: keyof typeof filters, value: string | boolean | string[]) => setFilters(current => ({ ...current, [key]: value }));
+  const handleRankImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const parsedRows = await parseRankWorkbook(file);
+      if (!parsedRows.length) {
+        onNotice(`${file.name} 未识别到可导入的职级数据`);
+        return;
+      }
+      const saved = await onImportRows(parsedRows);
+      onNotice(`已导入 ${saved} 条职级数据，岗位、员工、薪酬职级口径已刷新`);
+    } catch (err: any) {
+      onNotice(`职级导入失败：${String(err?.message || err)}`);
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = '';
+    }
+  };
+  const handleRankExport = async () => {
+    const exportRows = selected.length ? filtered.filter(row => selected.includes(row.id)) : filtered;
+    const ok = await downloadAttendanceXlsx({
+      fileName: `职级管理-${selected.length ? '选中记录' : '筛选结果'}.xlsx`,
+      sheetName: '职级管理',
+      headers: RANK_EXPORT_HEADERS,
+      rows: toRankExportRows(exportRows),
+      emptyMessage: '暂无可导出的职级数据',
+      saveAs: true,
+    });
+    if (ok) onNotice(`已导出${selected.length ? '选中' : '当前筛选'}职级数据 ${exportRows.length} 条`);
+  };
 
   return (
     <div style={{ height: '100%', background: colors.cardBg, borderRadius: 8, border: `1px solid ${colors.cardBorder}`, padding: '12px 14px 0', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ height: 40, border: `1px solid ${colors.primary}`, background: colors.badgeBlueBg, color: colors.text, borderRadius: 4, display: 'flex', alignItems: 'center', padding: '0 12px', marginBottom: 12, gap: 8, flexShrink: 0 }}>
-        <InfoIcon size={15} color={colors.primary} />
-        <span style={{ flex: 1 }}>职级是将岗位划分为不同级别的一种分类方式，反映岗位在组织中的重要性和复杂性，通常用于确定员工的晋升路径和薪酬水平。</span>
-        <button type="button" onClick={() => onNotice('已关闭职级说明提示')} style={plainIconButton(colors.textMuted)}><X size={14} /></button>
-      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '72px 240px 72px 240px 72px 240px 72px 240px 72px 240px auto', gap: 10, alignItems: 'center', marginBottom: 10, color: colors.text, fontSize: 13, flexShrink: 0 }}>
         <span style={{ textAlign: 'right' }}>职级代码</span>
         <div style={{ position: 'relative' }}>
@@ -1538,20 +1738,14 @@ function RankManagementPage({ rows, loading, error, onReload, onCreate, onEdit, 
       ) : null}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexShrink: 0 }}>
         <Button primary onClick={onCreate}><Plus size={15} />新增职级</Button>
-        <Button onClick={() => onNotice('职级导入入口已点击，可继续使用当前 Excel 数据源验证字段结构')}>导入</Button>
-        <Button onClick={() => downloadTextFile('职级数据导出.csv', toRankCsv(filtered))}>导出</Button>
-        <Button onClick={() => onNotice(selected.length ? `已选择 ${selected.length} 个职级，可执行批量操作` : '请先勾选职级')}>批量操作 <ChevronDown size={13} /></Button>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <Button onClick={() => onNotice('管理岗位序列入口已点击，左侧序列与职级列表联动')}>管理岗位序列</Button>
-          <Button onClick={() => onNotice('职等设置入口已点击，当前 Excel 职等表为空')}>职等设置</Button>
-          <SegmentedIcon active={false} onClick={() => onNotice('已切换表格展示设置入口')}><ListTree size={15} /></SegmentedIcon>
-          <SegmentedIcon active={false} onClick={() => onNotice('字段配置入口已点击')}><Settings size={15} /></SegmentedIcon>
-        </div>
+        <input ref={importInputRef} type="file" accept=".xls,.xlsx,.csv" onChange={handleRankImport} style={{ display: 'none' }} />
+        <Button onClick={() => importInputRef.current?.click()}>{importing ? '导入中...' : '导入'}</Button>
+        <Button exportButton disabled={filtered.length === 0} onClick={handleRankExport}><Download size={14} />导出Excel</Button>
       </div>
       {error ? <div style={{ color: colors.primary, fontSize: 12, paddingBottom: 8 }}>真实职级数据连接失败：{error}</div> : null}
       <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '230px minmax(0,1fr)', border: `1px solid ${colors.tableBorder}`, overflow: 'hidden' }}>
         <aside style={{ borderRight: `1px solid ${colors.tableBorder}`, background: colors.cardBg, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div style={{ height: 38, padding: '0 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: colors.text, fontWeight: 700 }}>岗位序列/子序列 <SlidersHorizontal size={14} color={colors.textMuted} /></div>
+          <div style={{ height: 38, padding: '0 12px', display: 'flex', alignItems: 'center', color: colors.text, fontWeight: 700 }}>岗位序列/子序列</div>
           <div style={{ padding: '0 12px 10px', position: 'relative' }}><Search size={13} color={colors.textMuted} style={{ position: 'absolute', left: 22, top: 9 }} /><input value={sequenceQuery} onChange={event => setSequenceQuery(event.target.value)} placeholder="搜索序列名称" style={{ ...filterInput(colors), paddingLeft: 28 }} /></div>
           <div style={{ overflow: 'auto', padding: '0 8px 10px' }}>
             {sequenceList.slice(0, 24).map(option => (
@@ -1683,23 +1877,21 @@ function DisabledButton({ children }: { children: React.ReactNode }) {
   );
 }
 
-function PositionManagementPage({ rows, loading, error, onReload, onCreate, onImport, onEdit, onDisable, onDelete, onNotice }: { rows: OrganizationPositionRecord[]; loading: boolean; error: string; onReload: () => void; onCreate: () => void; onImport: () => void; onEdit: (row: OrganizationPositionRecord) => void; onDisable: (row: OrganizationPositionRecord) => void; onDelete: (row: OrganizationPositionRecord) => void; onNotice: (message: string) => void }) {
+function PositionManagementPage({ rows, loading, error, onReload, onCreate, onImport, onEdit, onDisable, onDelete, onBulkDisable, onBulkDelete, onNotice }: { rows: OrganizationPositionRecord[]; loading: boolean; error: string; onReload: () => void; onCreate: () => void; onImport: () => void; onEdit: (row: OrganizationPositionRecord) => void; onDisable: (row: OrganizationPositionRecord) => void; onDelete: (row: OrganizationPositionRecord) => void; onBulkDisable: (rows: OrganizationPositionRecord[]) => Promise<void>; onBulkDelete: (rows: OrganizationPositionRecord[]) => Promise<void>; onNotice: (message: string) => void }) {
   const { colors } = useTheme();
   const [filters, setFilters] = useState({ code: '', name: '', statuses: ['已启用'] as string[], parentNames: [] as string[], companies: [] as string[], orgs: [] as string[], blankCode: false });
   const [selected, setSelected] = useState<number[]>([]);
   const [openDropdown, setOpenDropdown] = useState<'code' | 'status' | 'parent' | 'org' | null>(null);
   const [showMore, setShowMore] = useState(false);
   const [showCompanyModal, setShowCompanyModal] = useState(false);
-  const [showColumnSettings, setShowColumnSettings] = useState(false);
   const [sequenceQuery, setSequenceQuery] = useState('');
   const [activeSequence, setActiveSequence] = useState('全部');
-  const [visibleColumns, setVisibleColumns] = useState<Record<PositionColumnKey, boolean>>(() => POSITION_COLUMNS.reduce((acc, column) => ({ ...acc, [column.key]: true }), {} as Record<PositionColumnKey, boolean>));
   const codeTokens = useMemo(() => filters.code.split(/[;；,\s]+/).map(item => item.trim()).filter(Boolean), [filters.code]);
   const statusOptions = useMemo(() => uniqueValues(rows.map(row => row.status || '已启用'), ['已启用', '已停用']), [rows]);
   const parentOptions = useMemo(() => uniqueValues(rows.map(row => row.parentName || '未填写')), [rows]);
   const companyOptions = useMemo(() => uniqueValues(rows.flatMap(row => splitValueList(row.companyText)), ['上海拉迷家具有限公司']), [rows]);
   const orgOptions = useMemo(() => uniqueValues(rows.flatMap(row => splitValueList(row.orgText)), ['未填写']), [rows]);
-  const sequenceOptions = useMemo(() => uniqueValues(rows.map(row => row.sequence || '未填写'), ['全部', '未填写', '专业通道', '管理通道']), [rows]);
+  const sequenceOptions = useMemo(() => uniqueValues(rows.map(row => sequenceBucket(row.sequence)), ['全部', '专业通道', '管理通道', '未填写']), [rows]);
   const filtered = useMemo(() => rows.filter(row => {
     if (filters.blankCode && row.code) return false;
     if (codeTokens.length && !codeTokens.some(token => row.code.includes(token))) return false;
@@ -1715,7 +1907,7 @@ function PositionManagementPage({ rows, loading, error, onReload, onCreate, onIm
         return false;
       }
     }
-    if (activeSequence !== '全部' && (row.sequence || '未填写') !== activeSequence) return false;
+    if (activeSequence !== '全部' && sequenceBucket(row.sequence) !== activeSequence) return false;
     return true;
   }), [activeSequence, codeTokens, filters, rows]);
   const pageRows = filtered.slice(0, 20);
@@ -1735,18 +1927,25 @@ function PositionManagementPage({ rows, loading, error, onReload, onCreate, onIm
       return { ...current, [key]: list.includes(value) ? list.filter(item => item !== value) : [...list, value] };
     });
   };
-  const visibleColumnDefs = POSITION_COLUMNS.filter(column => visibleColumns[column.key]);
+  const visibleColumnDefs = POSITION_COLUMNS;
   const tableMinWidth = 42 + visibleColumnDefs.reduce((sum, column) => sum + column.width, 0);
   const sequenceList = sequenceOptions.filter(item => !sequenceQuery.trim() || item.includes(sequenceQuery.trim()));
+  const handlePositionExport = async () => {
+    const exportRows = selected.length ? filtered.filter(row => selected.includes(row.id)) : filtered;
+    const ok = await downloadAttendanceXlsx({
+      fileName: `岗位管理-${selected.length ? '选中记录' : '筛选结果'}.xlsx`,
+      sheetName: '岗位管理',
+      headers: POSITION_EXPORT_HEADERS,
+      rows: toPositionExportRows(exportRows),
+      emptyMessage: '暂无可导出的岗位数据',
+      saveAs: true,
+    });
+    if (ok) onNotice(`已导出${selected.length ? '选中' : '当前筛选'}岗位数据 ${exportRows.length} 条`);
+  };
 
   return (
     <div style={{ height: '100%', background: colors.cardBg, borderRadius: 8, border: `1px solid ${colors.cardBorder}`, padding: '12px 14px 0', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ height: 40, border: `1px solid ${colors.primary}`, background: colors.badgeBlueBg, color: colors.text, borderRadius: 4, display: 'flex', alignItems: 'center', padding: '0 12px', marginBottom: 12, gap: 8, flexShrink: 0 }}>
-        <InfoIcon size={15} color={colors.primary} />
-        <span style={{ flex: 1 }}>岗位是指在企业组织中，根据公司和部门的设置，由一个特定的员工在特定时间内承担的一个或多个任务的集合。岗位通常与具体人员结合，强调职责的明确性和唯一性。</span>
-        <button type="button" onClick={() => onNotice('已关闭岗位说明提示')} style={plainIconButton(colors.textMuted)}><X size={14} /></button>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '72px 240px 72px 240px 72px 240px 72px 240px 72px 240px auto', gap: 10, alignItems: 'center', marginBottom: 10, color: colors.text, fontSize: 13, flexShrink: 0 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '72px minmax(180px, 240px) 72px minmax(180px, 240px) 72px minmax(180px, 240px)', gap: 10, alignItems: 'center', marginBottom: 10, color: colors.text, fontSize: 13, flexShrink: 0 }}>
         <span style={{ textAlign: 'right' }}>岗位编码</span>
         <div style={{ position: 'relative' }}>
           <input value={filters.code} onFocus={() => setOpenDropdown('code')} onChange={event => setValue('code', event.target.value)} placeholder="多个用；号隔开，支持Excel复制" style={filterInput(colors)} />
@@ -1786,18 +1985,12 @@ function PositionManagementPage({ rows, loading, error, onReload, onCreate, onIm
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexShrink: 0 }}>
         <Button primary onClick={onCreate}><Plus size={15} />新增岗位</Button>
         <Button onClick={onImport}>导入</Button>
-        <Button onClick={() => downloadTextFile('岗位数据导出.csv', toPositionCsv(filtered))}>导出</Button>
-        <Button onClick={() => onNotice(selected.length ? `已选择 ${selected.length} 个岗位，可执行批量操作` : '请先勾选岗位')}>批量操作 <ChevronDown size={13} /></Button>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, position: 'relative' }}>
-          <Button onClick={() => onNotice('岗位序列管理入口已点击')}>管理岗位序列</Button>
-          <SegmentedIcon active={showColumnSettings} onClick={() => setShowColumnSettings(value => !value)}><SlidersHorizontal size={15} /></SegmentedIcon>
-          {showColumnSettings ? <PositionColumnSettingsPanel value={visibleColumns} onChange={setVisibleColumns} onClose={() => setShowColumnSettings(false)} /> : null}
-        </div>
+        <Button exportButton disabled={filtered.length === 0} onClick={handlePositionExport}><Download size={14} />导出Excel</Button>
       </div>
       {error ? <div style={{ color: colors.primary, fontSize: 12, paddingBottom: 8 }}>真实岗位数据连接失败：{error}</div> : null}
       <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '230px minmax(0,1fr)', border: `1px solid ${colors.tableBorder}`, overflow: 'hidden' }}>
         <aside style={{ borderRight: `1px solid ${colors.tableBorder}`, background: colors.cardBg, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div style={{ height: 38, padding: '0 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: colors.text, fontWeight: 700 }}>岗位序列/子序列 <SlidersHorizontal size={14} color={colors.textMuted} /></div>
+          <div style={{ height: 38, padding: '0 12px', display: 'flex', alignItems: 'center', color: colors.text, fontWeight: 700 }}>岗位序列/子序列</div>
           <div style={{ padding: '0 12px 10px', position: 'relative' }}><Search size={13} color={colors.textMuted} style={{ position: 'absolute', left: 22, top: 9 }} /><input value={sequenceQuery} onChange={event => setSequenceQuery(event.target.value)} placeholder="搜索序列名称" style={{ ...filterInput(colors), paddingLeft: 28 }} /></div>
           <div style={{ overflow: 'auto', padding: '0 8px 10px' }}>
             {sequenceList.slice(0, 24).map(option => (
@@ -2106,6 +2299,31 @@ async function parsePositionWorkbook(file: File, separator: string, ignoreBlank:
   }).filter((row): row is Partial<OrganizationPositionRecord> => Boolean(row?.name));
 }
 
+async function parseRankWorkbook(file: File): Promise<Partial<OrganizationRankRecord>[]> {
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+  const sheetName = workbook.SheetNames.find(name => name.includes('职级')) || workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  const matrix = XLSX.utils.sheet_to_json<Array<string | number | boolean | Date>>(sheet, { defval: '', raw: false, header: 1 });
+  const headerIndex = Math.max(0, matrix.findIndex(row => row.some(cell => String(cell).includes('职级代码')) || row.some(cell => String(cell).includes('职级名称'))));
+  const headers = (matrix[headerIndex] || []).map(cell => String(cell || '').trim());
+  return matrix.slice(headerIndex + 1).map(row => {
+    const code = workbookCell(headers, row, ['职级代码', '代码']);
+    const name = workbookCell(headers, row, ['职级名称', '名称']);
+    if (!code && !name) return null;
+    return {
+      sequence: workbookCell(headers, row, ['岗位序列名称', '岗位序列']),
+      subSequence: workbookCell(headers, row, ['岗位子序列名称', '岗位子序列']),
+      company: workbookCell(headers, row, ['适用公司', '公司']),
+      code,
+      name,
+      grade: workbookCell(headers, row, ['职等']),
+      desc: workbookCell(headers, row, ['职级描述', '描述']),
+      status: workbookCell(headers, row, ['职级状态', '状态']) || '已启用',
+    } as Partial<OrganizationRankRecord>;
+  }).filter((row): row is Partial<OrganizationRankRecord> => Boolean(row?.code || row?.name));
+}
+
 function workbookCell(headers: string[], row: Array<string | number | boolean | Date>, aliases: string[]) {
   const index = headers.findIndex(header => aliases.some(alias => header.includes(alias)));
   return index >= 0 ? text(row[index], '') : '';
@@ -2124,6 +2342,11 @@ function splitImportedPath(value: string, delimiter: string) {
     return splitValueList(source);
   }
   return source.split(delimiter).map(item => item.trim()).filter(Boolean);
+}
+
+function sequenceBucket(value?: string) {
+  const textValue = String(value || '').trim();
+  return !textValue || textValue === '-' ? '未填写' : textValue;
 }
 
 function ImportStep({ active, number, label }: { active?: boolean; number: string; label: string }) {
@@ -2273,9 +2496,11 @@ function DataMockCard({ title, rows }: { title: string; rows: string[][] }) {
   );
 }
 
-function toPositionCsv(rows: OrganizationPositionRecord[]) {
-  const headers = ['岗位编码', '岗位名称', '上级岗位', '适用公司', '所属组织', '岗位序列', '岗位子序列', '岗位状态', '占编人数'];
-  const lines = rows.map(row => [
+const POSITION_EXPORT_HEADERS = ['岗位编码', '岗位名称', '上级岗位', '适用公司', '所属组织', '岗位序列', '岗位子序列', '岗位状态', '占编人数'];
+const RANK_EXPORT_HEADERS = ['岗位序列名称', '岗位子序列名称', '适用公司', '职级代码', '职级名称', '职等', '职级描述', '在职人数统计', '职级状态'];
+
+function toPositionExportRows(rows: OrganizationPositionRecord[]): XlsxCellValue[][] {
+  return rows.map(row => [
     row.code,
     row.name,
     row.parentName || '',
@@ -2285,13 +2510,16 @@ function toPositionCsv(rows: OrganizationPositionRecord[]) {
     row.subSequence || '',
     row.status || '',
     row.linkedEmployeeCount ?? 0,
-  ].map(csvCell).join(','));
-  return `\uFEFF${headers.map(csvCell).join(',')}\n${lines.join('\n')}`;
+  ].map(textCell));
 }
 
-function toRankCsv(rows: OrganizationRankRecord[]) {
-  const headers = ['岗位序列名称', '岗位子序列名称', '适用公司', '职级代码', '职级名称', '职等', '职级描述', '在职人数统计', '职级状态'];
-  const lines = rows.map(row => [
+function toPositionCsv(rows: OrganizationPositionRecord[]) {
+  const lines = toPositionExportRows(rows).map(row => row.map(csvCell).join(','));
+  return `\uFEFF${POSITION_EXPORT_HEADERS.map(csvCell).join(',')}\n${lines.join('\n')}`;
+}
+
+function toRankExportRows(rows: OrganizationRankRecord[]): XlsxCellValue[][] {
+  return rows.map(row => [
     row.sequence || '',
     row.subSequence || '',
     row.company || '',
@@ -2301,8 +2529,12 @@ function toRankCsv(rows: OrganizationRankRecord[]) {
     row.desc || '',
     row.employeeCount ?? row.linkedEmployeeCount ?? 0,
     row.status || '',
-  ].map(csvCell).join(','));
-  return `\uFEFF${headers.map(csvCell).join(',')}\n${lines.join('\n')}`;
+  ].map(textCell));
+}
+
+function toRankCsv(rows: OrganizationRankRecord[]) {
+  const lines = toRankExportRows(rows).map(row => row.map(csvCell).join(','));
+  return `\uFEFF${RANK_EXPORT_HEADERS.map(csvCell).join(',')}\n${lines.join('\n')}`;
 }
 
 function OrganizationTypeEditModal({ type, onChange, onClose, onSave }: { type: OrganizationTypeRow; onChange: (type: OrganizationTypeRow) => void; onClose: () => void; onSave: () => void }) {

@@ -3,7 +3,7 @@ import {
   Calendar,
   ChevronRight,
   Download,
-  FileSpreadsheet,
+  GripVertical,
   Layers3,
   Plus,
   Search,
@@ -14,11 +14,30 @@ import {
   X,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import { ConfirmDialog } from '../shared/ui/ConfirmDialog';
+import {
+  fetchMonthlySummaryEmployees,
+  fetchEmployeeRoster,
+  fetchOrganizationPositions,
+  fetchOrganizations,
+  fetchPayrollFoundation,
+  fetchSalaryCalculationState,
+  saveSalaryCalculationState,
+  type MonthlySummaryEmployee,
+  type EmployeeRosterRecord,
+  type OrganizationPositionRecord,
+  type OrganizationRecord,
+type SalaryCalculationState,
+} from '../api/realData';
 
 type PayrollRow = {
   id: number;
+  employeeNo?: string;
   employeeName?: string;
+  displayEmployeeName?: string;
   dept?: string;
+  department?: string;
+  deptFullPath?: string;
   group?: '管理岗' | '销售设计岗';
   sourceType?: 'management' | 'consultant' | 'designer';
   month: number;
@@ -105,12 +124,16 @@ type SheetColumn = {
 type RuleFieldConfig = {
   key: string;
   label: string;
-  source: '输入项' | '系统默认' | '岗位模板' | '人员微调';
+  groupTop?: string;
+  groupSub?: string;
+  groupId?: string;
+  source: string;
   formula: string;
-  op1: '' | '+' | '-' | '*' | '/' | '%';
+  op1: '' | '+' | '-' | '*' | '/';
   value1: string;
-  op2: '' | '+' | '-' | '*' | '/' | '%';
+  op2: '' | '+' | '-' | '*' | '/';
   value2: string;
+  order?: number;
   custom?: boolean;
   deleted?: boolean;
 };
@@ -125,45 +148,64 @@ type RuleTemplate = {
   group: '管理岗' | '销售设计岗';
   position: string;
   fieldCount: number;
+  dept?: string;
+  custom?: boolean;
 };
 
-type ImportDraftField = {
+type TemplateAssignment = {
+  templateId: string;
+  position: string;
+  employeeKeys: string[];
+  categoryId?: string;
+};
+
+type AssignmentEmployeeOption = {
   key: string;
-  detectedName: string;
-  renamedName: string;
-  status: '已识别' | '待确认';
-  selected: boolean;
+  employeeName: string;
+  position: string;
+  dept?: string;
+  department?: string;
+  deptFullPath?: string;
 };
 
-const SOURCE_FILE = '资料/考勤真实数据/薪酬系统测试数据to李文.xlsx';
+type TemplatePreviewView = {
+  templateId: string;
+  position: string;
+} | null;
+
+type DepartmentCategory = {
+  id: string;
+  name: string;
+};
+
+type PeopleDataRow = EmployeeRosterRecord & {
+  peopleKey: string;
+  actualWorkDaysForSalary: number;
+  squareForSalary: number;
+};
+
+type PeopleDataOverride = {
+  square?: number;
+};
+
 const SOURCE_SHEET = '管理店长+设计总监+区域督导+小区运营';
-
-const payrollRows: PayrollRow[] = [
-  { id: 1, month: 202602, position: '管理型店长', should: 18, actual: 14.5, annual: 350000, monthly: 29167, fixed: 12500, base: 2163, overtime: 8654, perfStd: 16667, paymentPerf: 8725.385309, orderPerf: 9047.8, refundPerf: 0, supportPerf: 2083.375, perfActual: 19856.560309, other: -1637, sick: 0, late: 20, gross: 29017, social: 783.3, fund: 318, tax: 0, net: 27916 },
-  { id: 2, month: 202602, position: '设计总监', should: 18, actual: 16.5, annual: 400000, monthly: 33333, fixed: 14583, base: 2748, overtime: 10993, perfStd: 18750, paymentPerf: 22085.689849, refundPerf: 0, perfActual: 22085.689849, sick: 0, late: 0, gross: 35827, social: 783.3, fund: 237, tax: 0, net: 34807 },
-  { id: 3, month: 202602, position: '区域督导', should: 16, actual: 18.5, annual: 180000, monthly: 15000, fixed: 7083, base: 1417, overtime: 5666, perfStd: 7917, paymentPerf: 5100.658053, orderPerf: 3084.545455, refundPerf: 0, dailyPerf: 712.53, otherPerformance: -0.000001, perfActual: 8897.733507, sick: 0, late: 0, gross: 15981, social: 783.3, fund: 135, tax: 0, net: 15063 },
-  { id: 4, month: 202602, position: '运营专员', should: 16, actual: 17, annual: 180000, monthly: 15000, fixed: 7083, base: 1417, overtime: 5666, perfStd: 7917, orderPerf: 3958.5, dailyPerf: 728.364, developmentPerf: 3166.8, perfActual: 7853.664, other: 6292, sick: 0, late: 0, gross: 21229, social: 783.3, fund: 190, tax: 0, net: 20256 },
-  { id: 5, month: 202602, position: '运营助理', should: 16, actual: 15.5, annual: 120000, monthly: 10000, fixed: 7000, base: 1356, overtime: 5425, perfStd: 3000, orderPerf: 2266.18705, dailyPerf: 246, communityPerf: 0, perfActual: 2512.18705, sick: 0, late: 0, gross: 9293, social: 783.3, fund: 243, tax: 0, net: 8267 },
-  { id: 6, month: 202603, position: '管理型店长', should: 26, actual: 27.5, annual: 350000, monthly: 29167, fixed: 12500, base: 2644, overtime: 10577, perfStd: 16667, paymentPerf: 10376.475902, orderPerf: 8800.176, refundPerf: 2083.375, supportPerf: 0, perfActual: 21260.026902, sick: 0, late: 0, gross: 34481, social: 783.3, fund: 318, tax: 0, net: 33380 },
-  { id: 7, month: 202603, position: '设计总监', should: 26, actual: 31, annual: 400000, monthly: 33333, fixed: 14583, base: 3477, overtime: 13910, perfStd: 18750, paymentPerf: 17509.952885, refundPerf: 2343.75, orderSuccessPerf: 1406.25, installSuccessPerf: 0, perfActual: 21259.952885, sick: 0, late: 0, gross: 38647, social: 783.3, fund: 237, tax: 0, net: 37627 },
-  { id: 8, month: 202603, position: '区域督导', should: 27, actual: 27, annual: 180000, monthly: 15000, fixed: 7083, base: 1417, overtime: 5666, perfStd: 7917, paymentPerf: 3000.801163, orderPerf: 3084.545455, refundPerf: 989.625, dailyPerf: 712.53, samplePerf: 1543.815, perfActual: 9331.316618, quarterPerf: 953.124545, other: 735.22, sick: 0, late: 0, gross: 18103, social: 783.3, fund: 135, tax: 0, net: 17185 },
-  { id: 9, month: 202603, position: '运营专员', should: 27, actual: 27, annual: 180000, monthly: 15000, fixed: 7083, base: 1417, overtime: 5666, perfStd: 7917, orderPerf: 1979.25, dailyPerf: 765.31, developmentPerf: 3166.8, perfActual: 5911.36, other: 751, sick: 0, late: 0, gross: 13745, social: 783.3, fund: 190, tax: 0, net: 12772 },
-  { id: 10, month: 202603, position: '运营助理', should: 27, actual: 27, annual: 120000, monthly: 10000, fixed: 7000, base: 1400, overtime: 5600, perfStd: 3000, orderPerf: 2935.846321, dailyPerf: 300, communityPerf: 873, perfActual: 4108.846321, quarterPerf: 98.319328, sick: 0, late: 0, gross: 11207, social: 783.3, fund: 243, tax: 0, net: 10181 },
-  { id: 11, month: 202604, position: '管理型店长', should: 26, actual: 22.5, annual: 350000, monthly: 29167, fixed: 12500, base: 2163, overtime: 8654, perfStd: 16667, paymentPerf: 7501.144737, orderPerf: 7988.255, refundPerf: 0, supportPerf: 0, perfActual: 15489.399737, other: 120, gross: 26426, social: 783.3, fund: 318, tax: 348.41, net: 24976 },
-  { id: 12, month: 202604, position: '设计总监', should: 26, actual: 30, annual: 400000, monthly: 33333, fixed: 14583, base: 3365, overtime: 13461, perfStd: 18750, paymentPerf: 12657.928585, refundPerf: 0, orderSuccessPerf: 1968.75, installSuccessPerf: 0, perfActual: 14626.678585, other: 20, gross: 31473, social: 783.3, fund: 237, tax: 348.41, net: 30104 },
-  { id: 13, month: 202604, position: '区域督导', should: 22, actual: 26, annual: 180000, monthly: 15000, fixed: 7083, base: 1417, overtime: 5666, perfStd: 7917, paymentPerf: 5457.663228, orderPerf: 4229.210323, refundPerf: 633.36, dailyPerf: 752.115, otherPerformance: -0.000001, perfActual: 11072.34855, gross: 18155, social: 783.3, fund: 135, tax: 348.41, net: 16888 },
-  { id: 14, month: 202604, position: '运营专员', should: 22, actual: 24, annual: 180000, monthly: 15000, fixed: 7083, base: 1417, overtime: 5666, perfStd: 7917, orderPerf: 4912.6, dailyPerf: 736.281, developmentPerf: 3166.8, perfActual: 8815.681, gross: 15899, social: 783.3, fund: 190, tax: 348.41, net: 14577 },
-  { id: 15, month: 202604, position: '运营助理', should: 22, actual: 25, annual: 120000, monthly: 10000, fixed: 7000, base: 1400, overtime: 5600, perfStd: 3000, orderPerf: 2411.162791, dailyPerf: 294, communityPerf: 450, perfActual: 3155.162791, gross: 10155, social: 783.3, fund: 243, tax: 348.41, net: 8780 },
+const PAYROLL_GROUP = '管理岗' as const;
+const PAYROLL_GROUP_LABEL = '全部岗位';
+const UNCATEGORIZED_CATEGORY_ID = '__uncategorized__';
+const TEMPLATE_PAGE_SIZE = 20;
+const PEOPLE_DATA_PAGE_SIZE = 20;
+const CONFIG_ITEM_OPTIONS = ['月份', '门店', '部门', '岗位', '应出勤天数', '实际出勤天数', '平方', '薪资'] as const;
+const SALARY_STATE_SCHEMA_VERSION = 'real-flow-v2';
+const LEGACY_LOCAL_STORAGE_KEYS = [
+  'salary-calculation-formula-rules-v1',
+  'salary-calculation-field-config-v1',
+  'salary-calculation-rule-templates-v1',
+  'salary-calculation-template-assignments-v1',
 ];
 
-const salesDesignRows: PayrollRow[] = [
-  { id: 101, group: '销售设计岗', sourceType: 'consultant', month: 202604, position: '队长', should: 25, actual: 25, annual: 0, monthly: 0, fixed: 0, base: 0, overtime: 0, perfStd: 0, sickDays: 0, salesCommission: 34090.012, otherCommission: 0, salaryBase: 1000, phoneSubsidy: 100, guaranteeSalary: 4000, afterSaleDeduction: 0, orderDeduction: 0, lateDeduction: 0, otherDeduction: 0, fixedOtherAmount: 0, retroAmount: 0, holidaySubsidy: 120, perfActual: 34090, gross: 35310, social: 783.3, fund: 273, tax: 0, net: 34253.7 },
-  { id: 102, group: '销售设计岗', sourceType: 'consultant', month: 202604, position: '家居顾问', should: 26, actual: 21.5, annual: 0, monthly: 0, fixed: 0, base: 0, overtime: 0, perfStd: 0, sickDays: 4, salesCommission: 4944.054, otherCommission: 0, salaryBase: 1000, phoneSubsidy: 100, guaranteeSalary: 4000, afterSaleDeduction: 0, orderDeduction: 0, lateDeduction: 0, otherDeduction: 0, fixedOtherAmount: 0, retroAmount: 0, holidaySubsidy: 120, perfActual: 4944, gross: 5967, social: 783.3, fund: 232, tax: 0, net: 4951.7 },
-  { id: 103, group: '销售设计岗', sourceType: 'consultant', month: 202604, position: '家居顾问', should: 26, actual: 25.5, annual: 0, monthly: 0, fixed: 0, base: 0, overtime: 0, perfStd: 0, sickDays: 0, salesCommission: 9996.672, otherCommission: 0, salaryBase: 1000, phoneSubsidy: 100, guaranteeSalary: 4000, afterSaleDeduction: 0, orderDeduction: 0, lateDeduction: 0, otherDeduction: 0, fixedOtherAmount: 0, retroAmount: 50, holidaySubsidy: 120, perfActual: 9997, gross: 11217, social: 783.3, fund: 258, tax: 0, net: 10175.7 },
-  { id: 201, group: '销售设计岗', sourceType: 'designer', month: 202604, position: '全屋设计师', should: 25, actual: 28.5, annual: 0, monthly: 0, fixed: 0, base: 0, overtime: 0, perfStd: 0, sickDays: 0, designCommission: 40306.176, salaryBase: 2000, housingSubsidy: 500, trafficSubsidy: 200, guaranteeSalary: 4500, lateDeduction: 0, holidaySubsidy: 120, afterSaleDeduction: 634, customDeduction: 0, renderAmount: 1027117, specialFee: 7460, orderAuditDeduction: 180, productBonus: 0, perfActual: 5420.468, gross: 48262.64, social: 783.3, fund: 310, tax: 0, net: 47169.34 },
-  { id: 202, group: '销售设计岗', sourceType: 'designer', month: 202604, position: '产品设计师', should: 25, actual: 29, annual: 0, monthly: 0, fixed: 0, base: 0, overtime: 0, perfStd: 0, sickDays: 0, designCommission: 3700, salaryBase: 2000, housingSubsidy: 0, trafficSubsidy: 350, guaranteeSalary: 4500, lateDeduction: 0, holidaySubsidy: 120, afterSaleDeduction: 90, customDeduction: 0, renderAmount: 100000, specialFee: 0, orderAuditDeduction: 0, productBonus: 0, perfActual: 400, gross: 6880, social: 783.3, fund: 135, tax: 0, net: 5961.7 },
-  { id: 203, group: '销售设计岗', sourceType: 'designer', month: 202604, position: '产品设计师', should: 26, actual: 28, annual: 0, monthly: 0, fixed: 0, base: 0, overtime: 0, perfStd: 0, sickDays: 0, designCommission: 13457.684, salaryBase: 2000, housingSubsidy: 500, trafficSubsidy: 350, guaranteeSalary: 4500, lateDeduction: 0, holidaySubsidy: 120, afterSaleDeduction: 813, customDeduction: 0, renderAmount: 359877, specialFee: 0, orderAuditDeduction: 270, productBonus: 0, perfActual: 1169.508, gross: 16984.19, social: 783.3, fund: 197, tax: 0, net: 16003.89 },
-];
+function payrollGroupLabel(group: PayrollRow['group']) {
+  return group === PAYROLL_GROUP ? PAYROLL_GROUP_LABEL : group;
+}
 
 const performanceKeys: (keyof PayrollRow)[] = [
   'paymentPerf',
@@ -198,18 +240,65 @@ function deptForPosition(position: string) {
   return '小区运营部';
 }
 
+function normalizeDeptFullPath(value: string | undefined) {
+  return String(value || '').replace(/^上海拉迷家具有限公司\//, '');
+}
+
+function departmentForSummary(row: Pick<MonthlySummaryEmployee, 'dept' | 'deptFullPath'>) {
+  const path = normalizeDeptFullPath(row.deptFullPath);
+  const parts = path.split('/').filter(Boolean);
+  if (parts.length >= 2) return parts[parts.length - 2];
+  return row.dept || '';
+}
+
+function periodToPayrollMonth(period?: unknown) {
+  const text = String(period || '').replace(/-/g, '');
+  if (/^\d{6}$/.test(text)) return Number(text);
+  const now = new Date();
+  return Number(`${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`);
+}
+
+function monthlySummaryToPayrollRow(row: MonthlySummaryEmployee, index: number, month: number): PayrollRow {
+  return {
+    id: index + 1,
+    employeeNo: row.empId,
+    employeeName: row.name,
+    displayEmployeeName: row.name,
+    dept: row.dept,
+    department: departmentForSummary(row),
+    deptFullPath: normalizeDeptFullPath(row.deptFullPath),
+    group: PAYROLL_GROUP,
+    sourceType: 'management',
+    month,
+    position: row.position || '未配置岗位',
+    should: Number(row.shouldWorkDays || 0),
+    actual: Number(row.actualWorkDays || 0),
+    annual: 0,
+    monthly: 0,
+    fixed: 0,
+    base: 0,
+    overtime: 0,
+    perfStd: 0,
+    perfActual: 0,
+    gross: 0,
+    social: 0,
+    fund: 0,
+    tax: 0,
+    net: 0,
+  };
+}
+
 function enrichPayrollRows(rows: PayrollRow[]) {
-  const positionCounts: Record<string, number> = {};
   return rows.map((row, index) => {
-    const count = (positionCounts[row.position] ?? 0) + 1;
-    positionCounts[row.position] = count;
     return {
       ...row,
       group: row.group || '管理岗',
       sourceType: row.sourceType || 'management',
       id: row.id || index + 1,
-      employeeName: row.employeeName || `${row.position}${String(count).padStart(2, '0')}`,
+      employeeName: row.employeeName?.trim() || undefined,
       dept: row.dept || deptForPosition(row.position),
+      department: row.department || row.dept || deptForPosition(row.position),
+      deptFullPath: row.deptFullPath || row.dept || '',
     };
   });
 }
@@ -219,9 +308,142 @@ function formatMonthValue(month: number) {
   return `${text.slice(0, 4)}-${text.slice(4, 6)}`;
 }
 
+function todayDateInputValue() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeDateInputValue(value: unknown) {
+  const text = String(value || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  if (/^\d{8}$/.test(text)) return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
+  return '';
+}
+
+function rowMonthDateValue(row: Pick<PayrollRow, 'month'>) {
+  const text = String(row.month);
+  return `${text.slice(0, 4)}-${text.slice(4, 6)}-01`;
+}
+
 function csvEscape(value: unknown) {
   const text = String(value ?? '');
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function excelCellValue(value: React.ReactNode) {
+  if (value === null || value === undefined || typeof value === 'boolean') return '';
+  if (typeof value === 'number') return Number.isFinite(value) ? value : '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(excelCellValue).filter(Boolean).join('');
+  return '';
+}
+
+function normalizeXlsxFileName(name: string) {
+  const cleaned = name.replace(/[\\/:*?"<>|]/g, '_').trim() || '导出数据';
+  return /\.xlsx$/i.test(cleaned) ? cleaned : `${cleaned}.xlsx`;
+}
+
+function normalizeXlsxSheetName(name: string) {
+  return (name.replace(/[\\/?*\[\]:]/g, '').trim() || '数据').slice(0, 31);
+}
+
+function xlsxColumnWidth(values: unknown[]) {
+  const maxLength = values.reduce((max, value) => {
+    const text = String(value ?? '').replace(/\n/g, ' ');
+    const units = Array.from(text).reduce((sum, char) => sum + (/[ -~]/.test(char) ? 0.6 : 1), 0);
+    return Math.max(max, units);
+  }, 8);
+  return { wch: Math.min(Math.max(Math.ceil(maxLength) + 3, 10), 32) };
+}
+
+function xlsxHorizontalMerges(headerRows: unknown[][]) {
+  const merges: Array<{ s: { r: number; c: number }; e: { r: number; c: number } }> = [];
+  headerRows.forEach((row, rowIndex) => {
+    let start = 0;
+    while (start < row.length) {
+      const value = String(row[start] ?? '').trim();
+      let end = start;
+      while (end + 1 < row.length && String(row[end + 1] ?? '').trim() === value) end += 1;
+      if (value && end > start) merges.push({ s: { r: rowIndex, c: start }, e: { r: rowIndex, c: end } });
+      start = end + 1;
+    }
+  });
+  return merges;
+}
+
+async function downloadXlsxWorkbook({
+  fileName,
+  sheets,
+  saveAs = false,
+}: {
+  fileName: string;
+  sheets: Array<{ name: string; rows: unknown[][]; merges?: Array<{ s: { r: number; c: number }; e: { r: number; c: number } }> }>;
+  saveAs?: boolean;
+}) {
+  const safeFileName = normalizeXlsxFileName(fileName);
+  const XLSX = await import('xlsx');
+  const workbook = XLSX.utils.book_new();
+  sheets.forEach((sheet) => {
+    const worksheet = XLSX.utils.aoa_to_sheet(sheet.rows);
+    const columnCount = Math.max(0, ...sheet.rows.map((row) => row.length));
+    worksheet['!cols'] = Array.from({ length: columnCount }, (_, index) => xlsxColumnWidth(sheet.rows.map((row) => row[index])));
+    if (sheet.merges?.length) worksheet['!merges'] = sheet.merges;
+    XLSX.utils.book_append_sheet(workbook, worksheet, normalizeXlsxSheetName(sheet.name));
+  });
+  const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer | Uint8Array;
+  const bytes = content instanceof Uint8Array ? content : new Uint8Array(content);
+  if (!bytes.byteLength) {
+    throw new Error('生成的 Excel 内容为空');
+  }
+  const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+
+  if (saveAs) {
+    const picker = (window as any).showSaveFilePicker;
+    if (typeof picker !== 'function') {
+      throw new Error('当前浏览器不支持选择保存位置');
+    }
+    let saveHandle: any = null;
+    try {
+      saveHandle = await picker({
+        suggestedName: safeFileName,
+        types: [{
+          description: 'Excel 工作簿',
+          accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] },
+        }],
+      });
+    } catch (error: any) {
+      if (error?.name === 'AbortError') return 'cancelled' as const;
+      throw error;
+    }
+    let writable: any = null;
+    try {
+      writable = await saveHandle.createWritable();
+      await writable.write(bytes);
+      await writable.close();
+      return 'saved' as const;
+    } catch (error) {
+      try {
+        await writable?.abort?.();
+      } catch {
+        // Ignore abort failures; caller will report the save failure.
+      }
+      throw error;
+    }
+  }
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = safeFileName;
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return 'downloaded' as const;
 }
 
 function excelRound(value: number) {
@@ -341,81 +563,20 @@ function money(value: number | null | undefined) {
   return val(value).toLocaleString('zh-CN', { maximumFractionDigits: 0 });
 }
 
-function preciseMoney(value: number | null | undefined) {
-  return val(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 });
-}
-
-function diffText(value: number) {
-  if (Math.abs(value) < 0.01) return '0';
-  return value > 0 ? `+${preciseMoney(value)}` : preciseMoney(value);
-}
-
-function pct(pass: number, total: number) {
-  if (!total) return '0%';
-  return `${Math.round((pass / total) * 100)}%`;
-}
-
 function rowKey(row: PayrollRow) {
   return `${row.group || '管理岗'}-${row.sourceType || 'management'}-${row.id}`;
 }
 
-async function readPayrollRowsFromFile(file: File) {
-  const XLSX = await import('xlsx');
-  const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-  const sheet = workbook.Sheets[SOURCE_SHEET] || workbook.Sheets[workbook.SheetNames[0]];
-  if (!sheet) return [];
+function assignmentPersonKey(row: PayrollRow) {
+  if (row.employeeNo) return row.employeeNo;
+  const employeeName = row.employeeName?.trim();
+  return employeeName ? `${employeeName}::${row.position}::${row.dept || ''}` : rowKey(row);
+}
 
-  const table = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
-  const get = (row: unknown[], index: number) => row[index];
-  const num = (row: unknown[], index: number) => normalizeNumber(get(row, index));
-
-  return table
-    .slice(1)
-    .map((row, index): PayrollRow | null => {
-      const month = num(row, 0);
-      const position = String(get(row, 2) ?? '').trim();
-      const gross = num(row, 44);
-      const net = num(row, 48);
-      if (!month || !position || gross === null || net === null) return null;
-
-      return {
-        id: index + 1,
-        employeeName: String(get(row, 1) || '').trim() || undefined,
-        dept: String(get(row, 3) || '').trim() || undefined,
-        month,
-        position,
-        should: num(row, 5) ?? 0,
-        actual: num(row, 6) ?? 0,
-        annual: num(row, 7) ?? 0,
-        monthly: num(row, 8) ?? 0,
-        fixed: num(row, 9) ?? 0,
-        base: num(row, 10) ?? 0,
-        overtime: num(row, 11) ?? 0,
-        perfStd: num(row, 12) ?? 0,
-        paymentPerf: num(row, 16),
-        orderPerf: num(row, 20),
-        refundPerf: num(row, 23),
-        supportPerf: num(row, 25),
-        orderSuccessPerf: num(row, 27),
-        installSuccessPerf: num(row, 29),
-        dailyPerf: num(row, 31),
-        samplePerf: num(row, 33),
-        developmentPerf: num(row, 35),
-        communityPerf: num(row, 37),
-        perfActual: num(row, 38) ?? 0,
-        quarterPerf: num(row, 39),
-        other: num(row, 40),
-        sick: num(row, 41),
-        late: num(row, 42),
-        annualBonus: num(row, 43),
-        gross,
-        social: num(row, 45) ?? 0,
-        fund: num(row, 46) ?? 0,
-        tax: num(row, 47),
-        net,
-      };
-    })
-    .filter((row): row is PayrollRow => Boolean(row));
+function peopleDataKey(row: Pick<EmployeeRosterRecord, 'employeeNo' | 'name' | 'position' | 'dept'>) {
+  const employeeNo = String(row.employeeNo || '').trim();
+  if (employeeNo) return employeeNo;
+  return `${String(row.name || '').trim()}::${String(row.position || '').trim()}::${String(row.dept || '').trim()}`;
 }
 
 function displayValue(value: unknown) {
@@ -441,9 +602,10 @@ function withHeaderRows(columns: SheetColumn[], topHeaders: string[], bottomHead
 
 const managementSheetColumns: SheetColumn[] = [
   { key: 'month', label: '月份', get: row => row.month },
-  { key: 'employeeName', label: '姓名', get: row => row.employeeName || '' },
+  { key: 'employeeName', label: '姓名', get: row => row.employeeName || row.displayEmployeeName || '' },
   { key: 'position', label: '岗位', get: row => row.position },
   { key: 'dept', label: '门店', get: row => row.dept || '' },
+  { key: 'department', label: '部门', get: row => row.department || row.dept || '' },
   { key: 'account', label: '账号', get: () => '' },
   { key: 'should', label: '应出勤天数', get: row => row.should },
   { key: 'actual', label: '实际出勤天数', get: row => row.actual },
@@ -502,7 +664,7 @@ const managementSheetColumns: SheetColumn[] = [
 
 const consultantSheetColumnBase: SheetColumn[] = [
   { key: 'seq', label: '序号', get: row => row.id },
-  { key: 'employeeName', label: '姓名', get: row => row.employeeName || '' },
+  { key: 'employeeName', label: '姓名', get: row => row.employeeName || row.displayEmployeeName || '' },
   { key: 'dept', label: '门店', get: row => row.dept || '' },
   { key: 'position', label: '职位', get: row => row.position },
   { key: 'workAge', label: '工龄', get: () => '' },
@@ -609,50 +771,440 @@ const designerBottomHeaders = [
 
 const designerSheetColumns = withHeaderRows(designerSheetColumnBase, designerTopHeaders, designerBottomHeaders);
 
-const FORMULA_STORAGE_KEY = 'salary-calculation-formula-rules-v1';
-const FIELD_CONFIG_STORAGE_KEY = 'salary-calculation-field-config-v1';
-const OPERATOR_OPTIONS = ['', '+', '-', '*', '/', '%'] as const;
+const OPERATOR_OPTIONS = ['', '+', '-', '*', '/'] as const;
+const FIELD_GROUP_COLORS = ['#B42318', '#1D4ED8', '#047857', '#B45309', '#7C3AED', '#0F766E', '#BE185D'];
 
 function loadStoredFormulaRules() {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = window.localStorage.getItem(FORMULA_STORAGE_KEY);
-    return raw ? JSON.parse(raw) as Record<string, string> : {};
-  } catch {
-    return {};
-  }
+  return {};
 }
 
 function loadStoredFieldConfigs() {
-  if (typeof window === 'undefined') return {};
+  return {};
+}
+
+function loadStoredRuleTemplates() {
+  return [];
+}
+
+function loadStoredTemplateAssignments() {
+  return {};
+}
+
+function defaultDepartmentCategories(): DepartmentCategory[] {
+  return [
+    { id: 'category-after-sale', name: '售后部门' },
+    { id: 'category-cleaning', name: '保洁部门' },
+    { id: 'category-rendering', name: '效果图部门' },
+  ];
+}
+
+function clearLegacySalaryCache() {
+  if (typeof window === 'undefined') return;
+  LEGACY_LOCAL_STORAGE_KEYS.forEach((key) => window.localStorage.removeItem(key));
+}
+
+function ruleScopeKey(group: string, position: string, employeeKey: string, templateId = '') {
+  const base = `${group}::${position || '全部'}::${employeeKey || '*'}`;
+  return templateId ? `${base}::template:${templateId}` : base;
+}
+
+function formulaRuleKey(group: string, position: string, employeeKey: string, columnKey: string, templateId = '') {
+  return `${ruleScopeKey(group, position, employeeKey, templateId)}::${columnKey}`;
+}
+
+function fieldConfigKey(group: string, position: string, employeeKey: string, fieldKey: string, templateId = '') {
+  return `${ruleScopeKey(group, position, employeeKey, templateId)}::${fieldKey}`;
+}
+
+function buildOperationText(field: Pick<RuleFieldConfig, 'op1' | 'value1'>) {
+  const value = String(field.value1 || '').trim();
+  const operator = String(field.op1 || '').trim();
+  if (!value && !operator) return '';
+  return [value, operator].filter(Boolean).join(' ');
+}
+
+function baseColumnsForPosition(group: '管理岗' | '销售设计岗', position: string) {
+  if (group === '管理岗') return managementSheetColumns;
+  if (position === '全屋设计师' || position === '产品设计师') return designerSheetColumns;
+  return consultantSheetColumns;
+}
+
+function ruleFieldsForScope(
+  group: '管理岗' | '销售设计岗',
+  position: string,
+  employeeKey: string,
+  configs: Record<string, RuleFieldConfig>,
+  templateId = '',
+) {
+  const baseColumns = baseColumnsForPosition(group, position);
+  const scope = ruleScopeKey(group, position, employeeKey, templateId);
+  const legacyScope = ruleScopeKey(group, position, employeeKey);
+  const baseRows = baseColumns
+    .map((column) => {
+      const scopedConfig = configs[fieldConfigKey(group, position, employeeKey, column.key, templateId)];
+      const legacyConfig = configs[fieldConfigKey(group, position, employeeKey, column.key)];
+      const config = scopedConfig || legacyConfig || defaultFieldConfig(column);
+      return { ...config, baseColumn: column };
+    })
+    .filter((field) => !field.deleted);
+  const scopedCustomRows = Object.entries(configs)
+    .filter(([key, config]) => key.startsWith(`${scope}::`) && config.custom)
+    .map(([, config]) => ({ ...config }));
+  const legacyCustomRows = templateId
+    ? Object.entries(configs)
+      .filter(([key, config]) => key.startsWith(`${legacyScope}::`) && !key.includes('::template:') && config.custom)
+      .map(([, config]) => ({ ...config }))
+    : [];
+  const customRowsByKey = new Map<string, RuleFieldConfig>();
+  legacyCustomRows.forEach((field) => customRowsByKey.set(field.key, field));
+  scopedCustomRows.forEach((field) => customRowsByKey.set(field.key, field));
+  const customRows = Array.from(customRowsByKey.values()).filter((field) => !field.deleted);
+  const customKeys = new Set(baseRows.map((field) => field.key));
+  return [...baseRows, ...customRows.filter((field) => !customKeys.has(field.key))]
+    .map((field, index) => ({ field, index }))
+    .sort((a, b) => (a.field.order ?? a.index) - (b.field.order ?? b.index))
+    .map(({ field }) => field);
+}
+
+function splitTrailingOperator(value: string) {
+  const text = value.trim();
+  if (text.length > 1 && /[+\-*/]$/.test(text)) {
+    return { body: text.slice(0, -1).trim(), operator: text.slice(-1) };
+  }
+  return { body: text, operator: '' };
+}
+
+function normalizeArithmeticFragment(value: unknown) {
+  const text = String(value ?? '')
+    .replace(/，/g, ',')
+    .replace(/＋/g, '+')
+    .replace(/－/g, '-')
+    .replace(/×/g, '*')
+    .replace(/÷/g, '/')
+    .replace(/,/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+  if (!text) return '';
+  const normalized = text.replace(/(\d+(?:\.\d+)?)%/g, '($1/100)');
+  return /^[0-9+\-*/().]+$/.test(normalized) ? normalized : '';
+}
+
+function stripTrailingOperators(value: string) {
+  return value.replace(/[+\-*/]+$/g, '');
+}
+
+function joinFormulaSegments(segments: string[]) {
+  return segments.filter(Boolean).reduce((expression, segment) => {
+    if (!expression) return segment;
+    const previousEndsWithOperator = /[+\-*/]$/.test(expression);
+    const nextStartsWithOperator = /^[+\-*/]/.test(segment);
+    return `${expression}${previousEndsWithOperator || nextStartsWithOperator ? '' : '+'}${segment}`;
+  }, '');
+}
+
+function fieldUsesLinkedNumericValue(field: Pick<RuleFieldConfig, 'label' | 'source'>) {
+  if (field.label === '应出勤天数' || field.label === '实际出勤天数' || field.label === '平方') return true;
+  return field.source !== '输入项';
+}
+
+function fieldParticipatesInSalaryFormula(field: Pick<RuleFieldConfig, 'label'>) {
+  return !['月份', '门店', '部门', '岗位', '应出勤天数', '薪资'].includes(field.label);
+}
+
+function buildFormulaDisplaySegment(field: Pick<RuleFieldConfig, 'label' | 'op1' | 'value1' | 'source'>, index: number) {
+  const raw = String(field.value1 || '').trim();
+  if (!raw) return '';
+  const label = String(field.label || `表头${index + 1}`).trim();
+  const { body, operator } = splitTrailingOperator(raw);
+  const value = fieldUsesLinkedNumericValue(field) ? `${label}*(${body})` : body;
+  return `${value}${operator || field.op1 || ''}`;
+}
+
+function buildTemplateFormulaText(fields: Pick<RuleFieldConfig, 'label' | 'op1' | 'value1' | 'source'>[]) {
+  const formulaFields = fields.filter(fieldParticipatesInSalaryFormula);
+  const text = stripTrailingOperators(joinFormulaSegments(formulaFields.map((field, index) => buildFormulaDisplaySegment(field, index))));
+  if (!text) return emptyFormula;
+  return fields.some((field) => field.label === '薪资') ? `薪资 = ${text}` : text;
+}
+
+function applyTemplateOperation(baseValue: React.ReactNode, field: Pick<RuleFieldConfig, 'value1'>) {
+  const manualValue = String(field.value1 ?? '').trim();
+  return baseValue === '' || baseValue === null || baseValue === undefined ? manualValue : baseValue;
+}
+
+function configItemValue(row: CalculatedRow, label: string) {
+  if (label === '月份') return formatMonthValue(row.month);
+  if (label === '门店') return row.dept || '';
+  if (label === '部门') return row.department || row.dept || '';
+  if (label === '岗位') return row.position || '';
+  if (label === '应出勤天数') return row.should;
+  if (label === '实际出勤天数') return row.actual;
+  if (label === '平方') return row.renderAmount ?? (row as any).square ?? (row as any)['平方'] ?? (row as any).area ?? (row as any)['面积'] ?? 0;
+  return undefined;
+}
+
+function parseOperationInput(value: unknown) {
+  const text = String(value ?? '').replace(/,/g, '').trim();
+  if (!text) return null;
+  const isPercent = text.includes('%');
+  const parsed = Number(text.replace(/%/g, '').trim());
+  if (!Number.isFinite(parsed)) return null;
+  return isPercent ? parsed / 100 : parsed;
+}
+
+function numericCellValue(value: React.ReactNode) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const parsed = parseOperationInput(value);
+  return parsed;
+}
+
+function fieldDataValue(row: CalculatedRow, field: RuleFieldRow) {
+  const configValue = configItemValue(row, field.label);
+  if (configValue !== undefined) return configValue;
+  return field.baseColumn?.get(row) ?? '';
+}
+
+function formulaOperandValue(row: CalculatedRow, field: RuleFieldRow) {
+  if (field.label === '薪资') return null;
+  const sourceValue = numericCellValue(fieldDataValue(row, field));
+  const manualValue = parseOperationInput(field.value1);
+  if (sourceValue !== null && manualValue !== null) return sourceValue * manualValue;
+  if (sourceValue !== null) return sourceValue;
+  if (manualValue !== null) return manualValue;
+  return null;
+}
+
+function buildCalculationSegment(row: CalculatedRow, field: RuleFieldRow) {
+  if (!fieldParticipatesInSalaryFormula(field)) return '';
+  const sourceValue = numericCellValue(fieldDataValue(row, field));
+  const inputFormula = normalizeArithmeticFragment(field.value1);
+  if (inputFormula) {
+    const { body, operator } = splitTrailingOperator(inputFormula);
+    if (!body) return '';
+    const expression = sourceValue !== null && fieldUsesLinkedNumericValue(field)
+      ? `${sourceValue}*(${body})`
+      : body;
+    return `${expression}${operator || field.op1 || ''}`;
+  }
+  if (sourceValue !== null) return `${sourceValue}${field.op1 || ''}`;
+  return '';
+}
+
+function calculateFieldOperationResult(row: CalculatedRow | null, field: RuleFieldRow) {
+  if (field.label === '月份') {
+    const dateValue = normalizeDateInputValue(field.value1) || (row ? rowMonthDateValue(row) : '');
+    if (!dateValue) return '';
+    return dateValue;
+  }
+  const inputFormula = normalizeArithmeticFragment(field.value1);
+  if (inputFormula) {
+    const { body } = splitTrailingOperator(inputFormula);
+    if (!body) return '';
+    const sourceValue = row ? numericCellValue(fieldDataValue(row, field)) : null;
+    if (fieldUsesLinkedNumericValue(field) && row && sourceValue !== null) {
+      const result = evaluateArithmeticExpression(`${sourceValue}*(${body})`);
+      return result === null ? '' : round2(result);
+    }
+    if (fieldUsesLinkedNumericValue(field) && !row) return '按人员计算';
+    const result = evaluateArithmeticExpression(body);
+    return result === null ? '' : round2(result);
+  }
+  if (!row) return '';
+  return fieldDataValue(row, field);
+}
+
+function evaluateArithmeticExpression(expression: string) {
+  const safeExpression = stripTrailingOperators(expression);
+  if (!safeExpression || !/^[0-9+\-*/().]+$/.test(safeExpression)) return null;
   try {
-    const raw = window.localStorage.getItem(FIELD_CONFIG_STORAGE_KEY);
-    return raw ? JSON.parse(raw) as Record<string, RuleFieldConfig> : {};
+    const result = Function(`"use strict"; return (${safeExpression});`)();
+    return typeof result === 'number' && Number.isFinite(result) ? result : null;
   } catch {
-    return {};
+    return null;
   }
 }
 
-function formulaRuleKey(group: string, position: string, employeeKey: string, columnKey: string) {
-  return `${group}::${position || '全部'}::${employeeKey || '*'}::${columnKey}`;
+function calculateTemplateSalary(row: CalculatedRow, fields: RuleFieldRow[]) {
+  const expression = joinFormulaSegments(fields.map((field) => buildCalculationSegment(row, field)));
+  const result = evaluateArithmeticExpression(expression);
+  if (result === null) return '';
+  return round2(result);
 }
 
-function ruleScopeKey(group: string, position: string, employeeKey: string) {
-  return `${group}::${position || '全部'}::${employeeKey || '*'}`;
+function columnDisplayWidth(column: SheetColumn) {
+  return column.label ? (column.width || 96) : 60;
 }
 
-function fieldConfigKey(group: string, position: string, employeeKey: string, fieldKey: string) {
-  return `${ruleScopeKey(group, position, employeeKey)}::${fieldKey}`;
+function buildHeaderGroups(columns: SheetColumn[], labelForColumn: (column: SheetColumn) => string | undefined) {
+  return columns.reduce<Array<{ key: string; label: string; colSpan: number; width: number; column: SheetColumn; color: string; background: string }>>((groups, column, index) => {
+    const label = String(labelForColumn(column) || '').trim();
+    const last = groups[groups.length - 1];
+    if (label && last?.label === label) {
+      last.colSpan += 1;
+      last.width += columnDisplayWidth(column);
+      return groups;
+    }
+    const color = label ? FIELD_GROUP_COLORS[groups.filter((group) => group.label).length % FIELD_GROUP_COLORS.length] : '';
+    groups.push({ key: `${label || column.key}-${index}`, label, colSpan: 1, width: columnDisplayWidth(column), column, color, background: color ? `${color}12` : '' });
+    return groups;
+  }, []);
 }
 
-function buildOperationText(field: Pick<RuleFieldConfig, 'op1' | 'value1' | 'op2' | 'value2'>) {
-  return `${field.op1}${field.value1}${field.op2}${field.value2}`.trim();
+function normalizeOperator(value: unknown): RuleFieldConfig['op1'] {
+  return OPERATOR_OPTIONS.includes(value as RuleFieldConfig['op1']) ? value as RuleFieldConfig['op1'] : '';
+}
+
+function normalizeFieldAfterPatch(field: RuleFieldConfig, patch: Partial<RuleFieldConfig>) {
+  const next = { ...field, ...patch };
+  const expression = buildOperationText(next);
+  return {
+    ...next,
+    op1: normalizeOperator(next.op1),
+    formula: patch.formula ?? (expression || next.formula || emptyFormula),
+  };
+}
+
+function containsLegacySalaryTestValue(value: unknown) {
+  return /2222|333|效果图阶段三|管理岗-management-\d+/.test(JSON.stringify(value ?? ''));
+}
+
+function sanitizeFieldConfigs(configs: Record<string, RuleFieldConfig>) {
+  return Object.fromEntries(
+    Object.entries(configs)
+      .filter(([key, config]) => !containsLegacySalaryTestValue(key) && !containsLegacySalaryTestValue(config))
+      .map(([key, config]) => [key, { ...config, op1: normalizeOperator(config.op1), deleted: Boolean(config.deleted) || undefined }]),
+  ) as Record<string, RuleFieldConfig>;
+}
+
+function sanitizeDeletedRuleTemplateIds(ids: unknown[]) {
+  return Array.from(new Set(
+    ids
+      .filter((id): id is string => typeof id === 'string' && Boolean(id.trim()) && !containsLegacySalaryTestValue(id))
+      .map((id) => id.trim()),
+  ));
+}
+
+function sanitizeFormulaDrafts(drafts: Record<string, string>, blockedKeys = new Set<string>()) {
+  return Object.fromEntries(
+    Object.entries(drafts).filter(([key, value]) => !blockedKeys.has(key) && !containsLegacySalaryTestValue(key) && !containsLegacySalaryTestValue(value)),
+  ) as Record<string, string>;
+}
+
+function sanitizeDepartmentCategories(categories: unknown[]) {
+  const seen = new Set<string>();
+  return categories
+    .filter((category): category is DepartmentCategory => {
+      if (!category || typeof category !== 'object') return false;
+      const item = category as DepartmentCategory;
+      return typeof item.id === 'string' && typeof item.name === 'string' && Boolean(item.name.trim()) && !containsLegacySalaryTestValue(item);
+    })
+    .map((category) => ({ id: category.id, name: category.name.trim() }))
+    .filter((category) => {
+      if (seen.has(category.id)) return false;
+      seen.add(category.id);
+      return true;
+    });
+}
+
+function sanitizeManualRuleTemplates(templates: unknown[]) {
+  const seen = new Set<string>();
+  return templates
+    .filter((template): template is RuleTemplate => {
+      if (!template || typeof template !== 'object') return false;
+      const item = template as RuleTemplate;
+      return typeof item.id === 'string'
+        && item.id.startsWith('manual-')
+        && typeof item.name === 'string'
+        && typeof item.position === 'string'
+        && (item.group === '管理岗' || item.group === '销售设计岗')
+        && !containsLegacySalaryTestValue(item);
+    })
+    .map((template) => ({
+      ...template,
+      name: template.name.trim() || '未命名模板',
+      position: template.position.trim(),
+      fieldCount: Number.isFinite(Number(template.fieldCount)) ? Number(template.fieldCount) : 0,
+    }))
+    .filter((template) => {
+      if (seen.has(template.id)) return false;
+      seen.add(template.id);
+      return true;
+    });
+}
+
+function sanitizeTemplateAssignments(
+  assignments: Record<string, TemplateAssignment>,
+  validTemplateIds?: Set<string>,
+  validEmployeeKeys?: Record<string, unknown>,
+) {
+  return Object.fromEntries(
+    Object.entries(assignments)
+      .filter(([templateId, assignment]) => {
+        if (!assignment || typeof assignment !== 'object') return false;
+        if (containsLegacySalaryTestValue(templateId) || containsLegacySalaryTestValue(assignment)) return false;
+        if (validTemplateIds && !validTemplateIds.has(templateId)) return false;
+        return true;
+      })
+      .map(([templateId, assignment]) => {
+        const employeeKeys = Array.isArray(assignment.employeeKeys) ? assignment.employeeKeys : [];
+        return [
+          templateId,
+          {
+            templateId,
+            position: assignment.position || '',
+            categoryId: assignment.categoryId,
+            employeeKeys: employeeKeys.filter((key) => {
+              if (containsLegacySalaryTestValue(key)) return false;
+              return validEmployeeKeys ? Boolean(validEmployeeKeys[key]) : Boolean(key);
+            }),
+          },
+        ];
+      })
+      .filter(([, assignment]) => assignment.employeeKeys.length > 0),
+  ) as Record<string, TemplateAssignment>;
+}
+
+function sanitizeTemplateNameOverrides(overrides: Record<string, string>, validManualTemplateIds?: Set<string>) {
+  return Object.fromEntries(
+    Object.entries(overrides).filter(([key, value]) => {
+      if (containsLegacySalaryTestValue(key) || containsLegacySalaryTestValue(value)) return false;
+      if (!key.startsWith('manual-')) return true;
+      return validManualTemplateIds ? validManualTemplateIds.has(key) : true;
+    }),
+  ) as Record<string, string>;
+}
+
+function sanitizeSalaryCalculationState(state: SalaryCalculationState) {
+  const manualRuleTemplates = Array.isArray(state.manualRuleTemplates) ? sanitizeManualRuleTemplates(state.manualRuleTemplates) : [];
+  const validManualTemplateIds = new Set(manualRuleTemplates.map((template) => template.id));
+  const rawFieldConfigs = state.fieldConfigs && typeof state.fieldConfigs === 'object' ? state.fieldConfigs as Record<string, RuleFieldConfig> : {};
+  const deletedFieldConfigKeys = new Set(Object.entries(rawFieldConfigs).filter(([, config]) => config.deleted).map(([key]) => key));
+  return {
+    ...state,
+    manualRuleTemplates,
+    departmentCategories: Array.isArray(state.departmentCategories) ? sanitizeDepartmentCategories(state.departmentCategories) : [],
+    templateNameOverrides: state.templateNameOverrides && typeof state.templateNameOverrides === 'object'
+      ? sanitizeTemplateNameOverrides(state.templateNameOverrides, validManualTemplateIds)
+      : {},
+    deletedRuleTemplateIds: Array.isArray(state.deletedRuleTemplateIds) ? sanitizeDeletedRuleTemplateIds(state.deletedRuleTemplateIds) : [],
+    templateAssignments: state.templateAssignments && typeof state.templateAssignments === 'object'
+      ? sanitizeTemplateAssignments(state.templateAssignments as Record<string, TemplateAssignment>)
+      : {},
+    peopleDataOverrides: state.peopleDataOverrides && typeof state.peopleDataOverrides === 'object'
+      ? Object.fromEntries(Object.entries(state.peopleDataOverrides).filter(([key, value]) => !containsLegacySalaryTestValue(key) && !containsLegacySalaryTestValue(value)))
+      : {},
+    formulaDrafts: state.formulaDrafts && typeof state.formulaDrafts === 'object' ? sanitizeFormulaDrafts(state.formulaDrafts, deletedFieldConfigKeys) : {},
+    fieldConfigs: sanitizeFieldConfigs(rawFieldConfigs),
+  } as SalaryCalculationState;
 }
 
 function defaultFieldConfig(column: SheetColumn): RuleFieldConfig {
   return {
     key: column.key,
     label: columnTitle(column),
+    groupTop: '',
+    groupSub: '',
+    groupId: '',
     source: column.formula ? '系统默认' : '输入项',
     formula: column.formula || emptyFormula,
     op1: '',
@@ -664,19 +1216,27 @@ function defaultFieldConfig(column: SheetColumn): RuleFieldConfig {
 
 export default function SalaryCalculation() {
   const { colors } = useTheme();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [rows, setRows] = useState<PayrollRow[]>(() => enrichPayrollRows([...payrollRows, ...salesDesignRows]));
-  const [activeView, setActiveView] = useState<'calculation' | 'rules'>('calculation');
-  const [activeGroup, setActiveGroup] = useState<'管理岗' | '销售设计岗'>('管理岗');
+  const templateImportInputRef = useRef<HTMLInputElement | null>(null);
+  const peopleDataImportInputRef = useRef<HTMLInputElement | null>(null);
+  const salarySaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [rows, setRows] = useState<PayrollRow[]>([]);
+  const [employeeRosterRows, setEmployeeRosterRows] = useState<EmployeeRosterRecord[]>([]);
+  const [organizationRows, setOrganizationRows] = useState<OrganizationRecord[]>([]);
+  const [organizationPositions, setOrganizationPositions] = useState<OrganizationPositionRecord[]>([]);
+  const [activeView, setActiveView] = useState<'categories' | 'calculation' | 'rules'>('rules');
+  const [activeGroup, setActiveGroup] = useState<'管理岗' | '销售设计岗'>(PAYROLL_GROUP);
   const [activePosition, setActivePosition] = useState('全部');
-  const [ruleMode, setRuleMode] = useState<'position' | 'person'>('position');
+  const [ruleMode] = useState<'position' | 'person'>('position');
+  const [ruleSection, setRuleSection] = useState<'templates' | 'assignments' | 'peopleData'>('templates');
   const [rulePanelMode, setRulePanelMode] = useState<'templates' | 'detail'>('templates');
-  const [ruleModal, setRuleModal] = useState<'import' | 'export' | null>(null);
-  const [ruleGroup, setRuleGroup] = useState<'管理岗' | '销售设计岗'>('管理岗');
-  const [rulePosition, setRulePosition] = useState('管理型店长');
+  const [ruleModal, setRuleModal] = useState<'export' | null>(null);
+  const [ruleGroup, setRuleGroup] = useState<'管理岗' | '销售设计岗'>(PAYROLL_GROUP);
+  const [rulePosition, setRulePosition] = useState('');
   const [ruleEmployeeKey, setRuleEmployeeKey] = useState('*');
+  const [activeRuleTemplateId, setActiveRuleTemplateId] = useState('');
+  const [expandedSections, setExpandedSections] = useState({ calculation: true, rules: true, payrollGroup: true });
+  const [expandedCategoryIds, setExpandedCategoryIds] = useState<Record<string, boolean>>({});
   const [ruleStatus, setRuleStatus] = useState('');
-  const [importDraftFields, setImportDraftFields] = useState<ImportDraftField[]>([]);
   const [exportFieldKeys, setExportFieldKeys] = useState<Set<string>>(new Set());
   const [editingRuleField, setEditingRuleField] = useState<RuleFieldRow | null>(null);
   const [ruleFieldDraft, setRuleFieldDraft] = useState<RuleFieldConfig | null>(null);
@@ -689,8 +1249,55 @@ export default function SalaryCalculation() {
   const [activeFormulaColumn, setActiveFormulaColumn] = useState<SheetColumn | null>(null);
   const [formulaDrafts, setFormulaDrafts] = useState<Record<string, string>>(() => loadStoredFormulaRules());
   const [fieldConfigs, setFieldConfigs] = useState<Record<string, RuleFieldConfig>>(() => loadStoredFieldConfigs());
-  const calculatedRows = useMemo(() => rows.map(calculateRow), [rows]);
+  const [manualRuleTemplates, setManualRuleTemplates] = useState<RuleTemplate[]>(() => loadStoredRuleTemplates());
+  const [departmentCategories, setDepartmentCategories] = useState<DepartmentCategory[]>(() => defaultDepartmentCategories());
+  const [renamingCategoryId, setRenamingCategoryId] = useState('');
+  const [renameCategoryValue, setRenameCategoryValue] = useState('');
+  const [templateNameOverrides, setTemplateNameOverrides] = useState<Record<string, string>>({});
+  const [deletedRuleTemplateIds, setDeletedRuleTemplateIds] = useState<Set<string>>(new Set());
+  const [templateFilters, setTemplateFilters] = useState({ dept: '全部', group: '全部', position: '全部' });
+  const [openTemplateFilterKey, setOpenTemplateFilterKey] = useState('');
+  const [templateAssignments, setTemplateAssignments] = useState<Record<string, TemplateAssignment>>(() => loadStoredTemplateAssignments());
+  const [peopleDataOverrides, setPeopleDataOverrides] = useState<Record<string, PeopleDataOverride>>({});
+  const [assignmentTemplateId, setAssignmentTemplateId] = useState('');
+  const [assignmentPosition, setAssignmentPosition] = useState('');
+  const [assignmentCategoryId, setAssignmentCategoryId] = useState('');
+  const [assignmentEmployeeSearch, setAssignmentEmployeeSearch] = useState('');
+  const [pendingAssignmentEmployeeKeys, setPendingAssignmentEmployeeKeys] = useState<Set<string>>(new Set());
+  const [activeAssignmentTemplateId, setActiveAssignmentTemplateId] = useState('');
+  const [templatePreviewView, setTemplatePreviewView] = useState<TemplatePreviewView>(null);
+  const [renamingTemplateId, setRenamingTemplateId] = useState('');
+  const [renameTemplateValue, setRenameTemplateValue] = useState('');
+  const [deleteTemplateTarget, setDeleteTemplateTarget] = useState<RuleTemplate | null>(null);
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(new Set());
+  const [templatePage, setTemplatePage] = useState(1);
+  const [templatePageDraft, setTemplatePageDraft] = useState('1');
+  const [peopleNameQuery, setPeopleNameQuery] = useState('');
+  const [peopleEmployeeNoQuery, setPeopleEmployeeNoQuery] = useState('');
+  const [peopleDeptFilter, setPeopleDeptFilter] = useState('全部');
+  const [peoplePositionFilter, setPeoplePositionFilter] = useState('全部');
+  const [peoplePage, setPeoplePage] = useState(1);
+  const [peoplePageDraft, setPeoplePageDraft] = useState('1');
+  const [draggingRuleFieldKey, setDraggingRuleFieldKey] = useState('');
+  const [selectedGroupFieldKeys, setSelectedGroupFieldKeys] = useState<Set<string>>(new Set());
+  const [groupAnchorFieldKey, setGroupAnchorFieldKey] = useState('');
+  const [salaryStateLoaded, setSalaryStateLoaded] = useState(false);
+  const [salaryPersistenceStatus, setSalaryPersistenceStatus] = useState('');
+  const [payrollInputStatus, setPayrollInputStatus] = useState('正在读取员工主数据和考勤月汇总');
+  const [payrollInputsLoaded, setPayrollInputsLoaded] = useState(false);
+  const calculatedRows = useMemo(() => {
+    const fallbackCounts: Record<string, number> = {};
+    return rows.map(calculateRow).map((row) => {
+      const explicitName = row.employeeName?.trim();
+      if (explicitName) return { ...row, displayEmployeeName: explicitName };
+      const fallbackCount = (fallbackCounts[row.position] ?? 0) + 1;
+      fallbackCounts[row.position] = fallbackCount;
+      return { ...row, displayEmployeeName: `${row.position}${String(fallbackCount).padStart(2, '0')}` };
+    });
+  }, [rows]);
   const deptOptions = useMemo(() => ['全部', ...Array.from(new Set(rows.map((row) => row.dept || '未分配部门')))], [rows]);
+  const activeAssignmentView = activeAssignmentTemplateId ? templateAssignments[activeAssignmentTemplateId] || null : null;
+  const confirmedAssignmentKeySet = useMemo(() => new Set(activeAssignmentView?.employeeKeys || []), [activeAssignmentView]);
   const filteredRows = calculatedRows.filter((row) => {
     const matchGroup = row.group === activeGroup;
     const matchPosition = activePosition === '全部' || row.position === activePosition;
@@ -698,21 +1305,21 @@ export default function SalaryCalculation() {
     const matchMonth = !monthFilter || formatMonthValue(row.month) === monthFilter;
     const keyword = employeeQuery.trim().toLowerCase();
     const matchEmployee = !keyword
-      || String(row.employeeName || '').toLowerCase().includes(keyword)
+      || String(row.employeeName || row.displayEmployeeName || '').toLowerCase().includes(keyword)
       || row.position.toLowerCase().includes(keyword);
-    return matchGroup && matchPosition && matchDept && matchMonth && matchEmployee;
+    const matchConfirmedAssignment = templatePreviewView
+      ? true
+      : activeAssignmentView
+        ? confirmedAssignmentKeySet.has(assignmentPersonKey(row))
+        : true;
+    return matchGroup && matchPosition && matchDept && matchMonth && matchEmployee && matchConfirmedAssignment;
   });
-  const activeSheetColumns = useMemo(() => {
-    if (activeGroup === '管理岗') return managementSheetColumns;
-    if (activePosition === '全屋设计师' || activePosition === '产品设计师') return designerSheetColumns;
-    return consultantSheetColumns;
-  }, [activeGroup, activePosition]);
   const rulePositions = useMemo(() => {
     return Array.from(new Set(rows.filter((row) => row.group === ruleGroup).map((row) => row.position)));
   }, [rows, ruleGroup]);
   const ruleTemplates = useMemo((): RuleTemplate[] => {
-    const groups = Array.from(new Set(rows.map((row) => row.group || '管理岗'))) as ('管理岗' | '销售设计岗')[];
-    return groups.flatMap((group) => {
+    const groups = [PAYROLL_GROUP] as ('管理岗' | '销售设计岗')[];
+    const baseTemplates = groups.flatMap((group) => {
       const positions = Array.from(new Set(rows.filter((row) => row.group === group).map((row) => row.position)));
       return positions.map((position) => {
         const columns = group === '管理岗'
@@ -725,35 +1332,324 @@ export default function SalaryCalculation() {
           name: `${position}模板`,
           group,
           position,
+          dept: rows.find((row) => row.group === group && row.position === position)?.dept || deptForPosition(position),
           fieldCount: columns.length,
         };
       });
     });
-  }, [rows]);
+    return [...baseTemplates, ...manualRuleTemplates]
+      .filter((template) => !deletedRuleTemplateIds.has(template.id))
+      .map((template) => ({
+        ...template,
+        name: templateNameOverrides[template.id] || template.name,
+      }));
+  }, [deletedRuleTemplateIds, manualRuleTemplates, rows, templateNameOverrides]);
+  const filteredRuleTemplates = useMemo(() => {
+    return ruleTemplates.filter((template) => {
+      const matchDept = templateFilters.dept === '全部' || (template.dept || deptForPosition(template.position)) === templateFilters.dept;
+      const matchPosition = templateFilters.position === '全部' || template.position === templateFilters.position;
+      return matchDept && matchPosition;
+    });
+  }, [ruleTemplates, templateFilters]);
+  const templateTotalPages = Math.max(1, Math.ceil(filteredRuleTemplates.length / TEMPLATE_PAGE_SIZE));
+  const normalizedTemplatePage = Math.min(Math.max(templatePage, 1), templateTotalPages);
+  const paginatedRuleTemplates = useMemo(() => {
+    const start = (normalizedTemplatePage - 1) * TEMPLATE_PAGE_SIZE;
+    return filteredRuleTemplates.slice(start, start + TEMPLATE_PAGE_SIZE);
+  }, [filteredRuleTemplates, normalizedTemplatePage]);
+  const paginatedRuleTemplateIds = useMemo(() => paginatedRuleTemplates.map((template) => template.id), [paginatedRuleTemplates]);
+  const allFilteredTemplatesSelected = paginatedRuleTemplateIds.length > 0 && paginatedRuleTemplateIds.every((templateId) => selectedTemplateIds.has(templateId));
+  const selectedTemplateCount = selectedTemplateIds.size;
+  const organizationStoreOptions = useMemo(() => {
+    const values = organizationRows
+      .filter((row) => row.status !== '已停用')
+      .filter((row) => String(row.orgType || row.name || '').includes('门店') || String(row.fullPath || '').includes('门店'))
+      .map((row) => row.fullPath || row.name)
+      .filter(Boolean);
+    return Array.from(new Set(values.length ? values : rows.map((row) => row.dept || '').filter(Boolean)));
+  }, [organizationRows, rows]);
+  const organizationDepartmentOptions = useMemo(() => {
+    const values = organizationRows
+      .filter((row) => row.status !== '已停用')
+      .map((row) => row.fullPath || row.name)
+      .filter(Boolean);
+    return Array.from(new Set(values.length ? values : rows.map((row) => row.department || row.dept || '').filter(Boolean)));
+  }, [organizationRows, rows]);
+  const organizationPositionOptions = useMemo(() => {
+    const values = organizationPositions
+      .filter((row) => row.status !== '已停用')
+      .map((row) => row.name)
+      .filter(Boolean);
+    return Array.from(new Set(values.length ? values : rows.map((row) => row.position).filter(Boolean)));
+  }, [organizationPositions, rows]);
+  const templateDeptOptions = useMemo(() => ['全部', ...Array.from(new Set([
+    ...ruleTemplates.map((template) => template.dept || deptForPosition(template.position)),
+    ...organizationDepartmentOptions,
+    ...rows.map((row) => row.department || row.dept || '').filter(Boolean),
+  ].filter(Boolean)))], [organizationDepartmentOptions, ruleTemplates, rows]);
+  const templatePositionOptions = useMemo(() => ['全部', ...Array.from(new Set([
+    ...ruleTemplates.map((template) => template.position),
+    ...organizationPositionOptions,
+    ...rows.map((row) => row.position).filter(Boolean),
+  ].filter(Boolean)))], [organizationPositionOptions, ruleTemplates, rows]);
+  const activePreviewTemplate = useMemo(() => templatePreviewView ? ruleTemplates.find((template) => template.id === templatePreviewView.templateId) || null : null, [ruleTemplates, templatePreviewView]);
+  const editingAssignmentTemplate = useMemo(() => assignmentTemplateId ? ruleTemplates.find((template) => template.id === assignmentTemplateId) || null : null, [assignmentTemplateId, ruleTemplates]);
+  const assignmentEmployeeOptions = useMemo(() => {
+    const employees = new Map<string, AssignmentEmployeeOption>();
+    const fallbackCounts: Record<string, number> = {};
+    calculatedRows.forEach((row) => {
+      const key = assignmentPersonKey(row);
+      if (employees.has(key)) return;
+      const fallbackCount = (fallbackCounts[row.position] ?? 0) + 1;
+      fallbackCounts[row.position] = fallbackCount;
+      employees.set(key, {
+        key,
+        employeeName: row.employeeName?.trim() || row.displayEmployeeName || `${row.position}${String(fallbackCount).padStart(2, '0')}`,
+        position: row.position,
+        dept: row.dept,
+        department: row.department,
+        deptFullPath: row.deptFullPath,
+      });
+    });
+    return Array.from(employees.values());
+  }, [calculatedRows]);
+  const assignmentEmployees = assignmentEmployeeOptions;
+  const assignedEmployeeTemplateByKey = useMemo(() => {
+    const assigned: Record<string, string> = {};
+    Object.values(templateAssignments).forEach((assignment) => {
+      assignment.employeeKeys.forEach((employeeKey) => {
+        assigned[employeeKey] = assignment.templateId;
+      });
+    });
+    return assigned;
+  }, [templateAssignments]);
+  const assignmentEmployeeByKey = useMemo(() => {
+    const employees: Record<string, AssignmentEmployeeOption> = {};
+    assignmentEmployeeOptions.forEach((employee) => {
+      employees[employee.key] = employee;
+    });
+    return employees;
+  }, [assignmentEmployeeOptions]);
+  const assignmentResultViews = useMemo(() => {
+    return ruleTemplates
+      .map((template) => {
+        const assignment = templateAssignments[template.id];
+        const employeeKeys = (assignment?.employeeKeys || []).filter((key) => assignmentEmployeeByKey[key]);
+        if (!employeeKeys.length) return null;
+        return {
+          template,
+          assignment: {
+            templateId: template.id,
+            position: assignment?.position || template.position,
+            categoryId: assignment?.categoryId,
+            employeeKeys,
+          },
+        };
+      })
+      .filter(Boolean) as Array<{ template: RuleTemplate; assignment: TemplateAssignment }>;
+  }, [assignmentEmployeeByKey, ruleTemplates, templateAssignments]);
+  const departmentCategoryById = useMemo(() => {
+    const map: Record<string, DepartmentCategory> = {};
+    departmentCategories.forEach((category) => {
+      map[category.id] = category;
+    });
+    return map;
+  }, [departmentCategories]);
+  const assignmentViewsByCategory = useMemo(() => {
+    const groups: Record<string, Array<{ template: RuleTemplate; assignment: TemplateAssignment }>> = {};
+    assignmentResultViews.forEach((item) => {
+      const categoryId = item.assignment.categoryId && departmentCategoryById[item.assignment.categoryId]
+        ? item.assignment.categoryId
+        : UNCATEGORIZED_CATEGORY_ID;
+      if (!groups[categoryId]) groups[categoryId] = [];
+      groups[categoryId].push(item);
+    });
+    return groups;
+  }, [assignmentResultViews, departmentCategoryById]);
+  const navDepartmentCategories = useMemo(() => {
+    if (assignmentViewsByCategory[UNCATEGORIZED_CATEGORY_ID]?.length) {
+      return [...departmentCategories, { id: UNCATEGORIZED_CATEGORY_ID, name: '未分类' }];
+    }
+    return departmentCategories;
+  }, [assignmentViewsByCategory, departmentCategories]);
+  const activeAssignmentTemplate = useMemo(
+    () => assignmentResultViews.find((item) => item.template.id === activeAssignmentTemplateId)?.template || null,
+    [activeAssignmentTemplateId, assignmentResultViews],
+  );
+  const assignmentSlotCount = useMemo(() => {
+    const maxBound = Math.max(0, ...Object.values(templateAssignments).map((assignment) => assignment.employeeKeys.filter((key) => assignmentEmployeeByKey[key]).length));
+    return Math.max(1, maxBound);
+  }, [assignmentEmployeeByKey, templateAssignments]);
+  const filteredAssignmentEmployees = useMemo(() => {
+    const keyword = assignmentEmployeeSearch.trim().toLowerCase();
+    return assignmentEmployees.filter((employee) => {
+      if (!keyword) return true;
+      return String(employee.employeeName || '').toLowerCase().includes(keyword)
+        || String(employee.position || '').toLowerCase().includes(keyword)
+        || String(employee.dept || '').toLowerCase().includes(keyword);
+    });
+  }, [assignmentEmployeeSearch, assignmentEmployees]);
   const ruleEmployees = useMemo(() => {
     return calculatedRows.filter((row) => row.group === ruleGroup && row.position === rulePosition);
   }, [calculatedRows, ruleGroup, rulePosition]);
-  const baseRuleColumns = useMemo(() => {
-    if (ruleGroup === '管理岗') return managementSheetColumns;
-    if (rulePosition === '全屋设计师' || rulePosition === '产品设计师') return designerSheetColumns;
-    return consultantSheetColumns;
-  }, [ruleGroup, rulePosition]);
+  const rulePreviewRow = ruleEmployees[0] || null;
   const selectedRuleEmployeeKey = ruleMode === 'person' ? ruleEmployeeKey : '*';
   const ruleFields = useMemo((): RuleFieldRow[] => {
-    const scope = ruleScopeKey(ruleGroup, rulePosition, selectedRuleEmployeeKey);
-    const baseRows = baseRuleColumns
-      .map((column) => {
-        const config = fieldConfigs[fieldConfigKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, column.key)] || defaultFieldConfig(column);
-        return { ...config, baseColumn: column };
-      })
-      .filter((field) => !field.deleted);
-    const customRows = Object.entries(fieldConfigs)
-      .filter(([key, config]) => key.startsWith(`${scope}::`) && config.custom && !config.deleted)
-      .map(([, config]) => ({ ...config }));
-    const customKeys = new Set(baseRows.map((field) => field.key));
-    return [...baseRows, ...customRows.filter((field) => !customKeys.has(field.key))];
-  }, [baseRuleColumns, fieldConfigs, ruleGroup, rulePosition, selectedRuleEmployeeKey]);
-  const hasTieredHeader = activeSheetColumns.some((column) => column.topLabel !== undefined || column.bottomLabel !== undefined);
+    return ruleFieldsForScope(ruleGroup, rulePosition, selectedRuleEmployeeKey, fieldConfigs, activeRuleTemplateId);
+  }, [activeRuleTemplateId, fieldConfigs, ruleGroup, rulePosition, selectedRuleEmployeeKey]);
+  const ruleFieldGroupVisuals = useMemo(() => {
+    const groupColorIndex = new Map<string, number>();
+    let nextColorIndex = 0;
+    const visuals: Record<string, { color: string; background: string; isFirst: boolean; isLast: boolean }> = {};
+    ruleFields.forEach((field, index) => {
+      if (!field.groupId) return;
+      if (!groupColorIndex.has(field.groupId)) {
+        groupColorIndex.set(field.groupId, nextColorIndex);
+        nextColorIndex += 1;
+      }
+      const color = FIELD_GROUP_COLORS[(groupColorIndex.get(field.groupId) || 0) % FIELD_GROUP_COLORS.length];
+      const previous = ruleFields[index - 1];
+      const next = ruleFields[index + 1];
+      visuals[field.key] = {
+        color,
+        background: `${color}12`,
+        isFirst: previous?.groupId !== field.groupId,
+        isLast: next?.groupId !== field.groupId,
+      };
+    });
+    return visuals;
+  }, [ruleFields]);
+  const templateFieldCountById = useMemo(() => {
+    return Object.fromEntries(ruleTemplates.map((template) => [
+      template.id,
+      ruleFieldsForScope(template.group, template.position, '*', fieldConfigs, template.id).length,
+    ]));
+  }, [fieldConfigs, ruleTemplates]);
+  const activeTemplatePosition = templatePreviewView?.position || activeAssignmentView?.position || activePosition;
+  const activeFormulaTemplateId = templatePreviewView?.templateId || activeAssignmentTemplateId || '';
+  const activeFormulaKey = activeFormulaColumn ? formulaRuleKey(activeGroup, activeTemplatePosition, '*', activeFormulaColumn.key, activeFormulaTemplateId) : '';
+  const activeFormulaText = activeFormulaColumn
+    ? formulaDrafts[activeFormulaKey] ?? activeFormulaColumn.formula ?? emptyFormula
+    : '';
+  const headerTextColor = colors.sidebarMuted || colors.textMuted;
+  const peopleSourceRows = useMemo((): PeopleDataRow[] => {
+    const salaryRowByEmployeeNo = new Map(calculatedRows.filter((row) => row.employeeNo).map((row) => [row.employeeNo, row]));
+    const salaryRowByNamePosition = new Map(calculatedRows.map((row) => [`${row.employeeName || row.displayEmployeeName || ''}::${row.position || ''}`, row]));
+    const payrollValues = (peopleKey: string, row?: CalculatedRow | null) => ({
+      actualWorkDaysForSalary: row?.actual ?? 0,
+      squareForSalary: peopleDataOverrides[peopleKey]?.square ?? (row ? (numericCellValue(configItemValue(row, '平方')) ?? 0) : 0),
+    });
+    if (employeeRosterRows.length) {
+      return employeeRosterRows.map((row) => ({
+        ...row,
+        peopleKey: peopleDataKey(row),
+        ...payrollValues(
+          peopleDataKey(row),
+          salaryRowByEmployeeNo.get(row.employeeNo) || salaryRowByNamePosition.get(`${row.name || ''}::${row.position || ''}`),
+        ),
+      }));
+    }
+    return calculatedRows.map((row, index) => ({
+      id: index + 1,
+      name: row.employeeName || row.displayEmployeeName || '',
+      phone: '',
+      employeeNo: row.employeeNo || '',
+      dept: row.dept || '',
+      deptFullPath: row.deptFullPath || row.department || row.dept || '',
+      position: row.position || '',
+      hireDate: '',
+      employeeType: '全职',
+      employeeStatus: row.employeeNo ? '已入职' : '未填写',
+      identityVerify: '未校验',
+      source: '薪酬核算联动数据',
+      peopleKey: peopleDataKey({
+        employeeNo: row.employeeNo || '',
+        name: row.employeeName || row.displayEmployeeName || '',
+        position: row.position || '',
+        dept: row.dept || '',
+      }),
+      ...payrollValues(peopleDataKey({
+        employeeNo: row.employeeNo || '',
+        name: row.employeeName || row.displayEmployeeName || '',
+        position: row.position || '',
+        dept: row.dept || '',
+      }), row),
+    }));
+  }, [calculatedRows, employeeRosterRows, peopleDataOverrides]);
+  const peopleDataByKey = useMemo(() => {
+    return new Map(peopleSourceRows.map((row) => [row.peopleKey, row]));
+  }, [peopleSourceRows]);
+  const peopleDataForPayrollRow = (row: CalculatedRow) => peopleDataByKey.get(peopleDataKey({
+    employeeNo: row.employeeNo || '',
+    name: row.employeeName || row.displayEmployeeName || '',
+    position: row.position || '',
+    dept: row.dept || '',
+  }));
+  const templateFieldDataValue = (row: CalculatedRow, field: RuleFieldRow) => {
+    if (field.label === '实际出勤天数') return peopleDataForPayrollRow(row)?.actualWorkDaysForSalary ?? row.actual;
+    if (field.label === '平方') return peopleDataForPayrollRow(row)?.squareForSalary ?? 0;
+    return fieldDataValue(row, field);
+  };
+  const templateBuildCalculationSegment = (row: CalculatedRow, field: RuleFieldRow) => {
+    if (!fieldParticipatesInSalaryFormula(field)) return '';
+    const sourceValue = numericCellValue(templateFieldDataValue(row, field));
+    const inputFormula = normalizeArithmeticFragment(field.value1);
+    if (inputFormula) {
+      const { body, operator } = splitTrailingOperator(inputFormula);
+      if (!body) return '';
+      const expression = sourceValue !== null && fieldUsesLinkedNumericValue(field)
+        ? `${sourceValue}*(${body})`
+        : body;
+      return `${expression}${operator || field.op1 || ''}`;
+    }
+    if (sourceValue !== null) return `${sourceValue}${field.op1 || ''}`;
+    return '';
+  };
+  const templateCalculateFieldOperationResult = (row: CalculatedRow | null, field: RuleFieldRow) => {
+    if (field.label === '月份') {
+      const dateValue = normalizeDateInputValue(field.value1) || (row ? rowMonthDateValue(row) : '');
+      if (!dateValue) return '';
+      return dateValue;
+    }
+    const inputFormula = normalizeArithmeticFragment(field.value1);
+    if (inputFormula) {
+      const { body } = splitTrailingOperator(inputFormula);
+      if (!body) return '';
+      const sourceValue = row ? numericCellValue(templateFieldDataValue(row, field)) : null;
+      if (fieldUsesLinkedNumericValue(field) && row && sourceValue !== null) {
+        const result = evaluateArithmeticExpression(`${sourceValue}*(${body})`);
+        return result === null ? '' : round2(result);
+      }
+      if (fieldUsesLinkedNumericValue(field) && !row) return '按人员计算';
+      const result = evaluateArithmeticExpression(body);
+      return result === null ? '' : round2(result);
+    }
+    if (!row) return '';
+    return templateFieldDataValue(row, field);
+  };
+  const templateCalculateSalary = (row: CalculatedRow, fields: RuleFieldRow[]) => {
+    const expression = joinFormulaSegments(fields.map((field) => templateBuildCalculationSegment(row, field)));
+    const result = evaluateArithmeticExpression(expression);
+    return result === null ? '' : round2(result);
+  };
+  const activeSheetColumns = useMemo((): SheetColumn[] => {
+    const activeTemplateId = templatePreviewView?.templateId || activeAssignmentTemplateId || '';
+    const fields = ruleFieldsForScope(activeGroup, activeTemplatePosition, '*', fieldConfigs, activeTemplateId);
+    return fields.map((field) => ({
+      key: field.key,
+      label: field.label,
+      topLabel: field.groupTop?.trim() || undefined,
+      bottomLabel: field.groupSub?.trim() || undefined,
+      formula: field.formula || field.baseColumn?.formula || emptyFormula,
+      width: field.label === '月份' ? 132 : field.baseColumn?.width,
+      get: (row) => field.label === '薪资'
+        ? templateCalculateSalary(row, fields)
+        : templateCalculateFieldOperationResult(row, field),
+    }));
+  }, [activeAssignmentTemplateId, activeGroup, activeTemplatePosition, fieldConfigs, peopleDataByKey, templatePreviewView?.templateId]);
+  const hasTieredHeader = activeSheetColumns.some((column) => Boolean(column.topLabel || column.bottomLabel));
+  const topHeaderGroups = useMemo(() => buildHeaderGroups(activeSheetColumns, (column) => column.topLabel), [activeSheetColumns]);
+  const subHeaderGroups = useMemo(() => buildHeaderGroups(activeSheetColumns, (column) => column.bottomLabel), [activeSheetColumns]);
   const visibleRows = [...filteredRows].sort((a, b) => {
     const sortColumn = activeSheetColumns.find((column) => column.key === sortConfig.key);
     const aValue = sortColumn ? sortColumn.get(a) : (a as any)[sortConfig.key];
@@ -767,27 +1663,218 @@ export default function SalaryCalculation() {
   const visibleRowKeys = visibleRows.map((row) => rowKey(row));
   const selectedVisibleRows = visibleRows.filter((row) => selectedRowKeys.has(rowKey(row)));
   const allVisibleSelected = visibleRows.length > 0 && visibleRowKeys.every((key) => selectedRowKeys.has(key));
-  const selected = visibleRows[0] || calculatedRows[0];
-  const passCount = visibleRows.filter((row) => row.passed).length;
-  const totalGrossDiff = visibleRows.reduce((sum, row) => sum + Math.abs(row.grossDiff), 0);
-  const totalNetDiff = visibleRows.reduce((sum, row) => sum + Math.abs(row.netDiff), 0);
-  const activeFormulaKey = activeFormulaColumn ? formulaRuleKey(activeGroup, activePosition, '*', activeFormulaColumn.key) : '';
-  const activeFormulaText = activeFormulaColumn
-    ? formulaDrafts[activeFormulaKey] ?? activeFormulaColumn.formula ?? emptyFormula
-    : '';
-  const headerTextColor = colors.sidebarMuted || colors.textMuted;
+  const exportDisabled = !payrollInputsLoaded || visibleRows.length === 0;
+  const peopleDeptOptions = useMemo(() => ['全部', ...Array.from(new Set(peopleSourceRows.map((row) => row.dept || '未分配部门')))], [peopleSourceRows]);
+  const peoplePositionOptions = useMemo(() => ['全部', ...Array.from(new Set(peopleSourceRows.map((row) => row.position || '未配置岗位')))], [peopleSourceRows]);
+  const peopleQueryMatches = (value: string, query: string) => {
+    const keywords = query.split(/[;；,\s]+/).map((item) => item.trim().toLowerCase()).filter(Boolean);
+    if (!keywords.length) return true;
+    const text = value.toLowerCase();
+    return keywords.some((keyword) => text.includes(keyword));
+  };
+  const filteredPeopleRows = useMemo(() => {
+    return peopleSourceRows.filter((row) => {
+      const matchName = peopleQueryMatches(row.name || '', peopleNameQuery);
+      const matchEmployeeNo = peopleQueryMatches(row.employeeNo || '', peopleEmployeeNoQuery);
+      const matchDept = peopleDeptFilter === '全部' || (row.dept || '未分配部门') === peopleDeptFilter;
+      const matchPosition = peoplePositionFilter === '全部' || (row.position || '未配置岗位') === peoplePositionFilter;
+      return matchName && matchEmployeeNo && matchDept && matchPosition;
+    });
+  }, [peopleDeptFilter, peopleEmployeeNoQuery, peopleNameQuery, peoplePositionFilter, peopleSourceRows]);
+  const peopleTotalPages = Math.max(1, Math.ceil(filteredPeopleRows.length / PEOPLE_DATA_PAGE_SIZE));
+  const normalizedPeoplePage = Math.min(Math.max(peoplePage, 1), peopleTotalPages);
+  const paginatedPeopleRows = useMemo(() => {
+    const start = (normalizedPeoplePage - 1) * PEOPLE_DATA_PAGE_SIZE;
+    return filteredPeopleRows.slice(start, start + PEOPLE_DATA_PAGE_SIZE);
+  }, [filteredPeopleRows, normalizedPeoplePage]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(FORMULA_STORAGE_KEY, JSON.stringify(formulaDrafts));
-    }
-  }, [formulaDrafts]);
+    clearLegacySalaryCache();
+  }, []);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(FIELD_CONFIG_STORAGE_KEY, JSON.stringify(fieldConfigs));
+    let cancelled = false;
+    async function loadPayrollInputs() {
+      setPayrollInputsLoaded(false);
+      try {
+        const [foundationResult, monthlyResult, organizationsResult, positionsResult, rosterResult] = await Promise.allSettled([
+          fetchPayrollFoundation(),
+          fetchMonthlySummaryEmployees(),
+          fetchOrganizations(),
+          fetchOrganizationPositions(),
+          fetchEmployeeRoster(),
+        ]);
+        if (cancelled) return;
+        const period = foundationResult.status === 'fulfilled'
+          ? foundationResult.value.summary?.currentPeriod
+          : undefined;
+        if (organizationsResult.status === 'fulfilled') {
+          setOrganizationRows(organizationsResult.value.rows || []);
+        }
+        if (positionsResult.status === 'fulfilled') {
+          setOrganizationPositions(positionsResult.value.rows || []);
+        }
+        if (rosterResult.status === 'fulfilled') {
+          setEmployeeRosterRows(rosterResult.value.rows || []);
+        }
+        if (monthlyResult.status !== 'fulfilled') {
+          setPayrollInputStatus('员工和考勤联动数据读取失败');
+          setPayrollInputsLoaded(false);
+          return;
+        }
+        const month = periodToPayrollMonth(period);
+        const nextRows = monthlyResult.value.rows
+          .map((row, index) => monthlySummaryToPayrollRow(row, index, month))
+          .filter((row) => row.employeeNo && row.position && row.position !== '-');
+        setRows(enrichPayrollRows(nextRows));
+        setPayrollInputStatus(`已联通员工 ${nextRows.length} 人，考勤月汇总 ${monthlyResult.value.total} 条`);
+        setPayrollInputsLoaded(true);
+      } catch {
+        if (!cancelled) {
+          setPayrollInputStatus('员工和考勤联动数据读取失败');
+          setPayrollInputsLoaded(false);
+        }
+      }
     }
-  }, [fieldConfigs]);
+    loadPayrollInputs();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSalaryCalculationState()
+      .then(({ state }) => {
+        if (cancelled || !state) return;
+        if (state.schemaVersion !== SALARY_STATE_SCHEMA_VERSION) {
+          setSalaryPersistenceStatus('已清理旧薪酬测试记录');
+          return;
+        }
+        const sanitizedState = sanitizeSalaryCalculationState(state);
+        if (Array.isArray(sanitizedState.manualRuleTemplates)) setManualRuleTemplates(sanitizedState.manualRuleTemplates as RuleTemplate[]);
+        if (Array.isArray(sanitizedState.departmentCategories) && sanitizedState.departmentCategories.length) {
+          setDepartmentCategories(sanitizedState.departmentCategories as DepartmentCategory[]);
+        }
+        if (sanitizedState.templateNameOverrides && typeof sanitizedState.templateNameOverrides === 'object') {
+          setTemplateNameOverrides(sanitizedState.templateNameOverrides as Record<string, string>);
+        }
+        setDeletedRuleTemplateIds(new Set(Array.isArray(sanitizedState.deletedRuleTemplateIds) ? sanitizedState.deletedRuleTemplateIds : []));
+        if (sanitizedState.templateAssignments && typeof sanitizedState.templateAssignments === 'object') setTemplateAssignments(sanitizedState.templateAssignments as Record<string, TemplateAssignment>);
+        if (sanitizedState.peopleDataOverrides && typeof sanitizedState.peopleDataOverrides === 'object') setPeopleDataOverrides(sanitizedState.peopleDataOverrides as Record<string, PeopleDataOverride>);
+        if (sanitizedState.formulaDrafts && typeof sanitizedState.formulaDrafts === 'object') setFormulaDrafts(sanitizeFormulaDrafts(sanitizedState.formulaDrafts));
+        if (sanitizedState.fieldConfigs && typeof sanitizedState.fieldConfigs === 'object') setFieldConfigs(sanitizeFieldConfigs(sanitizedState.fieldConfigs as Record<string, RuleFieldConfig>));
+        setActivePosition('全部');
+        setActiveAssignmentTemplateId('');
+        setTemplatePreviewView(null);
+        setSelectedRowKeys(new Set());
+        setSalaryPersistenceStatus(state.updatedAt ? '已读取后端薪酬记录' : '已连接薪酬记录');
+      })
+      .catch(() => {
+        if (!cancelled) setSalaryPersistenceStatus('薪酬记录服务连接失败，暂用本机缓存');
+      })
+      .finally(() => {
+        if (!cancelled) setSalaryStateLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!salaryStateLoaded) return;
+    if (salarySaveTimerRef.current) clearTimeout(salarySaveTimerRef.current);
+    const ruleTemplateIdSet = new Set(ruleTemplates.map((template) => template.id));
+    const validManualTemplateIds = new Set(manualRuleTemplates.map((template) => template.id));
+    const sanitizedTemplateAssignments = sanitizeTemplateAssignments(templateAssignments, ruleTemplateIdSet, assignmentEmployeeByKey);
+    const deletedFieldConfigKeys = new Set(Object.entries(fieldConfigs).filter(([, config]) => config.deleted).map(([key]) => key));
+    const state: SalaryCalculationState = {
+      schemaVersion: SALARY_STATE_SCHEMA_VERSION,
+      manualRuleTemplates: sanitizeManualRuleTemplates(manualRuleTemplates),
+      departmentCategories,
+      deletedRuleTemplateIds: sanitizeDeletedRuleTemplateIds(Array.from(deletedRuleTemplateIds)),
+      templateNameOverrides: sanitizeTemplateNameOverrides(templateNameOverrides, validManualTemplateIds),
+      templateAssignments: sanitizedTemplateAssignments,
+      peopleDataOverrides: Object.fromEntries(
+        Object.entries(peopleDataOverrides).filter(([key, value]) => !containsLegacySalaryTestValue(key) && !containsLegacySalaryTestValue(value)),
+      ),
+      formulaDrafts: sanitizeFormulaDrafts(formulaDrafts, deletedFieldConfigKeys),
+      fieldConfigs: sanitizeFieldConfigs(fieldConfigs),
+    };
+    salarySaveTimerRef.current = setTimeout(() => {
+      saveSalaryCalculationState(state)
+        .then(() => setSalaryPersistenceStatus('薪酬记录已保存'))
+        .catch(() => setSalaryPersistenceStatus('薪酬记录保存失败'));
+    }, 500);
+    return () => {
+      if (salarySaveTimerRef.current) clearTimeout(salarySaveTimerRef.current);
+    };
+  }, [
+    assignmentEmployeeByKey,
+    departmentCategories,
+    fieldConfigs,
+    formulaDrafts,
+    manualRuleTemplates,
+    peopleDataOverrides,
+    deletedRuleTemplateIds,
+    ruleTemplates,
+    salaryStateLoaded,
+    templateAssignments,
+    templateNameOverrides,
+  ]);
+
+  useEffect(() => {
+    if (assignmentTemplateId && !ruleTemplates.some((template) => template.id === assignmentTemplateId)) {
+      setAssignmentTemplateId('');
+      setAssignmentPosition('');
+      setAssignmentCategoryId('');
+      setAssignmentEmployeeSearch('');
+      setPendingAssignmentEmployeeKeys(new Set());
+    }
+  }, [assignmentTemplateId, ruleTemplates]);
+
+  useEffect(() => {
+    if (activeAssignmentTemplateId && !assignmentResultViews.some((item) => item.template.id === activeAssignmentTemplateId)) {
+      setActiveAssignmentTemplateId('');
+      setImportStatus('');
+    }
+  }, [activeAssignmentTemplateId, assignmentResultViews]);
+
+  useEffect(() => {
+    setSelectedTemplateIds((current) => {
+      const validIds = new Set(ruleTemplates.map((template) => template.id));
+      const next = new Set(Array.from(current).filter((templateId) => validIds.has(templateId)));
+      return next.size === current.size ? current : next;
+    });
+  }, [ruleTemplates]);
+
+  useEffect(() => {
+    setTemplatePage(1);
+    setTemplatePageDraft('1');
+  }, [templateFilters.dept, templateFilters.group, templateFilters.position]);
+
+  useEffect(() => {
+    if (templatePage > templateTotalPages) setTemplatePage(templateTotalPages);
+    if (templatePage < 1) setTemplatePage(1);
+  }, [templatePage, templateTotalPages]);
+
+  useEffect(() => {
+    setTemplatePageDraft(String(normalizedTemplatePage));
+  }, [normalizedTemplatePage]);
+
+  useEffect(() => {
+    setPeoplePage(1);
+    setPeoplePageDraft('1');
+  }, [peopleDeptFilter, peopleEmployeeNoQuery, peopleNameQuery, peoplePositionFilter]);
+
+  useEffect(() => {
+    if (peoplePage > peopleTotalPages) setPeoplePage(peopleTotalPages);
+    if (peoplePage < 1) setPeoplePage(1);
+  }, [peoplePage, peopleTotalPages]);
+
+  useEffect(() => {
+    setPeoplePageDraft(String(normalizedPeoplePage));
+  }, [normalizedPeoplePage]);
 
   useEffect(() => {
     if (!rulePositions.includes(rulePosition)) {
@@ -802,46 +1889,402 @@ export default function SalaryCalculation() {
     }
   }, [ruleEmployeeKey, ruleEmployees, ruleMode]);
 
-  const handleImport = async (file: File | null) => {
-    if (!file) return;
-    try {
-      const importedRows = await readPayrollRowsFromFile(file);
-      if (!importedRows.length) {
-        setImportStatus('未识别到可核算数据');
-        return;
-      }
-      setRows(enrichPayrollRows(importedRows));
-      setActiveGroup('管理岗');
-      setActivePosition('全部');
-      setDeptFilter('全部');
-      setMonthFilter('');
-      setEmployeeQuery('');
-      setSelectedRowKeys(new Set());
-      setImportStatus(`已导入 ${importedRows.length} 条`);
-    } catch (error) {
-      setImportStatus('导入失败');
-    } finally {
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
+  useEffect(() => {
+    const clearCurrentGroupSession = () => {
+      setGroupAnchorFieldKey('');
+      setSelectedGroupFieldKeys(new Set());
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Control' && !event.repeat) clearCurrentGroupSession();
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === 'Control') clearCurrentGroupSession();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', clearCurrentGroupSession);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', clearCurrentGroupSession);
+    };
+  }, []);
 
-  const handleExport = () => {
+  const handleExport = async () => {
+    if (!payrollInputsLoaded) {
+      setImportStatus('正在读取员工主数据和考勤月汇总，稍后再导出');
+      return;
+    }
+    if (!visibleRows.length) {
+      setImportStatus('暂无可导出的薪酬数据');
+      return;
+    }
+    if (!activeSheetColumns.length) {
+      setImportStatus('暂无可导出的表头');
+      return;
+    }
     const exportRows = selectedVisibleRows.length ? selectedVisibleRows : visibleRows;
     const headerRows = hasTieredHeader
       ? [
-        activeSheetColumns.map((column) => column.topLabel ?? column.label),
+        activeSheetColumns.map((column) => column.topLabel ?? ''),
         activeSheetColumns.map((column) => column.bottomLabel ?? ''),
+        activeSheetColumns.map((column) => column.label),
       ]
       : [activeSheetColumns.map((column) => column.label)];
-    const body = exportRows.map((row) => activeSheetColumns.map((column) => column.get(row)));
-    const csv = [...headerRows, ...body].map((line) => line.map(csvEscape).join(',')).join('\n');
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `薪酬核算对账_${monthFilter || '全部'}_${activeGroup}_${activePosition}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const body = exportRows.map((row) => activeSheetColumns.map((column) => excelCellValue(column.get(row))));
+    const hasBodyContent = body.some((row) => row.some((value) => String(value ?? '').trim() !== ''));
+    if (!hasBodyContent) {
+      setImportStatus('当前选择的数据没有可导出的内容');
+      return;
+    }
+    try {
+      const exportResult = await downloadXlsxWorkbook({
+        fileName: `薪酬核算对账_${monthFilter || '全部'}_${payrollGroupLabel(activeGroup)}_${activePosition}`,
+        sheets: [{
+          name: '薪酬核算',
+          rows: [...headerRows, ...body],
+          merges: hasTieredHeader ? xlsxHorizontalMerges(headerRows.slice(0, -1)) : [],
+        }],
+        saveAs: true,
+      });
+      setImportStatus(exportResult === 'cancelled' ? '已取消导出' : `已保存 ${exportRows.length} 条 ${activeSheetColumns.length} 列 Excel`);
+    } catch (error: any) {
+      setImportStatus(error?.message || '导出失败');
+    }
+  };
+
+  const exportPeopleData = async () => {
+    const headers = ['姓名', '部门', '岗位', '实际出勤天数', '平方'];
+    if (!filteredPeopleRows.length) {
+      setRuleStatus('暂无可导出的人员数据');
+      return;
+    }
+    const body = filteredPeopleRows.map((row) => [
+      row.name,
+      row.dept,
+      row.position,
+      row.actualWorkDaysForSalary,
+      row.squareForSalary,
+    ]);
+    const hasBodyContent = body.some((row) => row.some((value) => String(value ?? '').trim() !== ''));
+    if (!hasBodyContent) {
+      setRuleStatus('当前筛选的人员数据没有可导出的内容');
+      return;
+    }
+    try {
+      const exportResult = await downloadXlsxWorkbook({
+        fileName: `薪酬人员数据_${new Date().toISOString().slice(0, 10)}`,
+        sheets: [{ name: '人员数据', rows: [headers, ...body] }],
+        saveAs: true,
+      });
+      setRuleStatus(exportResult === 'cancelled' ? '已取消导出人员数据' : `已保存 ${filteredPeopleRows.length} 条 ${headers.length} 列 Excel`);
+    } catch (error: any) {
+      setRuleStatus(error?.message || '人员数据导出失败');
+    }
+  };
+
+  const handlePeopleDataImport = async (files: File[]) => {
+    if (!files.length) return;
+    const textValue = (value: unknown) => String(value ?? '').trim();
+    const headerText = (value: unknown) => textValue(value).replace(/\s/g, '').toLowerCase();
+    const columnIndex = (headers: unknown[], aliases: string[]) => {
+      const normalizedAliases = aliases.map((alias) => headerText(alias));
+      return headers.findIndex((header) => normalizedAliases.some((alias) => headerText(header).includes(alias)));
+    };
+    const peopleByEmployeeNo = new Map<string, PeopleDataRow>();
+    const peopleByNamePosition = new Map<string, PeopleDataRow>();
+    const peopleByNameDept = new Map<string, PeopleDataRow>();
+    const peopleByUniqueName = new Map<string, PeopleDataRow | null>();
+    peopleSourceRows.forEach((row) => {
+      const employeeNo = textValue(row.employeeNo).toLowerCase();
+      const name = textValue(row.name).toLowerCase();
+      const position = textValue(row.position).toLowerCase();
+      const dept = textValue(row.dept).toLowerCase();
+      if (employeeNo) peopleByEmployeeNo.set(employeeNo, row);
+      if (name && position) peopleByNamePosition.set(`${name}::${position}`, row);
+      if (name && dept) peopleByNameDept.set(`${name}::${dept}`, row);
+      if (name) peopleByUniqueName.set(name, peopleByUniqueName.has(name) ? null : row);
+    });
+
+    let matched = 0;
+    let importedRows = 0;
+    let scannedSheets = 0;
+    const nextOverrides: Record<string, PeopleDataOverride> = {};
+    try {
+      const XLSX = await import('xlsx');
+      for (const file of files) {
+        const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          const table = sheet ? XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' }) : [];
+          if (!table.length) continue;
+          scannedSheets += 1;
+          const headerRowIndex = table.findIndex((row) => {
+            const squareIndex = columnIndex(row, ['平方', '平米', '面积', '平方数']);
+            const nameIndex = columnIndex(row, ['姓名', '员工姓名', '人员', '名字']);
+            const employeeNoIndex = columnIndex(row, ['员工号', '工号', '员工编号', '人员编号']);
+            return squareIndex >= 0 && (nameIndex >= 0 || employeeNoIndex >= 0);
+          });
+          if (headerRowIndex < 0) continue;
+          const headers = table[headerRowIndex];
+          const squareIndex = columnIndex(headers, ['平方', '平米', '面积', '平方数']);
+          const nameIndex = columnIndex(headers, ['姓名', '员工姓名', '人员', '名字']);
+          const employeeNoIndex = columnIndex(headers, ['员工号', '工号', '员工编号', '人员编号']);
+          const positionIndex = columnIndex(headers, ['岗位', '职位']);
+          const deptIndex = columnIndex(headers, ['部门', '所属部门', '门店']);
+          table.slice(headerRowIndex + 1).forEach((row) => {
+            const square = normalizeNumber(row[squareIndex]);
+            if (square === null) return;
+            importedRows += 1;
+            const employeeNo = employeeNoIndex >= 0 ? textValue(row[employeeNoIndex]).toLowerCase() : '';
+            const name = nameIndex >= 0 ? textValue(row[nameIndex]).toLowerCase() : '';
+            const position = positionIndex >= 0 ? textValue(row[positionIndex]).toLowerCase() : '';
+            const dept = deptIndex >= 0 ? textValue(row[deptIndex]).toLowerCase() : '';
+            const matchedPerson = (employeeNo && peopleByEmployeeNo.get(employeeNo))
+              || (name && position && peopleByNamePosition.get(`${name}::${position}`))
+              || (name && dept && peopleByNameDept.get(`${name}::${dept}`))
+              || (name && peopleByUniqueName.get(name))
+              || null;
+            if (!matchedPerson) return;
+            matched += 1;
+            nextOverrides[matchedPerson.peopleKey] = {
+              ...peopleDataOverrides[matchedPerson.peopleKey],
+              ...nextOverrides[matchedPerson.peopleKey],
+              square,
+            };
+          });
+        }
+      }
+      if (!matched) {
+        setRuleStatus(`已读取 ${files.length} 个文件、${scannedSheets} 个sheet，未匹配到人员平方数据`);
+        return;
+      }
+      setPeopleDataOverrides((current) => ({ ...current, ...nextOverrides }));
+      setRuleStatus(`已导入 ${files.length} 个文件、${scannedSheets} 个sheet，识别平方 ${importedRows} 条，匹配 ${matched} 人`);
+    } catch {
+      setRuleStatus('人员数据导入失败');
+    } finally {
+      if (peopleDataImportInputRef.current) peopleDataImportInputRef.current.value = '';
+    }
+  };
+
+  const jumpPeoplePage = () => {
+    const page = Number(peoplePageDraft);
+    if (!Number.isFinite(page)) {
+      setPeoplePageDraft(String(normalizedPeoplePage));
+      return;
+    }
+    setPeoplePage(Math.min(Math.max(Math.floor(page), 1), peopleTotalPages));
+  };
+
+  const createRuleTemplate = () => {
+    const position = templateFilters.position !== '全部'
+      ? templateFilters.position
+      : rulePosition && rulePosition !== '全部'
+        ? rulePosition
+        : rulePositions[0] || rows[0]?.position || '未设置岗位';
+    const dept = templateFilters.dept !== '全部'
+      ? templateFilters.dept
+      : rows.find((row) => row.position === position)?.dept || deptForPosition(position);
+    const template: RuleTemplate = {
+      id: `manual-${Date.now()}`,
+      name: '新建模板',
+      group: PAYROLL_GROUP,
+      position,
+      dept,
+      fieldCount: managementSheetColumns.length,
+      custom: true,
+    };
+    setManualRuleTemplates((current) => [...current, template]);
+    setTemplateFilters((current) => ({ ...current, dept, group: PAYROLL_GROUP_LABEL, position }));
+    setActiveRuleTemplateId(template.id);
+    setRenamingTemplateId(template.id);
+    setRenameTemplateValue(template.name);
+    setRuleStatus('已新增模板');
+  };
+
+  const startRenamingTemplate = (template: RuleTemplate) => {
+    setRenamingTemplateId(template.id);
+    setRenameTemplateValue(template.name);
+  };
+
+  const commitTemplateRename = () => {
+    if (!renamingTemplateId) return;
+    const nextName = renameTemplateValue.trim() || '新建模板';
+    setManualRuleTemplates((current) => current.map((template) => (
+      template.id === renamingTemplateId ? { ...template, name: nextName } : template
+    )));
+    setTemplateNameOverrides((current) => ({
+      ...current,
+      [renamingTemplateId]: nextName,
+    }));
+    setRenamingTemplateId('');
+    setRenameTemplateValue('');
+    setRuleStatus('模板名称已更新');
+  };
+
+  const cancelTemplateRename = () => {
+    setRenamingTemplateId('');
+    setRenameTemplateValue('');
+  };
+
+  const handleTemplateImport = async (file: File | null) => {
+    if (!file) return;
+    try {
+      const XLSX = await import('xlsx');
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const table = sheet ? XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' }) : [];
+      const headerRow = table.find((row) => row.some((cell) => String(cell ?? '').trim()));
+      const headerNames = (headerRow || []).map((cell, index) => String(cell || `表头${index + 1}`).trim()).filter(Boolean);
+      const position = templateFilters.position !== '全部' ? templateFilters.position : rulePosition;
+      const dept = templateFilters.dept !== '全部'
+        ? templateFilters.dept
+        : rows.find((row) => row.position === position)?.dept || deptForPosition(position);
+      const stamp = Date.now();
+      const template: RuleTemplate = {
+        id: `import-${stamp}`,
+        name: `${file.name.replace(/\.[^.]+$/, '') || position}模板`,
+        group: PAYROLL_GROUP,
+        position,
+        dept,
+        fieldCount: headerNames.length || managementSheetColumns.length,
+        custom: true,
+      };
+      if (headerNames.length) {
+        const nextConfigs: Record<string, RuleFieldConfig> = {};
+        headerNames.forEach((label, index) => {
+          const key = `import_${stamp}_${index}`;
+          nextConfigs[fieldConfigKey(PAYROLL_GROUP, position, selectedRuleEmployeeKey, key, template.id)] = {
+            key,
+            label,
+            source: '输入项',
+            formula: emptyFormula,
+            groupTop: '',
+            groupSub: '',
+            groupId: '',
+            op1: '',
+            value1: '',
+            op2: '',
+            value2: '',
+            custom: true,
+          };
+        });
+        setFieldConfigs((current) => ({ ...current, ...nextConfigs }));
+      }
+      setManualRuleTemplates((current) => [...current, template]);
+      setTemplateFilters((current) => ({ ...current, dept, group: PAYROLL_GROUP_LABEL, position }));
+      setRuleStatus(`已导入模板：${template.name}`);
+    } catch {
+      setRuleStatus('导入模板失败');
+    } finally {
+      if (templateImportInputRef.current) templateImportInputRef.current.value = '';
+    }
+  };
+
+  const openAssignmentEditor = (template: RuleTemplate) => {
+    const current = templateAssignments[template.id];
+    const position = current?.position || template.position;
+    setRuleSection('assignments');
+    setRulePanelMode('templates');
+    setAssignmentTemplateId(template.id);
+    setAssignmentPosition(position);
+    setAssignmentCategoryId(current?.categoryId || '');
+    setAssignmentEmployeeSearch('');
+    setPendingAssignmentEmployeeKeys(new Set((current?.employeeKeys || []).filter((employeeKey) => {
+      const employee = assignmentEmployeeByKey[employeeKey];
+      return Boolean(employee);
+    })));
+    setTemplateAssignments((assignments) => ({
+      ...assignments,
+      [template.id]: {
+        templateId: template.id,
+        position,
+        categoryId: assignments[template.id]?.categoryId,
+        employeeKeys: (assignments[template.id]?.employeeKeys || []).filter((employeeKey) => {
+          const employee = assignmentEmployeeByKey[employeeKey];
+          return Boolean(employee);
+        }),
+      },
+    }));
+    setRuleStatus(`正在编辑${template.name}人员`);
+  };
+
+  const togglePendingAssignmentEmployee = (employeeKey: string) => {
+    const assignedTemplateId = assignedEmployeeTemplateByKey[employeeKey];
+    if (assignedTemplateId && assignedTemplateId !== assignmentTemplateId) return;
+    setPendingAssignmentEmployeeKeys((current) => {
+      const next = new Set(current);
+      if (next.has(employeeKey)) next.delete(employeeKey);
+      else next.add(employeeKey);
+      return next;
+    });
+  };
+
+  const updateAssignmentCategory = (categoryId: string) => {
+    setAssignmentCategoryId(categoryId);
+  };
+
+  const confirmAssignment = () => {
+    const template = ruleTemplates.find((item) => item.id === assignmentTemplateId);
+    const targetPosition = assignmentPosition || template?.position || '设计总监';
+    const boundEmployeeKeys = Array.from(pendingAssignmentEmployeeKeys).filter((key) => {
+      const assignedTemplateId = assignedEmployeeTemplateByKey[key];
+      const employee = assignmentEmployeeByKey[key];
+      return employee
+        && (!assignedTemplateId || assignedTemplateId === assignmentTemplateId);
+    });
+    if (!assignmentTemplateId || boundEmployeeKeys.length === 0) return;
+
+    setTemplateAssignments((current) => ({
+      ...current,
+      [assignmentTemplateId]: {
+        templateId: assignmentTemplateId,
+        position: targetPosition,
+        categoryId: assignmentCategoryId || undefined,
+        employeeKeys: boundEmployeeKeys,
+      },
+    }));
+    setActiveView('calculation');
+    setExpandedSections((current) => ({ ...current, calculation: true, payrollGroup: true }));
+    setExpandedCategoryIds((current) => ({ ...current, [assignmentCategoryId || UNCATEGORIZED_CATEGORY_ID]: true }));
+    setActiveGroup(template?.group || PAYROLL_GROUP);
+    setActivePosition('全部');
+    setDeptFilter('全部');
+    setMonthFilter('');
+    setEmployeeQuery('');
+    setSelectedRowKeys(new Set());
+    setActiveAssignmentTemplateId(assignmentTemplateId);
+    setTemplatePreviewView(null);
+    setAssignmentTemplateId('');
+    setAssignmentPosition('');
+    setAssignmentCategoryId('');
+    setAssignmentEmployeeSearch('');
+    setPendingAssignmentEmployeeKeys(new Set());
+    setImportStatus(`已按人员分配展示 ${boundEmployeeKeys.length} 人`);
+    setRuleStatus(`人员分配已确认，已跳转到全部岗位 / ${targetPosition}`);
+  };
+
+  const unbindAssignmentEmployee = (templateId: string, employeeKey: string) => {
+    setTemplateAssignments((current) => {
+      const existing = current[templateId];
+      if (!existing) return current;
+      return {
+        ...current,
+        [templateId]: {
+          ...existing,
+          employeeKeys: existing.employeeKeys.filter((key) => key !== employeeKey),
+        },
+      };
+    });
+    if (templateId === assignmentTemplateId) {
+      setPendingAssignmentEmployeeKeys((current) => {
+        const next = new Set(current);
+        next.delete(employeeKey);
+        return next;
+      });
+    }
+    setRuleStatus('已取消绑定');
   };
 
   const toggleSort = (key: string) => {
@@ -882,57 +2325,177 @@ export default function SalaryCalculation() {
     setRuleGroup(template.group);
     setRulePosition(template.position);
     setRuleEmployeeKey('*');
+    setActiveRuleTemplateId(template.id);
     setRulePanelMode('detail');
     setRuleStatus('');
   };
 
-  const openTemplateModal = (template: RuleTemplate, modal: 'import' | 'export') => {
+  const openTemplateModal = (template: RuleTemplate, modal: 'export') => {
     openTemplateDetail(template);
-    if (modal === 'import') {
-      const columns = template.group === '管理岗'
-        ? managementSheetColumns
-        : template.position === '全屋设计师' || template.position === '产品设计师'
-          ? designerSheetColumns
-          : consultantSheetColumns;
-      setImportDraftFields(columns.map((column, index) => {
-        const name = columnTitle(column);
-        return {
-          key: column.key,
-          detectedName: name,
-          renamedName: name,
-          status: column.formula || index < 8 ? '已识别' : '待确认',
-          selected: true,
-        };
-      }));
-    }
-    if (modal === 'export') {
-      const columns = template.group === '管理岗'
-        ? managementSheetColumns
-        : template.position === '全屋设计师' || template.position === '产品设计师'
-          ? designerSheetColumns
-          : consultantSheetColumns;
-      setExportFieldKeys(new Set(columns.map((column) => column.key)));
-    }
+    const columns = baseColumnsForPosition(template.group, template.position);
+    setExportFieldKeys(new Set(columns.map((column) => column.key)));
     setRuleModal(modal);
   };
 
-  const openCurrentTemplateImport = () => {
-    setImportDraftFields(baseRuleColumns.map((column, index) => {
-      const name = columnTitle(column);
-      return {
-        key: column.key,
-        detectedName: name,
-        renamedName: name,
-        status: column.formula || index < 8 ? '已识别' : '待确认',
-        selected: true,
-      };
-    }));
-    setRuleModal('import');
+  const requestDeleteSelectedTemplates = () => {
+    if (!selectedTemplateIds.size) return;
+    setDeleteTemplateTarget({ id: '__batch__', name: `${selectedTemplateIds.size} 个模板`, group: PAYROLL_GROUP, position: '', fieldCount: selectedTemplateIds.size });
   };
 
-  const openCurrentTemplateExport = () => {
-    setExportFieldKeys(new Set(ruleFields.map((field) => field.key)));
-    setRuleModal('export');
+  const deleteRuleTemplates = (templateIds: string[]) => {
+    const idSet = new Set(templateIds);
+    setManualRuleTemplates((current) => current.filter((item) => !idSet.has(item.id)));
+    setTemplateNameOverrides((current) => {
+      const next = { ...current };
+      idSet.forEach((templateId) => delete next[templateId]);
+      return next;
+    });
+    setDeletedRuleTemplateIds((current) => {
+      const next = new Set(current);
+      idSet.forEach((templateId) => next.add(templateId));
+      return next;
+    });
+    setTemplateAssignments((current) => {
+      const next = { ...current };
+      idSet.forEach((templateId) => delete next[templateId]);
+      return next;
+    });
+    setFieldConfigs((current) => Object.fromEntries(
+      Object.entries(current).filter(([key]) => !Array.from(idSet).some((templateId) => key.includes(`::template:${templateId}::`))),
+    ) as Record<string, RuleFieldConfig>);
+    setFormulaDrafts((current) => Object.fromEntries(
+      Object.entries(current).filter(([key]) => !Array.from(idSet).some((templateId) => key.includes(`::template:${templateId}::`))),
+    ));
+    if (idSet.has(activeRuleTemplateId)) {
+      setActiveRuleTemplateId('');
+      setRulePanelMode('templates');
+    }
+    if (idSet.has(assignmentTemplateId)) {
+      setAssignmentTemplateId('');
+      setAssignmentPosition('');
+      setAssignmentCategoryId('');
+      setAssignmentEmployeeSearch('');
+      setPendingAssignmentEmployeeKeys(new Set());
+    }
+    if (templatePreviewView?.templateId && idSet.has(templatePreviewView.templateId)) {
+      setTemplatePreviewView(null);
+      setImportStatus('');
+    }
+    if (idSet.has(activeAssignmentTemplateId)) {
+      setActiveAssignmentTemplateId('');
+      setImportStatus('');
+    }
+    if (idSet.has(renamingTemplateId)) {
+      cancelTemplateRename();
+    }
+    setSelectedTemplateIds((current) => new Set(Array.from(current).filter((templateId) => !idSet.has(templateId))));
+    setDeleteTemplateTarget(null);
+    setRuleStatus(`已删除 ${templateIds.length} 个模板`);
+  };
+
+  const toggleTemplateSelection = (templateId: string) => {
+    setSelectedTemplateIds((current) => {
+      const next = new Set(current);
+      if (next.has(templateId)) next.delete(templateId);
+      else next.add(templateId);
+      return next;
+    });
+  };
+
+  const toggleSelectAllFilteredTemplates = () => {
+    setSelectedTemplateIds((current) => {
+      const next = new Set(current);
+      if (allFilteredTemplatesSelected) paginatedRuleTemplateIds.forEach((templateId) => next.delete(templateId));
+      else paginatedRuleTemplateIds.forEach((templateId) => next.add(templateId));
+      return next;
+    });
+  };
+
+  const jumpToTemplatePage = () => {
+    const parsed = Number(templatePageDraft);
+    const nextPage = Number.isFinite(parsed)
+      ? Math.min(Math.max(Math.trunc(parsed), 1), templateTotalPages)
+      : normalizedTemplatePage;
+    setTemplatePage(nextPage);
+    setTemplatePageDraft(String(nextPage));
+  };
+
+  const currentRuleTemplate = () => {
+    return ruleTemplates.find((template) => template.id === activeRuleTemplateId)
+      || ruleTemplates.find((template) => template.group === ruleGroup && template.position === rulePosition)
+      || null;
+  };
+
+  const confirmTemplateToAssignments = () => {
+    const template = currentRuleTemplate();
+    if (!template) return;
+    openAssignmentEditor(template);
+    setRuleStatus('模板已确认，请分配人员');
+  };
+
+  const previewCurrentTemplate = () => {
+    const template = currentRuleTemplate();
+    if (!template) return;
+    setActiveView('calculation');
+    setExpandedSections((current) => ({ ...current, calculation: true, payrollGroup: true }));
+    setActiveGroup(template.group);
+    setActivePosition(template.position);
+    setTemplatePreviewView({ templateId: template.id, position: template.position });
+    setActiveAssignmentTemplateId('');
+    setDeptFilter('全部');
+    setMonthFilter('');
+    setEmployeeQuery('');
+    setSelectedRowKeys(new Set());
+    setImportStatus(`${template.name}预览中`);
+  };
+
+  const exitTemplatePreview = () => {
+    setTemplatePreviewView(null);
+    setImportStatus('');
+    setActiveView('rules');
+    setRuleSection('templates');
+    setRulePanelMode('detail');
+  };
+
+  const exitAssignmentResult = () => {
+    setActiveAssignmentTemplateId('');
+    setImportStatus('');
+  };
+
+  const exportTemplateFields = async (template: RuleTemplate | null, fields: RuleFieldRow[]) => {
+    const headers = ['序号', '一级表头', '二级表头', '表头名称', '来源', '运算输入', '运算符', '公式算法', '是否薪资列'];
+    const rows = fields.map((field, index) => [
+      index + 1,
+      field.groupTop || '',
+      field.groupSub || '',
+      field.label || '空表头',
+      field.source || '',
+      field.value1 || '',
+      field.op1 || '',
+      field.formula || buildOperationText(field) || '',
+      field.label === '薪资' ? '是' : '否',
+    ]);
+    try {
+      const exportResult = await downloadXlsxWorkbook({
+        fileName: `岗位模板导出项_${template?.name || rulePosition || '模板'}`,
+        sheets: [
+          { name: '导出项', rows: [headers, ...rows] },
+          { name: '公式摘要', rows: [['模板', template?.name || rulePosition || ''], ['公式算法', buildTemplateFormulaText(fields)]] },
+        ],
+      });
+      setRuleStatus(exportResult === 'cancelled' ? '已取消导出项' : `${exportResult === 'saved' ? '已保存' : '已下载'}${template?.name || rulePosition || '模板'}导出项 ${fields.length} 个`);
+    } catch (error) {
+      setRuleStatus('导出项导出失败');
+    }
+  };
+
+  const openCurrentTemplateExport = async () => {
+    await exportTemplateFields(currentRuleTemplate(), ruleFields);
+  };
+
+  const exportTemplateFromList = async (template: RuleTemplate) => {
+    const fields = ruleFieldsForScope(template.group, template.position, '*', fieldConfigs, template.id);
+    await exportTemplateFields(template, fields);
   };
 
   const saveRuleEditor = () => {
@@ -943,32 +2506,13 @@ export default function SalaryCalculation() {
     }
     const finalFormula = ruleFieldDraft.formula || buildOperationText(ruleFieldDraft) || emptyFormula;
     const nextConfig = { ...ruleFieldDraft, formula: finalFormula };
-    const key = fieldConfigKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, editingRuleField.key);
-    const formulaKey = formulaRuleKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, editingRuleField.key);
+    const key = fieldConfigKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, editingRuleField.key, activeRuleTemplateId);
+    const formulaKey = formulaRuleKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, editingRuleField.key, activeRuleTemplateId);
     setFieldConfigs((current) => ({ ...current, [key]: nextConfig }));
     setFormulaDrafts((current) => ({ ...current, [formulaKey]: finalFormula }));
     setEditingRuleField(null);
     setRuleFieldDraft(null);
     setRuleStatus('已保存');
-  };
-
-  const copyTemplateToPerson = () => {
-    if (selectedRuleEmployeeKey === '*') {
-      setRuleStatus('请选择人员');
-      return;
-    }
-    const nextRules: Record<string, string> = {};
-    const nextConfigs: Record<string, RuleFieldConfig> = {};
-    baseRuleColumns.forEach((column) => {
-      const templateConfig = fieldConfigs[fieldConfigKey(ruleGroup, rulePosition, '*', column.key)] || defaultFieldConfig(column);
-      const personConfigKey = fieldConfigKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, column.key);
-      const personFormulaKey = formulaRuleKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, column.key);
-      nextConfigs[personConfigKey] = { ...templateConfig, source: '人员微调' };
-      nextRules[personFormulaKey] = templateConfig.formula;
-    });
-    setFieldConfigs((current) => ({ ...current, ...nextConfigs }));
-    setFormulaDrafts((current) => ({ ...current, ...nextRules }));
-    setRuleStatus('已复制岗位模板');
   };
 
   const addRuleField = () => {
@@ -980,21 +2524,26 @@ export default function SalaryCalculation() {
     const draft: RuleFieldConfig = {
       key,
       label: '新增字段',
-      source: ruleMode === 'person' ? '人员微调' : '岗位模板',
+      source: '岗位模板',
       formula: '',
+      groupTop: '',
+      groupSub: '',
+      groupId: '',
       op1: '+',
       value1: '',
       op2: '',
       value2: '',
       custom: true,
     };
-    setEditingRuleField(draft);
-    setRuleFieldDraft(draft);
-    setRuleStatus('');
+    setFieldConfigs((current) => ({
+      ...current,
+      [fieldConfigKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, key, activeRuleTemplateId)]: draft,
+    }));
+    setRuleStatus('已新增字段');
   };
 
   const deleteRuleField = (field: RuleFieldRow) => {
-    const key = fieldConfigKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, field.key);
+    const key = fieldConfigKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, field.key, activeRuleTemplateId);
     const { baseColumn, ...fieldConfig } = field;
     setFieldConfigs((current) => ({
       ...current,
@@ -1003,34 +2552,162 @@ export default function SalaryCalculation() {
     setRuleStatus('已删除字段');
   };
 
-  const confirmImportFields = () => {
-    const nextConfigs: Record<string, RuleFieldConfig> = {};
-    importDraftFields.filter((field) => field.selected).forEach((field) => {
-      const baseColumn = baseRuleColumns.find((column) => column.key === field.key);
-      const baseConfig = baseColumn ? defaultFieldConfig(baseColumn) : {
-        key: field.key,
-        label: field.detectedName,
-        source: '输入项' as const,
-        formula: emptyFormula,
-        op1: '' as const,
-        value1: '',
-        op2: '' as const,
-        value2: '',
-      };
-      nextConfigs[fieldConfigKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, field.key)] = {
-        ...baseConfig,
-        label: field.renamedName || field.detectedName,
-        source: ruleMode === 'person' ? '人员微调' : baseConfig.source,
-      };
+  const updateRuleFieldGroup = (field: RuleFieldRow, patch: Pick<Partial<RuleFieldConfig>, 'groupTop' | 'groupSub'>) => {
+    const targetKeys = field.groupId
+      ? new Set(ruleFields.filter((item) => item.groupId === field.groupId).map((item) => item.key))
+      : selectedGroupFieldKeys.has(field.key) ? selectedGroupFieldKeys : new Set([field.key]);
+    setFieldConfigs((current) => {
+      const next = { ...current };
+      ruleFields
+        .filter((item) => targetKeys.has(item.key))
+        .forEach((item) => {
+          const { baseColumn, ...fieldConfig } = item;
+          next[fieldConfigKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, item.key, activeRuleTemplateId)] = {
+            ...fieldConfig,
+            ...patch,
+          };
+        });
+      return next;
     });
-    setFieldConfigs((current) => ({ ...current, ...nextConfigs }));
-    setRuleModal(null);
-    setRuleStatus('导入项已确认');
+    setRuleStatus(targetKeys.size > 1 ? `已更新 ${targetKeys.size} 个表头分组` : '已更新表头分组');
+  };
+
+  const addFieldToGroupSelection = (field: RuleFieldRow) => {
+    const anchor = ruleFields.find((item) => item.key === groupAnchorFieldKey);
+    if (!anchor) {
+      setGroupAnchorFieldKey(field.key);
+      setSelectedGroupFieldKeys(new Set([field.key]));
+      setRuleStatus('已选中分组起点');
+      return;
+    }
+    const nextGroupId = anchor.groupId || `group-${Date.now()}`;
+    const selectedKeys = new Set([anchor.key, field.key]);
+    setSelectedGroupFieldKeys(selectedKeys);
+    setFieldConfigs((current) => {
+      const next = { ...current };
+      ruleFields
+        .filter((item) => selectedKeys.has(item.key) || item.groupId === nextGroupId)
+        .forEach((item) => {
+          const { baseColumn, ...fieldConfig } = item;
+          next[fieldConfigKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, item.key, activeRuleTemplateId)] = {
+            ...fieldConfig,
+            groupId: nextGroupId,
+            groupTop: anchor.groupTop || item.groupTop || '',
+            groupSub: anchor.groupSub || item.groupSub || '',
+          };
+        });
+      return next;
+    });
+    setRuleStatus('已加入表头分组');
+  };
+
+  const removeFieldFromGroup = (field: RuleFieldRow) => {
+    const { baseColumn, ...fieldConfig } = field;
+    setFieldConfigs((current) => ({
+      ...current,
+      [fieldConfigKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, field.key, activeRuleTemplateId)]: {
+        ...fieldConfig,
+        groupTop: '',
+        groupSub: '',
+        groupId: '',
+      },
+    }));
+    setSelectedGroupFieldKeys((current) => {
+      const next = new Set(current);
+      next.delete(field.key);
+      return next;
+    });
+    if (groupAnchorFieldKey === field.key) setGroupAnchorFieldKey('');
+    setRuleStatus('已移出表头分组');
+  };
+
+  const reorderRuleField = (sourceKey: string, targetKey: string) => {
+    if (!sourceKey || !targetKey || sourceKey === targetKey) return;
+    const sourceField = ruleFields.find((field) => field.key === sourceKey);
+    if (!sourceField) return;
+    const sourceGroupTop = String(sourceField.groupTop || '').trim();
+    const sourceGroupSub = String(sourceField.groupSub || '').trim();
+    const movingKeySet = sourceField.groupId
+      ? new Set(ruleFields.filter((field) => field.groupId === sourceField.groupId).map((field) => field.key))
+      : sourceGroupTop || sourceGroupSub
+      ? new Set(ruleFields.filter((field) => String(field.groupTop || '').trim() === sourceGroupTop && String(field.groupSub || '').trim() === sourceGroupSub).map((field) => field.key))
+      : new Set([sourceKey]);
+    if (movingKeySet.has(targetKey)) {
+      setDraggingRuleFieldKey('');
+      return;
+    }
+    const movingFields = ruleFields.filter((field) => movingKeySet.has(field.key));
+    const remainingFields = ruleFields.filter((field) => !movingKeySet.has(field.key));
+    const targetIndex = remainingFields.findIndex((field) => field.key === targetKey);
+    if (targetIndex < 0 || !movingFields.length) return;
+    const nextFields = [...remainingFields];
+    nextFields.splice(targetIndex, 0, ...movingFields);
+    setFieldConfigs((current) => {
+      const next = { ...current };
+      nextFields.forEach((field, index) => {
+        const { baseColumn, ...fieldConfig } = field;
+        next[fieldConfigKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, field.key, activeRuleTemplateId)] = {
+          ...fieldConfig,
+          order: index,
+        };
+      });
+      return next;
+    });
+    setDraggingRuleFieldKey('');
+    setRuleStatus(movingFields.length > 1 ? `已移动 ${movingFields.length} 个表头` : '已调整表头顺序');
   };
 
   const saveExportFields = () => {
     setRuleModal(null);
     setRuleStatus(`导出项已保存 ${exportFieldKeys.size} 个字段`);
+  };
+
+  const createDepartmentCategory = () => {
+    const nextCategory = { id: `category-${Date.now()}`, name: '新建部门' };
+    setDepartmentCategories((current) => [...current, nextCategory]);
+    setRenamingCategoryId(nextCategory.id);
+    setRenameCategoryValue(nextCategory.name);
+    setRuleStatus('已新增部门分类');
+  };
+
+  const startRenamingCategory = (category: DepartmentCategory) => {
+    setRenamingCategoryId(category.id);
+    setRenameCategoryValue(category.name);
+  };
+
+  const commitCategoryRename = () => {
+    if (!renamingCategoryId) return;
+    const nextName = renameCategoryValue.trim() || '未命名部门';
+    setDepartmentCategories((current) => current.map((category) => (
+      category.id === renamingCategoryId ? { ...category, name: nextName } : category
+    )));
+    setRenamingCategoryId('');
+    setRenameCategoryValue('');
+    setRuleStatus('部门分类已更新');
+  };
+
+  const deleteDepartmentCategory = (categoryId: string) => {
+    setDepartmentCategories((current) => current.filter((category) => category.id !== categoryId));
+    setTemplateAssignments((current) => Object.fromEntries(
+      Object.entries(current).map(([templateId, assignment]) => [
+        templateId,
+        assignment.categoryId === categoryId ? { ...assignment, categoryId: undefined } : assignment,
+      ]),
+    ) as Record<string, TemplateAssignment>);
+    if (assignmentCategoryId === categoryId) setAssignmentCategoryId('');
+    if (renamingCategoryId === categoryId) {
+      setRenamingCategoryId('');
+      setRenameCategoryValue('');
+    }
+    setRuleStatus('部门分类已删除，相关模板已转入未分类');
+  };
+
+  const closeAssignmentEditor = () => {
+    setAssignmentTemplateId('');
+    setAssignmentPosition('');
+    setAssignmentCategoryId('');
+    setAssignmentEmployeeSearch('');
+    setPendingAssignmentEmployeeKeys(new Set());
   };
 
   const renderHeaderCell = (col: SheetColumn, text: string) => (
@@ -1053,8 +2730,147 @@ export default function SalaryCalculation() {
       </button>
   );
 
+  const sourceOptionsForField = (field: RuleFieldRow) => {
+    if (field.label === '月份') return ['月份日期', '年份', '月份'];
+    if (field.label === '门店') return ['组织管理-门店数据', ...organizationStoreOptions];
+    if (field.label === '部门') return ['组织管理-部门数据', ...organizationDepartmentOptions];
+    if (field.label === '岗位') return ['组织管理-岗位数据', ...organizationPositionOptions];
+    if (field.label === '应出勤天数') return ['考勤管理-应出勤天数自动联动'];
+    if (field.label === '实际出勤天数') return ['人员数据-实际出勤天数'];
+    if (field.label === '平方') return ['人员数据-平方'];
+    if (field.label === '薪资') return ['运算插件-薪资结果'];
+    return ['输入项', '系统默认', '岗位模板'];
+  };
+
+  const updateRuleFieldLabel = (field: RuleFieldRow, label: string) => {
+    const sourceOptions = label === '月份'
+      ? ['月份日期', '年份', '月份']
+      : label === '门店'
+      ? ['组织管理-门店数据', ...organizationStoreOptions]
+      : label === '部门'
+        ? ['组织管理-部门数据', ...organizationDepartmentOptions]
+        : label === '岗位'
+          ? ['组织管理-岗位数据', ...organizationPositionOptions]
+          : label === '应出勤天数'
+            ? ['考勤管理-应出勤天数自动联动']
+            : label === '实际出勤天数'
+              ? ['人员数据-实际出勤天数']
+              : label === '平方'
+                ? ['人员数据-平方']
+                : label === '薪资'
+                  ? ['运算插件-薪资结果']
+                  : ['输入项'];
+    updateRuleFieldConfig(field, { label, source: sourceOptions[0] });
+  };
+
+  const updateRuleFieldConfig = (field: RuleFieldRow, patch: Partial<RuleFieldConfig>) => {
+    const nextConfig = normalizeFieldAfterPatch(field, patch);
+    const { baseColumn, ...config } = nextConfig;
+    const finalFormula = config.formula || buildOperationText(config) || emptyFormula;
+    const key = fieldConfigKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, field.key, activeRuleTemplateId);
+    const formulaKey = formulaRuleKey(ruleGroup, rulePosition, selectedRuleEmployeeKey, field.key, activeRuleTemplateId);
+    setFieldConfigs((current) => ({ ...current, [key]: { ...config, formula: finalFormula } }));
+    setFormulaDrafts((current) => ({ ...current, [formulaKey]: finalFormula }));
+    setRuleStatus('已更新');
+  };
+
+  const renderTemplateSearchFilter = (
+    label: string,
+    key: 'dept' | 'position',
+    options: string[],
+    dropdownId: string,
+    minWidth = 150,
+  ) => {
+    const value = templateFilters[key] === '全部' ? '' : templateFilters[key];
+    const query = value.trim().toLowerCase();
+    const visibleOptions = options
+      .filter((option) => option !== '全部')
+      .filter((option) => !query || option.toLowerCase().includes(query))
+      .slice(0, 80);
+    const open = openTemplateFilterKey === dropdownId;
+    const chooseOption = (option: string) => {
+      setTemplateFilters((current) => ({
+        ...current,
+        [key]: option || '全部',
+      }));
+      setOpenTemplateFilterKey('');
+    };
+
+    return (
+      <div
+        key={dropdownId}
+        style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, padding: '0 8px', color: colors.textMuted, fontSize: 12, boxSizing: 'border-box' }}
+      >
+        <span style={{ flexShrink: 0 }}>{label}</span>
+        <input
+          value={value}
+          onFocus={() => setOpenTemplateFilterKey(dropdownId)}
+          onBlur={() => window.setTimeout(() => setOpenTemplateFilterKey((current) => (current === dropdownId ? '' : current)), 120)}
+          onChange={(event) => {
+            setTemplateFilters((current) => ({
+              ...current,
+              [key]: event.target.value || '全部',
+            }));
+            setOpenTemplateFilterKey(dropdownId);
+          }}
+          placeholder="请选择或搜索"
+          style={{ height: 28, minWidth, border: 'none', outline: 'none', background: 'transparent', color: colors.inputText, fontSize: 12, colorScheme: 'light' }}
+        />
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => setOpenTemplateFilterKey((current) => (current === dropdownId ? '' : dropdownId))}
+          aria-label={`展开${label}筛选`}
+          style={{ width: 18, height: 28, border: 'none', background: 'transparent', color: colors.textMuted, cursor: 'pointer', padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          ▾
+        </button>
+        {open && (
+          <div
+            style={{ position: 'absolute', top: 36, left: 0, zIndex: 30, width: Math.max(minWidth + 86, 240), maxHeight: 260, overflowY: 'auto', border: `1px solid ${colors.cardBorder}`, borderRadius: 5, background: colors.cardBg, boxShadow: '0 12px 28px rgba(15, 23, 42, 0.18)', padding: 4, color: colors.text }}
+          >
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => chooseOption('')}
+              style={{ width: '100%', minHeight: 28, border: 'none', borderRadius: 4, background: templateFilters[key] === '全部' ? colors.tableRowHover : 'transparent', color: colors.textMuted, padding: '5px 8px', textAlign: 'left', cursor: 'pointer', fontSize: 12 }}
+            >
+              全部
+            </button>
+            {visibleOptions.map((option) => (
+              <button
+                key={`${dropdownId}-${option}`}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => chooseOption(option)}
+                style={{ width: '100%', minHeight: 28, border: 'none', borderRadius: 4, background: option === value ? colors.tableRowHover : 'transparent', color: colors.text, padding: '5px 8px', textAlign: 'left', cursor: 'pointer', fontSize: 12, lineHeight: 1.35, overflowWrap: 'anywhere' }}
+              >
+                {option}
+              </button>
+            ))}
+            {!visibleOptions.length && (
+              <div style={{ padding: '8px', color: colors.textMuted, fontSize: 12 }}>无匹配选项</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
-    <div style={{ height: '100%', display: 'flex', background: colors.appBg, color: colors.text, position: 'relative' }}>
+    <div className="salary-calculation-page" style={{ height: '100%', display: 'flex', background: colors.appBg, color: colors.text, position: 'relative' }}>
+      <style>
+        {`.salary-calculation-page select,
+.salary-calculation-page option,
+.salary-calculation-page input,
+.salary-calculation-page textarea {
+  color-scheme: light;
+}
+.salary-calculation-page option {
+  background: #ffffff;
+  color: #14213d;
+}`}
+      </style>
       <aside
         style={{
           width: 180,
@@ -1068,7 +2884,29 @@ export default function SalaryCalculation() {
       >
         <div>
           <div
-            onClick={() => setActiveView('calculation')}
+            onClick={() => {
+              setActiveView('categories');
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '10px 14px',
+              fontSize: 13,
+              color: activeView === 'categories' ? '#FFFFFF' : colors.sidebarText,
+              backgroundColor: activeView === 'categories' ? 'rgba(170, 43, 58, 0.15)' : 'transparent',
+              borderLeft: activeView === 'categories' ? `3px solid ${colors.sidebarActiveBg}` : '3px solid transparent',
+              cursor: 'pointer',
+            }}
+          >
+            <ShieldCheck size={14} />
+            <span style={{ flex: 1, fontWeight: activeView === 'categories' ? 600 : 400 }}>部门分类</span>
+          </div>
+          <div
+            onClick={() => {
+              setActiveView('calculation');
+              setExpandedSections((current) => ({ ...current, calculation: activeView === 'calculation' ? !current.calculation : true, payrollGroup: true }));
+            }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -1081,49 +2919,59 @@ export default function SalaryCalculation() {
               cursor: 'pointer',
             }}
           >
-            <ShieldCheck size={14} />
-            <span style={{ flex: 1, fontWeight: activeView === 'calculation' ? 600 : 400 }}>核算表格</span>
-            <ChevronRight size={12} style={{ opacity: 0.65, transform: activeView === 'calculation' ? 'rotate(90deg)' : 'rotate(0deg)' }} />
+            <Layers3 size={14} />
+            <span style={{ flex: 1, fontWeight: activeView === 'calculation' ? 600 : 400 }}>全部岗位</span>
+            <ChevronRight size={12} style={{ opacity: 0.65, transform: activeView === 'calculation' && expandedSections.calculation ? 'rotate(90deg)' : 'rotate(0deg)' }} />
           </div>
-          {activeView === 'calculation' && (
-            <div style={{ backgroundColor: 'rgba(0,0,0,0.12)' }}>
-          {(['管理岗', '销售设计岗'] as const).map((group) => {
-            const groupActive = activeGroup === group;
-            const groupPositions = ['全部', ...Array.from(new Set(rows.filter((row) => row.group === group).map((row) => row.position)))];
-            return (
-              <div key={group}>
-                <div
-                  onClick={() => {
-                    setActiveView('calculation');
-                    setActiveGroup(group);
-                    setActivePosition('全部');
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '9px 14px',
-                    fontSize: 13,
-                    color: groupActive ? '#FFFFFF' : colors.sidebarText,
-                    backgroundColor: groupActive ? 'rgba(170, 43, 58, 0.15)' : 'transparent',
-                    borderLeft: groupActive ? `3px solid ${colors.sidebarActiveBg}` : '3px solid transparent',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <Layers3 size={14} />
-                  <span style={{ flex: 1, fontWeight: groupActive ? 600 : 400 }}>{group}</span>
-                  <ChevronRight size={12} style={{ opacity: 0.65, transform: groupActive ? 'rotate(90deg)' : 'rotate(0deg)' }} />
-                </div>
-                {groupActive && (
-                  <div style={{ backgroundColor: 'rgba(0,0,0,0.15)' }}>
-                    {groupPositions.map((position) => {
-                      const active = activePosition === position;
+          {activeView === 'calculation' && expandedSections.calculation && (
+            <div style={{ backgroundColor: 'rgba(0,0,0,0.15)' }}>
+              {navDepartmentCategories.length ? navDepartmentCategories.map((category) => {
+                const categoryAssignments = assignmentViewsByCategory[category.id] || [];
+                const categoryActive = categoryAssignments.some(({ template }) => template.id === activeAssignmentTemplateId);
+                const expanded = expandedCategoryIds[category.id] ?? categoryActive;
+                return (
+                  <div key={`nav-category-${category.id}`}>
+                    <div
+                      onClick={() => setExpandedCategoryIds((current) => ({ ...current, [category.id]: !expanded }))}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '8px 14px 8px 28px',
+                        fontSize: 12,
+                        color: categoryActive ? '#FFFFFF' : colors.sidebarText,
+                        backgroundColor: categoryActive ? 'rgba(170, 43, 58, 0.15)' : 'transparent',
+                        cursor: 'pointer',
+                        borderLeft: categoryActive ? `3px solid ${colors.sidebarActiveBg}` : '3px solid transparent',
+                      }}
+                    >
+                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{category.name}</span>
+                      <ChevronRight size={11} style={{ opacity: 0.65, transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }} />
+                    </div>
+                    {expanded && categoryAssignments.length === 0 && (
+                      <div style={{ padding: '8px 14px 8px 46px', fontSize: 12, color: colors.sidebarMuted }}>
+                        暂无模板
+                      </div>
+                    )}
+                    {expanded && categoryAssignments.map(({ template }) => {
+                      const active = activeAssignmentTemplateId === template.id;
                       return (
                         <div
-                          key={`${group}-${position}`}
-                          onClick={() => setActivePosition(position)}
+                          key={`nav-template-${template.id}`}
+                          onClick={() => {
+                            setActiveView('calculation');
+                            setActiveGroup(template.group);
+                            setActivePosition('全部');
+                            setActiveAssignmentTemplateId(template.id);
+                            setTemplatePreviewView(null);
+                            setDeptFilter('全部');
+                            setMonthFilter('');
+                            setEmployeeQuery('');
+                            setSelectedRowKeys(new Set());
+                            setImportStatus(`已切换到${template.name}分配结果`);
+                          }}
                           style={{
-                            padding: '8px 14px 8px 36px',
+                            padding: '8px 14px 8px 46px',
                             fontSize: 12,
                             color: active ? colors.sidebarActiveText : colors.sidebarMuted,
                             backgroundColor: active ? colors.sidebarActiveBg : 'transparent',
@@ -1134,19 +2982,24 @@ export default function SalaryCalculation() {
                             textOverflow: 'ellipsis',
                           }}
                         >
-                          {position}
+                          {template.name}
                         </div>
                       );
                     })}
                   </div>
-                )}
-              </div>
-            );
-          })}
+                );
+              }) : (
+                <div style={{ padding: '8px 14px 8px 36px', fontSize: 12, color: colors.sidebarMuted }}>
+                  暂无已确认模板
+                </div>
+              )}
             </div>
           )}
           <div
-            onClick={() => setActiveView('rules')}
+            onClick={() => {
+              setActiveView('rules');
+              setExpandedSections((current) => ({ ...current, rules: activeView === 'rules' ? !current.rules : true }));
+            }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -1161,26 +3014,30 @@ export default function SalaryCalculation() {
           >
             <Settings2 size={14} />
             <span style={{ flex: 1, fontWeight: activeView === 'rules' ? 600 : 400 }}>规则配置</span>
-            <ChevronRight size={12} style={{ opacity: 0.65, transform: activeView === 'rules' ? 'rotate(90deg)' : 'rotate(0deg)' }} />
+            <ChevronRight size={12} style={{ opacity: 0.65, transform: activeView === 'rules' && expandedSections.rules ? 'rotate(90deg)' : 'rotate(0deg)' }} />
           </div>
-          {activeView === 'rules' && (
+          {activeView === 'rules' && expandedSections.rules && (
             <div style={{ backgroundColor: 'rgba(0,0,0,0.15)' }}>
               {[
-                ['position', '岗位模板'],
-                ['person', '人员微调'],
-              ].map(([mode, label]) => {
-                const active = ruleMode === mode;
+                ['templates', '岗位模板'],
+                ['assignments', '人员分配'],
+                ['peopleData', '人员数据'],
+              ].map(([section, label]) => {
+                const active = ruleSection === section;
                 return (
                   <div
-                    key={mode}
-                    onClick={() => setRuleMode(mode as 'position' | 'person')}
+                    key={section}
+                    onClick={() => {
+                      setRuleSection(section as 'templates' | 'assignments' | 'peopleData');
+                      setRulePanelMode('templates');
+                    }}
                     style={{
                       padding: '8px 14px 8px 36px',
                       fontSize: 12,
                       color: active ? colors.sidebarActiveText : colors.sidebarMuted,
                       backgroundColor: active ? colors.sidebarActiveBg : 'transparent',
-                      cursor: 'pointer',
                       borderLeft: active ? '3px solid rgba(255,255,255,0.4)' : '3px solid transparent',
+                      cursor: 'pointer',
                     }}
                   >
                     {label}
@@ -1193,134 +3050,387 @@ export default function SalaryCalculation() {
       </aside>
 
       <main style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: 16 }}>
-        {activeView === 'rules' ? (
+        {activeView === 'categories' ? (
           <>
-            <section
-              style={{
-                background: colors.cardBg,
-                border: `1px solid ${colors.cardBorder}`,
-                borderRadius: 6,
-                padding: 14,
-                marginBottom: 12,
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+            <section style={{ background: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 6, padding: 14, marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 17, fontWeight: 700 }}>
-                  <Settings2 size={19} color={colors.primary} />
-                  {rulePanelMode === 'templates' ? '规则配置' : `${rulePosition}模板`}
+                  <ShieldCheck size={19} color={colors.primary} />
+                  部门分类
                 </div>
-                {ruleStatus && <span style={{ color: colors.textMuted, fontSize: 12 }}>{ruleStatus}</span>}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                <div style={{ display: 'inline-flex', border: `1px solid ${colors.inputBorder}`, borderRadius: 4, overflow: 'hidden', height: 32 }}>
-                  {[
-                    ['position', '岗位模板'],
-                    ['person', '人员微调'],
-                  ].map(([mode, label]) => {
-                    const active = ruleMode === mode;
-                    return (
-                      <button
-                        key={mode}
-                        onClick={() => {
-                          setRuleMode(mode as 'position' | 'person');
-                          setRuleStatus('');
-                        }}
-                        style={{
-                          border: 'none',
-                          borderRight: mode === 'position' ? `1px solid ${colors.inputBorder}` : 'none',
-                          background: active ? colors.primary : colors.cardBg,
-                          color: active ? colors.primaryText : colors.text,
-                          padding: '0 12px',
-                          cursor: 'pointer',
-                          fontSize: 13,
-                        }}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-                {ruleMode === 'person' && (
-                  <>
-                    <select
-                      value={ruleGroup}
-                      onChange={(event) => {
-                        setRuleGroup(event.target.value as '管理岗' | '销售设计岗');
-                        setRuleEmployeeKey('*');
-                        setRulePanelMode('templates');
-                        setRuleStatus('');
-                      }}
-                      style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 8px', fontSize: 13 }}
-                    >
-                      {(['管理岗', '销售设计岗'] as const).map((group) => (
-                        <option key={group} value={group}>{group}</option>
-                      ))}
-                    </select>
-                    <select
-                      value={rulePosition}
-                      onChange={(event) => {
-                        setRulePosition(event.target.value);
-                        setRuleEmployeeKey('*');
-                        setRuleStatus('');
-                      }}
-                      style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 8px', fontSize: 13 }}
-                    >
-                      {rulePositions.map((position) => (
-                        <option key={position} value={position}>{position}</option>
-                      ))}
-                    </select>
-                    <select
-                      value={ruleEmployeeKey}
-                      onChange={(event) => {
-                        setRuleEmployeeKey(event.target.value);
-                        setRuleStatus('');
-                      }}
-                      style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 8px', fontSize: 13, minWidth: 160 }}
-                    >
-                      <option value="*">选择人员</option>
-                      {ruleEmployees.map((employee) => (
-                        <option key={rowKey(employee)} value={rowKey(employee)}>{employee.employeeName || employee.position}</option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={copyTemplateToPerson}
-                      style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: colors.text, padding: '0 10px', cursor: 'pointer' }}
-                    >
-                      复制岗位模板
-                    </button>
-                  </>
-                )}
-                {rulePanelMode === 'detail' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
-                    <button onClick={() => setRulePanelMode('templates')} style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: colors.text, padding: '0 10px', cursor: 'pointer' }}>
-                      返回模板
-                    </button>
-                    <button onClick={openCurrentTemplateImport} style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: colors.text, padding: '0 10px', cursor: 'pointer' }}>
-                      导入项
-                    </button>
-                    <button onClick={openCurrentTemplateExport} style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: colors.text, padding: '0 10px', cursor: 'pointer' }}>
-                      导出项
-                    </button>
-                    <button onClick={addRuleField} style={{ height: 32, border: 'none', borderRadius: 4, background: colors.primary, color: colors.primaryText, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '0 10px', cursor: 'pointer' }}>
-                      <Plus size={14} />
-                      新增表头
-                    </button>
-                  </div>
-                )}
+                <button onClick={createDepartmentCategory} style={{ height: 32, border: 'none', borderRadius: 4, background: colors.primary, color: colors.primaryText, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '0 10px', cursor: 'pointer' }}>
+                  <Plus size={14} />
+                  新增部门
+                </button>
               </div>
             </section>
+            <section style={{ background: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 6, overflow: 'hidden' }}>
+              <div style={{ padding: '10px 12px', borderBottom: `1px solid ${colors.cardBorder}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 700 }}>部门分类列表</span>
+                <span style={{ color: colors.textMuted, fontSize: 12 }}>{departmentCategories.length} 个部门</span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 680 }}>
+                  <thead>
+                    <tr style={{ background: colors.tableHeaderBg }}>
+                      {['部门分类', '已挂模板', '操作'].map((header) => (
+                        <th key={header} style={{ padding: '10px 12px', fontSize: 12, color: headerTextColor, fontWeight: 600, textAlign: 'left', borderBottom: `1px solid ${colors.tableBorder}` }}>
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {departmentCategories.map((category) => {
+                      const assignmentCount = assignmentViewsByCategory[category.id]?.length || 0;
+                      return (
+                        <tr key={category.id} style={{ borderBottom: `1px solid ${colors.tableBorder}` }}>
+                          <td style={{ padding: 12, color: colors.text, fontWeight: 600 }}>
+                            {renamingCategoryId === category.id ? (
+                              <input
+                                value={renameCategoryValue}
+                                autoFocus
+                                onChange={(event) => setRenameCategoryValue(event.target.value)}
+                                onBlur={commitCategoryRename}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') commitCategoryRename();
+                                  if (event.key === 'Escape') {
+                                    setRenamingCategoryId('');
+                                    setRenameCategoryValue('');
+                                  }
+                                }}
+                                style={{ width: 'min(240px, 100%)', height: 30, border: `1px solid ${colors.primary}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 8px', outline: 'none', fontWeight: 600 }}
+                              />
+                            ) : (
+                              <button
+                                onClick={() => startRenamingCategory(category)}
+                                style={{ border: 'none', background: 'transparent', color: colors.text, cursor: 'text', padding: 0, font: 'inherit', fontWeight: 600 }}
+                              >
+                                {category.name}
+                              </button>
+                            )}
+                          </td>
+                          <td style={{ padding: 12, color: colors.textMuted }}>{assignmentCount} 个模板</td>
+                          <td style={{ padding: 12, display: 'flex', gap: 12 }}>
+                            <button onClick={() => startRenamingCategory(category)} style={{ border: 'none', background: 'transparent', color: colors.primary, cursor: 'pointer' }}>编辑</button>
+                            <button onClick={() => deleteDepartmentCategory(category.id)} style={{ border: 'none', background: 'transparent', color: colors.badgeRedText || '#B42318', cursor: 'pointer' }}>删除</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        ) : activeView === 'rules' ? (
+          <>
+            {ruleSection !== 'peopleData' && (
+              <section
+                style={{
+                  background: colors.cardBg,
+                  border: `1px solid ${colors.cardBorder}`,
+                  borderRadius: 6,
+                  padding: 14,
+                  marginBottom: 12,
+                }}
+              >
+                <input
+                  ref={templateImportInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  style={{ display: 'none' }}
+                  onChange={(event) => handleTemplateImport(event.target.files?.[0] || null)}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 17, fontWeight: 700 }}>
+                    <Settings2 size={19} color={colors.primary} />
+                    {ruleSection === 'assignments' ? '人员分配' : rulePanelMode === 'templates' ? '规则配置' : `${rulePosition}模板`}
+                  </div>
+                  {ruleStatus && <span style={{ color: colors.textMuted, fontSize: 12 }}>{ruleStatus}</span>}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                  {ruleSection === 'templates' && rulePanelMode === 'templates' && (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        {renderTemplateSearchFilter('部门', 'dept', templateDeptOptions, 'salary-template-dept-options', 150)}
+                        {renderTemplateSearchFilter('关联岗位', 'position', templatePositionOptions, 'salary-template-position-options', 150)}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+                        <button onClick={createRuleTemplate} style={{ height: 32, border: 'none', borderRadius: 4, background: colors.primary, color: colors.primaryText, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '0 10px', cursor: 'pointer' }}>
+                          <Plus size={14} />
+                          新增模板
+                        </button>
+                        <button
+                          onClick={requestDeleteSelectedTemplates}
+                          disabled={!selectedTemplateCount}
+                          style={{ height: 32, border: `1px solid ${selectedTemplateCount ? (colors.badgeRedText || '#B42318') : colors.inputBorder}`, borderRadius: 4, background: selectedTemplateCount ? (colors.badgeRedBg || '#FEE4E2') : colors.cardBg, color: selectedTemplateCount ? (colors.badgeRedText || '#B42318') : colors.textMuted, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '0 10px', cursor: selectedTemplateCount ? 'pointer' : 'not-allowed' }}
+                        >
+                          <Trash2 size={14} />
+                          删除{selectedTemplateCount ? `(${selectedTemplateCount})` : ''}
+                        </button>
+                        <button onClick={() => templateImportInputRef.current?.click()} style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: colors.text, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '0 10px', cursor: 'pointer' }}>
+                          <Upload size={14} />
+                          导入模板
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  {ruleSection === 'templates' && rulePanelMode === 'detail' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+                      <button onClick={() => setRulePanelMode('templates')} style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: colors.text, padding: '0 10px', cursor: 'pointer' }}>
+                        返回模板
+                      </button>
+                      <button onClick={confirmTemplateToAssignments} style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: colors.text, padding: '0 10px', cursor: 'pointer' }}>
+                        确认
+                      </button>
+                      <button onClick={previewCurrentTemplate} style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: colors.text, padding: '0 10px', cursor: 'pointer' }}>
+                        预览
+                      </button>
+                      <button onClick={openCurrentTemplateExport} style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: colors.text, padding: '0 10px', cursor: 'pointer' }}>
+                        导出项
+                      </button>
+                      <button onClick={addRuleField} style={{ height: 32, border: 'none', borderRadius: 4, background: colors.primary, color: colors.primaryText, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '0 10px', cursor: 'pointer' }}>
+                        <Plus size={14} />
+                        新增表头
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
 
-            {rulePanelMode === 'templates' ? (
+            {ruleSection === 'peopleData' ? (
+              <section style={{ background: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 6, overflow: 'hidden' }}>
+                <div style={{ padding: 16, borderBottom: `1px solid ${colors.cardBorder}` }}>
+                  <input
+                    ref={peopleDataImportInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    multiple
+                    style={{ display: 'none' }}
+                    onChange={(event) => handlePeopleDataImport(Array.from(event.target.files || []))}
+                  />
+                  <div style={{ display: 'grid', gridTemplateColumns: '180px 210px 180px 210px', gap: 12, alignItems: 'center', marginBottom: 14 }}>
+                    <label style={{ display: 'grid', gridTemplateColumns: '36px minmax(0, 1fr)', gap: 6, alignItems: 'center' }}>
+                      <span style={{ color: colors.text, fontSize: 13 }}>姓名</span>
+                      <input
+                        value={peopleNameQuery}
+                        onChange={(event) => setPeopleNameQuery(event.target.value)}
+                        placeholder="多个用；号隔开，支持Excel复制"
+                        style={{ height: 34, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 10px', outline: 'none', fontSize: 12 }}
+                      />
+                    </label>
+                    <label style={{ display: 'grid', gridTemplateColumns: '36px minmax(0, 1fr)', gap: 6, alignItems: 'center' }}>
+                      <span style={{ color: colors.text, fontSize: 13 }}>部门</span>
+                      <select
+                        value={peopleDeptFilter}
+                        onChange={(event) => setPeopleDeptFilter(event.target.value)}
+                        style={{ height: 34, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 10px', outline: 'none', fontSize: 12 }}
+                      >
+                        {peopleDeptOptions.map((option) => <option key={option} value={option}>{option === '全部' ? '请选择' : option}</option>)}
+                      </select>
+                    </label>
+                    <label style={{ display: 'grid', gridTemplateColumns: '50px minmax(0, 1fr)', gap: 6, alignItems: 'center' }}>
+                      <span style={{ color: colors.text, fontSize: 13 }}>员工号</span>
+                      <input
+                        value={peopleEmployeeNoQuery}
+                        onChange={(event) => setPeopleEmployeeNoQuery(event.target.value)}
+                        placeholder="多个用；号隔开，支持Excel复制"
+                        style={{ height: 34, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 10px', outline: 'none', fontSize: 12 }}
+                      />
+                    </label>
+                    <label style={{ display: 'grid', gridTemplateColumns: '36px minmax(0, 1fr)', gap: 6, alignItems: 'center' }}>
+                      <span style={{ color: colors.text, fontSize: 13 }}>岗位</span>
+                      <select
+                        value={peoplePositionFilter}
+                        onChange={(event) => setPeoplePositionFilter(event.target.value)}
+                        style={{ height: 34, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 10px', outline: 'none', fontSize: 12 }}
+                      >
+                        {peoplePositionOptions.map((option) => <option key={option} value={option}>{option === '全部' ? '请选择' : option}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <button onClick={() => peopleDataImportInputRef.current?.click()} style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: colors.text, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '0 10px', cursor: 'pointer' }}>
+                        <Upload size={14} />
+                        导入
+                      </button>
+                      <button
+                        onClick={exportPeopleData}
+                        disabled={!filteredPeopleRows.length}
+                        style={{
+                          height: 32,
+                          border: `1px solid ${colors.inputBorder}`,
+                          borderRadius: 4,
+                          background: filteredPeopleRows.length ? colors.cardBg : colors.inputBorder,
+                          color: filteredPeopleRows.length ? colors.text : colors.textMuted,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          padding: '0 10px',
+                          cursor: filteredPeopleRows.length ? 'pointer' : 'not-allowed',
+                        }}
+                      >
+                        <Download size={14} />
+                        导出Excel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ overflow: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+                    <thead>
+                      <tr style={{ background: colors.tableHeaderBg }}>
+                        {['姓名', '部门', '岗位', '实际出勤天数', '平方', '操作'].map((header) => (
+                          <th key={header} style={{ padding: '11px 12px', borderBottom: `1px solid ${colors.tableBorder}`, borderRight: `1px solid ${colors.tableBorder}`, color: colors.text, fontSize: 13, fontWeight: 700, textAlign: 'left', whiteSpace: 'nowrap' }}>
+                            {header}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedPeopleRows.map((row) => (
+                        <tr key={`${row.employeeNo || row.name}-${row.id}`} style={{ borderBottom: `1px solid ${colors.tableBorder}` }}>
+                          <td style={{ padding: '10px 12px', borderRight: `1px solid ${colors.tableBorder}`, color: colors.primary, whiteSpace: 'nowrap' }}>{row.name || '-'}</td>
+                          <td style={{ padding: '10px 12px', borderRight: `1px solid ${colors.tableBorder}`, color: colors.text, whiteSpace: 'nowrap' }}>{row.dept || '-'}</td>
+                          <td style={{ padding: '10px 12px', borderRight: `1px solid ${colors.tableBorder}`, color: colors.text, whiteSpace: 'nowrap' }}>{row.position || '-'}</td>
+                          <td style={{ padding: '10px 12px', borderRight: `1px solid ${colors.tableBorder}`, color: colors.text, whiteSpace: 'nowrap' }}>{displayValue(row.actualWorkDaysForSalary)}</td>
+                          <td style={{ padding: '10px 12px', borderRight: `1px solid ${colors.tableBorder}`, color: colors.text, whiteSpace: 'nowrap' }}>{displayValue(row.squareForSalary)}</td>
+                          <td style={{ padding: '10px 12px', borderRight: `1px solid ${colors.tableBorder}`, color: colors.text, whiteSpace: 'nowrap' }} />
+                        </tr>
+                      ))}
+                      {!paginatedPeopleRows.length && (
+                        <tr>
+                          <td colSpan={6} style={{ padding: 32, textAlign: 'center', color: colors.textMuted }}>
+                            暂无人员数据
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ minHeight: 42, padding: '8px 12px', borderTop: `1px solid ${colors.cardBorder}`, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, color: colors.textMuted, fontSize: 12 }}>
+                  <span>共 {filteredPeopleRows.length} 条</span>
+                  <button onClick={() => setPeoplePage((page) => Math.max(1, page - 1))} disabled={normalizedPeoplePage <= 1} style={{ border: 'none', background: 'transparent', color: normalizedPeoplePage <= 1 ? colors.textMuted : colors.text, cursor: normalizedPeoplePage <= 1 ? 'not-allowed' : 'pointer' }}>{'<'}</button>
+                  <button style={{ minWidth: 28, height: 28, border: `1px solid ${colors.primary}`, borderRadius: 4, background: colors.cardBg, color: colors.primary }}>{normalizedPeoplePage}</button>
+                  <button onClick={() => setPeoplePage((page) => Math.min(peopleTotalPages, page + 1))} disabled={normalizedPeoplePage >= peopleTotalPages} style={{ border: 'none', background: 'transparent', color: normalizedPeoplePage >= peopleTotalPages ? colors.textMuted : colors.text, cursor: normalizedPeoplePage >= peopleTotalPages ? 'not-allowed' : 'pointer' }}>{'>'}</button>
+                  <select value={PEOPLE_DATA_PAGE_SIZE} disabled style={{ height: 28, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 8px' }}>
+                    <option value={PEOPLE_DATA_PAGE_SIZE}>{PEOPLE_DATA_PAGE_SIZE} 条/页</option>
+                  </select>
+                  <span>跳至</span>
+                  <input
+                    value={peoplePageDraft}
+                    onChange={(event) => setPeoplePageDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') jumpPeoplePage();
+                    }}
+                    onBlur={jumpPeoplePage}
+                    style={{ width: 54, height: 28, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 8px', outline: 'none' }}
+                  />
+                  <span>页</span>
+                </div>
+              </section>
+            ) : ruleSection === 'assignments' ? (
+              <section style={{ background: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 6, overflow: 'hidden' }}>
+                <div style={{ padding: '10px 12px', borderBottom: `1px solid ${colors.cardBorder}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 700 }}>模板人员分配</span>
+                    {renderTemplateSearchFilter('部门', 'dept', templateDeptOptions, 'salary-assignment-dept-options', 150)}
+                    {renderTemplateSearchFilter('关联岗位', 'position', templatePositionOptions, 'salary-assignment-position-options', 150)}
+                  </div>
+                </div>
+                <div style={{ overflow: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: Math.max(860, assignmentSlotCount * 160 + 330) }}>
+                    <thead>
+                      <tr style={{ background: colors.tableHeaderBg }}>
+                        <th style={{ position: 'sticky', left: 0, zIndex: 2, width: 220, padding: '10px 12px', fontSize: 12, color: headerTextColor, fontWeight: 600, textAlign: 'left', borderBottom: `1px solid ${colors.tableBorder}`, background: colors.tableHeaderBg }}>模板 / 部门 / 岗位</th>
+                        {Array.from({ length: assignmentSlotCount }, (_, index) => (
+                          <th key={`slot-head-${index}`} style={{ minWidth: 150, padding: '10px 12px', fontSize: 12, color: headerTextColor, fontWeight: 600, textAlign: 'center', borderBottom: `1px solid ${colors.tableBorder}`, background: colors.tableHeaderBg }}>
+                            <div>人员{index + 1}</div>
+                          </th>
+                        ))}
+                        <th style={{ width: 110, padding: '10px 12px', fontSize: 12, color: headerTextColor, fontWeight: 600, textAlign: 'left', borderBottom: `1px solid ${colors.tableBorder}`, background: colors.tableHeaderBg }}>
+                          操作
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredRuleTemplates.map((template) => {
+                        const assignment = templateAssignments[template.id];
+                        const employeeKeys = (assignment?.employeeKeys || []).filter((key) => assignmentEmployeeByKey[key]);
+                        const isEditing = assignmentTemplateId === template.id;
+                        return (
+                          <tr key={`assignment-${template.id}`} style={{ borderBottom: `1px solid ${colors.tableBorder}`, background: isEditing ? 'rgba(180, 45, 58, 0.05)' : 'transparent' }}>
+                            <td style={{ position: 'sticky', left: 0, zIndex: 1, padding: '10px 12px', background: isEditing ? 'rgba(180, 45, 58, 0.05)' : colors.cardBg, color: colors.text, fontWeight: 600 }}>
+                              <div>{template.name}</div>
+                              <div style={{ marginTop: 3, color: colors.textMuted, fontSize: 12 }}>{template.dept || deptForPosition(template.position)}</div>
+                              <div style={{ marginTop: 2, color: colors.primary, fontSize: 12 }}>{assignment?.position || template.position}</div>
+                            </td>
+                            {Array.from({ length: assignmentSlotCount }, (_, index) => {
+                              const employeeKey = employeeKeys[index];
+                              const employee = employeeKey ? assignmentEmployeeByKey[employeeKey] : null;
+                              return (
+                                <td
+                                  key={`${template.id}-slot-${index}`}
+                                  style={{
+                                    padding: '8px 10px',
+                                    textAlign: 'center',
+                                    color: employee ? colors.text : colors.textMuted,
+                                    background: employee ? 'rgba(22, 163, 74, 0.08)' : 'transparent',
+                                  }}
+                                >
+                                  {employee ? (
+                                    <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                                      <span>{employee.employeeName}</span>
+                                      <button
+                                        onClick={() => unbindAssignmentEmployee(template.id, employeeKey)}
+                                        style={{ height: 24, border: `1px solid ${colors.badgeRedText || '#B42318'}`, borderRadius: 4, background: colors.badgeRedBg || '#FEE4E2', color: colors.badgeRedText || '#B42318', padding: '0 8px', cursor: 'pointer', fontSize: 12 }}
+                                      >
+                                        解绑
+                                      </button>
+                                    </div>
+                                  ) : '-'}
+                                </td>
+                              );
+                            })}
+                            <td style={{ padding: '8px 12px', textAlign: 'left', whiteSpace: 'nowrap' }}>
+                              <button
+                                onClick={() => openAssignmentEditor(template)}
+                                style={{ height: 28, border: `1px solid ${isEditing ? colors.primary : colors.inputBorder}`, borderRadius: 4, background: isEditing ? colors.primary : colors.cardBg, color: isEditing ? colors.primaryText : colors.primary, padding: '0 10px', cursor: 'pointer', fontSize: 12 }}
+                              >
+                                编辑
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ) : rulePanelMode === 'templates' ? (
               <section style={{ background: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 6, overflow: 'hidden' }}>
                 <div style={{ padding: '10px 12px', borderBottom: `1px solid ${colors.cardBorder}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontWeight: 700 }}>核算模板</span>
-                  <span style={{ color: colors.textMuted, fontSize: 12 }}>{ruleTemplates.length} 个模板</span>
+                  <span style={{ color: colors.textMuted, fontSize: 12 }}>
+                    {filteredRuleTemplates.length} / {ruleTemplates.length} 个模板，每页 {TEMPLATE_PAGE_SIZE} 个{selectedTemplateCount ? `，已选 ${selectedTemplateCount}` : ''}
+                  </span>
                 </div>
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 860 }}>
                     <thead>
                       <tr style={{ background: colors.tableHeaderBg }}>
-                        {['模板名称', '岗位分组', '关联岗位', '表头数量', '操作'].map((header) => (
+                        <th style={{ width: 44, padding: '10px 12px', borderBottom: `1px solid ${colors.tableBorder}`, background: colors.tableHeaderBg }}>
+                          <input
+                            type="checkbox"
+                            checked={allFilteredTemplatesSelected}
+                            onChange={toggleSelectAllFilteredTemplates}
+                            aria-label="全选当前页模板"
+                          />
+                        </th>
+                        {['模板名称', '部门', '关联岗位', '表头数量', '操作'].map((header) => (
                           <th key={header} style={{ padding: '10px 12px', fontSize: 12, color: headerTextColor, fontWeight: 600, textAlign: 'left', borderBottom: `1px solid ${colors.tableBorder}`, whiteSpace: 'nowrap' }}>
                             {header}
                           </th>
@@ -1328,40 +3438,307 @@ export default function SalaryCalculation() {
                       </tr>
                     </thead>
                     <tbody>
-                      {ruleTemplates.map((template) => (
+                      {paginatedRuleTemplates.map((template) => (
                         <tr key={template.id} style={{ borderBottom: `1px solid ${colors.tableBorder}` }}>
-                          <td style={{ padding: '12px', color: colors.text, fontWeight: 600 }}>{template.name}</td>
-                          <td style={{ padding: '12px', color: colors.textMuted }}>{template.group}</td>
+                          <td style={{ width: 44, padding: '12px', whiteSpace: 'nowrap' }}>
+                            <input
+                              type="checkbox"
+                              checked={selectedTemplateIds.has(template.id)}
+                              onChange={() => toggleTemplateSelection(template.id)}
+                              aria-label={`选择${template.name}`}
+                            />
+                          </td>
+                          <td style={{ padding: '12px', color: colors.text, fontWeight: 600 }}>
+                            {renamingTemplateId === template.id ? (
+                              <input
+                                value={renameTemplateValue}
+                                autoFocus
+                                onChange={(event) => setRenameTemplateValue(event.target.value)}
+                                onBlur={commitTemplateRename}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') commitTemplateRename();
+                                  if (event.key === 'Escape') cancelTemplateRename();
+                                }}
+                                style={{ width: 'min(220px, 100%)', height: 30, border: `1px solid ${colors.primary}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 8px', outline: 'none', fontWeight: 600 }}
+                              />
+                            ) : (
+                              <button
+                                onClick={() => startRenamingTemplate(template)}
+                                title="重命名模板"
+                                style={{ border: 'none', background: 'transparent', color: colors.text, cursor: 'text', padding: 0, font: 'inherit', fontWeight: 600, textAlign: 'left' }}
+                              >
+                                {template.name}
+                              </button>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px', color: colors.textMuted }}>{template.dept || deptForPosition(template.position)}</td>
                           <td style={{ padding: '12px', color: colors.textMuted }}>{template.position}</td>
-                          <td style={{ padding: '12px', color: colors.textMuted }}>{template.fieldCount}</td>
+                          <td style={{ padding: '12px', color: colors.textMuted }}>{templateFieldCountById[template.id] ?? template.fieldCount}</td>
                           <td style={{ padding: '12px', display: 'flex', gap: 12, whiteSpace: 'nowrap' }}>
-                            <button onClick={() => openTemplateDetail(template)} style={{ border: 'none', background: 'transparent', color: colors.primary, cursor: 'pointer' }}>详情</button>
                             <button onClick={() => openTemplateDetail(template)} style={{ border: 'none', background: 'transparent', color: colors.primary, cursor: 'pointer' }}>编辑</button>
-                            <button onClick={() => openTemplateModal(template, 'import')} style={{ border: 'none', background: 'transparent', color: colors.primary, cursor: 'pointer' }}>导入项</button>
-                            <button onClick={() => openTemplateModal(template, 'export')} style={{ border: 'none', background: 'transparent', color: colors.primary, cursor: 'pointer' }}>导出项</button>
+                            <button onClick={() => exportTemplateFromList(template)} style={{ border: 'none', background: 'transparent', color: colors.primary, cursor: 'pointer' }}>导出项</button>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+                <div style={{ padding: '10px 12px', borderTop: `1px solid ${colors.cardBorder}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <span style={{ color: colors.textMuted, fontSize: 12 }}>
+                    第 {normalizedTemplatePage} / {templateTotalPages} 页，共 {filteredRuleTemplates.length} 条
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                      onClick={() => setTemplatePage((page) => Math.max(1, page - 1))}
+                      disabled={normalizedTemplatePage <= 1}
+                      style={{ height: 30, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: normalizedTemplatePage <= 1 ? colors.textMuted : colors.text, padding: '0 10px', cursor: normalizedTemplatePage <= 1 ? 'not-allowed' : 'pointer' }}
+                    >
+                      上一页
+                    </button>
+                    <button
+                      onClick={() => setTemplatePage((page) => Math.min(templateTotalPages, page + 1))}
+                      disabled={normalizedTemplatePage >= templateTotalPages}
+                      style={{ height: 30, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: normalizedTemplatePage >= templateTotalPages ? colors.textMuted : colors.text, padding: '0 10px', cursor: normalizedTemplatePage >= templateTotalPages ? 'not-allowed' : 'pointer' }}
+                    >
+                      下一页
+                    </button>
+                    <span style={{ color: colors.textMuted, fontSize: 12 }}>跳到</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={templateTotalPages}
+                      value={templatePageDraft}
+                      onChange={(event) => setTemplatePageDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') jumpToTemplatePage();
+                      }}
+                      style={{ width: 64, height: 30, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 8px', outline: 'none', colorScheme: 'light' }}
+                    />
+                    <span style={{ color: colors.textMuted, fontSize: 12 }}>页</span>
+                    <button
+                      onClick={jumpToTemplatePage}
+                      style={{ height: 30, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: colors.text, padding: '0 10px', cursor: 'pointer' }}
+                    >
+                      跳转
+                    </button>
+                  </div>
+                </div>
               </section>
             ) : (
               <section style={{ background: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 6, overflow: 'hidden' }}>
-                <div style={{ padding: '10px 12px', borderBottom: `1px solid ${colors.cardBorder}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 700 }}>{ruleMode === 'position' ? '岗位模板' : '人员微调'} / {rulePosition}</span>
+                <div style={{ padding: '10px 12px', borderBottom: `1px solid ${colors.cardBorder}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontWeight: 700 }}>岗位模板 / {rulePosition}</span>
                   <span style={{ color: colors.textMuted, fontSize: 12 }}>{ruleFields.length} 个表头</span>
                 </div>
-                <div style={{ padding: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-                  {ruleFields.map((field, index) => (
-                    <div key={`${field.key}-${index}`} style={{ minHeight: 58, border: `1px solid ${colors.tableBorder}`, borderRadius: 4, padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: colors.cardBg }}>
-                      <span style={{ color: colors.text, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{field.label || '空表头'}</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-                        <button onClick={() => openRuleEditor(field)} disabled={ruleMode === 'person' && selectedRuleEmployeeKey === '*'} style={{ border: 'none', background: 'transparent', color: colors.primary, cursor: 'pointer' }}>编辑</button>
-                        <button onClick={() => deleteRuleField(field)} disabled={ruleMode === 'person' && selectedRuleEmployeeKey === '*'} style={{ border: 'none', background: 'transparent', color: colors.textMuted, cursor: 'pointer' }}>删除</button>
-                      </span>
-                    </div>
-                  ))}
+                <div style={{ overflow: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: Math.max(1180, ruleFields.length * 168 + 120) }}>
+                    <thead>
+                      <tr style={{ background: colors.tableHeaderBg }}>
+                        <th style={{ position: 'sticky', left: 0, zIndex: 2, width: 108, padding: '8px 10px', fontSize: 12, color: headerTextColor, fontWeight: 600, textAlign: 'left', borderBottom: `1px solid ${colors.tableBorder}`, background: colors.tableHeaderBg }}>
+                          配置项
+                        </th>
+                        {ruleFields.map((field) => {
+                          const groupVisual = ruleFieldGroupVisuals[field.key];
+                          const isGroupedFollower = Boolean(groupVisual && !groupVisual.isFirst);
+                          return (
+                          <React.Fragment key={`header-${field.key}`}>
+                            <th
+                              onDragOver={(event) => {
+                                event.preventDefault();
+                                event.dataTransfer.dropEffect = 'move';
+                              }}
+                              onDrop={(event) => {
+                                event.preventDefault();
+                                reorderRuleField(event.dataTransfer.getData('text/plain') || draggingRuleFieldKey, field.key);
+                              }}
+                              onDragEnd={() => setDraggingRuleFieldKey('')}
+                              onMouseDown={(event) => {
+                                if (event.ctrlKey && event.button === 0) {
+                                  event.preventDefault();
+                                  addFieldToGroupSelection(field);
+                                }
+                              }}
+                              onContextMenu={(event) => {
+                                if (event.ctrlKey) {
+                                  event.preventDefault();
+                                  removeFieldFromGroup(field);
+                                }
+                              }}
+                              style={{
+                                minWidth: 168,
+                                padding: '6px 8px',
+                                borderTop: groupVisual ? `2px solid ${groupVisual.color}` : undefined,
+                                borderBottom: groupVisual ? `2px solid ${groupVisual.color}` : `1px solid ${colors.tableBorder}`,
+                                borderLeft: groupVisual ? (groupVisual.isFirst ? `2px solid ${groupVisual.color}` : 'none') : undefined,
+                                borderRight: groupVisual ? (groupVisual.isLast ? `2px solid ${groupVisual.color}` : 'none') : undefined,
+                                boxShadow: groupVisual && !groupVisual.isLast ? `inset -1px 0 0 ${groupVisual.color}22` : undefined,
+                                background: selectedGroupFieldKeys.has(field.key)
+                                  ? 'rgba(180, 45, 58, 0.08)'
+                                  : draggingRuleFieldKey === field.key
+                                    ? 'rgba(180, 45, 58, 0.08)'
+                                    : groupVisual ? groupVisual.background : colors.tableHeaderBg,
+                                outline: selectedGroupFieldKeys.has(field.key)
+                                  ? `2px solid ${colors.primary}`
+                                  : draggingRuleFieldKey && draggingRuleFieldKey !== field.key ? `1px dashed ${colors.primary}` : 'none',
+                              }}
+                            >
+                              <div style={{ display: 'grid', gap: 5 }}>
+                                <button
+                                  type="button"
+                                  draggable
+                                  onDragStart={(event) => {
+                                    setDraggingRuleFieldKey(field.key);
+                                    event.dataTransfer.effectAllowed = 'move';
+                                    event.dataTransfer.setData('text/plain', field.key);
+                                  }}
+                                  onDragEnd={() => setDraggingRuleFieldKey('')}
+                                  title="按住拖动表头换位置"
+                                  style={{
+                                    width: '100%',
+                                    height: 22,
+                                    border: `1px dashed ${colors.inputBorder}`,
+                                    borderRadius: 4,
+                                    background: colors.cardBg,
+                                    color: colors.textMuted,
+                                    cursor: 'grab',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    padding: 0,
+                                  }}
+                                >
+                                  <GripVertical size={14} />
+                                </button>
+                                {isGroupedFollower ? (
+                                  <>
+                                    <div style={{ height: 26, borderRadius: 4, background: groupVisual?.background, color: groupVisual?.color || colors.textMuted, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 }}>
+                                      同组
+                                    </div>
+                                    <div style={{ height: 26, borderRadius: 4, background: groupVisual?.background }} />
+                                  </>
+                                ) : (
+                                  <>
+                                    <input
+                                      value={field.groupTop || ''}
+                                      onChange={(event) => updateRuleFieldGroup(field, { groupTop: event.target.value })}
+                                      placeholder="如 三维家/SU"
+                                      title="一级分组。Ctrl+左键多选成组，Ctrl+右键移出分组"
+                                      style={{ width: '100%', height: 26, border: `1px solid ${groupVisual?.color || colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 6px', outline: 'none', boxSizing: 'border-box', fontSize: 12 }}
+                                    />
+                                    <input
+                                      value={field.groupSub || ''}
+                                      onChange={(event) => updateRuleFieldGroup(field, { groupSub: event.target.value })}
+                                      placeholder="如 小区营销"
+                                      title="二级分组。Ctrl+左键多选成组，Ctrl+右键移出分组"
+                                      style={{ width: '100%', height: 26, border: `1px solid ${groupVisual?.color || colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 6px', outline: 'none', boxSizing: 'border-box', fontSize: 12 }}
+                                    />
+                                  </>
+                                )}
+                                <select
+                                  value={CONFIG_ITEM_OPTIONS.includes(field.label as any) ? field.label : '自定义表头'}
+                                  onChange={(event) => {
+                                    updateRuleFieldLabel(field, event.target.value === '自定义表头' ? '自定义表头' : event.target.value);
+                                  }}
+                                  style={{ width: '100%', height: 28, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 6px', outline: 'none', boxSizing: 'border-box', fontSize: 12 }}
+                                >
+                                  {CONFIG_ITEM_OPTIONS.map((option) => (
+                                    <option key={option} value={option}>{option}</option>
+                                  ))}
+                                  <option value="自定义表头">自定义表头</option>
+                                </select>
+                                <textarea
+                                  value={field.label}
+                                  onChange={(event) => updateRuleFieldLabel(field, event.target.value)}
+                                  rows={field.label.length > 20 ? 2 : 1}
+                                  style={{ width: '100%', minHeight: field.label.length > 20 ? 48 : 28, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '5px 8px', outline: 'none', boxSizing: 'border-box', fontSize: 12, fontWeight: 600, lineHeight: 1.45, resize: 'vertical', overflowWrap: 'anywhere', whiteSpace: 'normal' }}
+                                />
+                              </div>
+                            </th>
+                          </React.Fragment>
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr style={{ borderBottom: `1px solid ${colors.tableBorder}` }}>
+                        <td style={{ position: 'sticky', left: 0, zIndex: 1, padding: '8px 10px', color: colors.textMuted, background: colors.cardBg, fontSize: 12 }}>来源</td>
+                        {ruleFields.map((field) => (
+                          <React.Fragment key={`source-${field.key}`}>
+                            <td style={{ padding: '6px 8px' }}>
+                              <select
+                                value={sourceOptionsForField(field).includes(field.source) ? field.source : sourceOptionsForField(field)[0]}
+                                onChange={(event) => updateRuleFieldConfig(field, { source: event.target.value as RuleFieldConfig['source'] })}
+                                disabled={field.label === '应出勤天数' || field.label === '实际出勤天数' || field.label === '平方' || field.label === '薪资'}
+                                style={{ width: '100%', height: 28, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 6px', outline: 'none', boxSizing: 'border-box', fontSize: 12 }}
+                              >
+                                {sourceOptionsForField(field).map((source) => (
+                                  <option key={source} value={source}>{source}</option>
+                                ))}
+                              </select>
+                            </td>
+                          </React.Fragment>
+                        ))}
+                      </tr>
+                      <tr style={{ borderBottom: `1px solid ${colors.tableBorder}` }}>
+                        <td style={{ position: 'sticky', left: 0, zIndex: 1, padding: '8px 10px', color: colors.textMuted, background: colors.cardBg, fontSize: 12 }}>运算一</td>
+                        {ruleFields.map((field) => (
+                          <React.Fragment key={`operation-${field.key}`}>
+                            <td style={{ padding: '6px 8px' }}>
+                              {field.label === '月份' ? (
+                                <div style={{ display: 'grid' }}>
+                                  <input
+                                    type="date"
+                                    value={normalizeDateInputValue(field.value1)}
+                                    onFocus={() => {
+                                      if (!normalizeDateInputValue(field.value1)) updateRuleFieldConfig(field, { value1: todayDateInputValue(), op1: '' });
+                                    }}
+                                    onChange={(event) => updateRuleFieldConfig(field, { value1: event.target.value, op1: '' })}
+                                    style={{ width: '100%', height: 28, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 6px', outline: 'none', boxSizing: 'border-box', fontSize: 12, colorScheme: 'light' }}
+                                  />
+                                </div>
+                              ) : (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(72px, 0.72fr)', gap: 6 }}>
+                                  <input
+                                    value={field.value1 || ''}
+                                    onChange={(event) => updateRuleFieldConfig(field, { value1: event.target.value, op1: '' })}
+                                    placeholder="如 2000*5%+"
+                                    style={{ width: '100%', height: 28, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 6px', outline: 'none', boxSizing: 'border-box', fontSize: 12 }}
+                                  />
+                                  <div
+                                    title="当前表头运算结果"
+                                    style={{ height: 28, border: `1px solid ${colors.tableBorder}`, borderRadius: 4, background: colors.tableHeaderBg, color: colors.text, padding: '0 6px', display: 'flex', alignItems: 'center', boxSizing: 'border-box', fontSize: 12, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}
+                                  >
+                                    {String(field.label === '薪资' ? (rulePreviewRow ? templateCalculateSalary(rulePreviewRow, ruleFields) : '按人员计算') : templateCalculateFieldOperationResult(rulePreviewRow, field)) || '-'}
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+                          </React.Fragment>
+                        ))}
+                      </tr>
+                      <tr style={{ borderBottom: `1px solid ${colors.tableBorder}` }}>
+                        <td style={{ position: 'sticky', left: 0, zIndex: 1, padding: '8px 10px', color: colors.textMuted, background: colors.cardBg, fontSize: 12 }}>公式算法</td>
+                        <td colSpan={Math.max(1, ruleFields.length)} style={{ padding: '6px 8px' }}>
+                          <div style={{ minHeight: 28, border: `1px solid ${colors.tableBorder}`, borderRadius: 4, background: colors.tableHeaderBg, color: colors.textMuted, padding: '5px 8px', boxSizing: 'border-box', fontSize: 12, lineHeight: 1.45, overflowWrap: 'anywhere' }}>
+                            {buildTemplateFormulaText(ruleFields)}
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ position: 'sticky', left: 0, zIndex: 1, padding: '8px 10px', color: colors.textMuted, background: colors.cardBg, fontSize: 12 }}>操作</td>
+                        {ruleFields.map((field) => (
+                          <React.Fragment key={`action-${field.key}`}>
+                            <td style={{ padding: '6px 8px' }}>
+                              <button onClick={() => deleteRuleField(field)} style={{ width: '100%', height: 28, border: `1px solid ${colors.badgeRedText || '#B42318'}`, borderRadius: 4, background: colors.badgeRedBg || '#FEE4E2', color: colors.badgeRedText || '#B42318', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, fontSize: 12, fontWeight: 700 }}>
+                                <Trash2 size={13} />
+                                删除
+                              </button>
+                            </td>
+                          </React.Fragment>
+                        ))}
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               </section>
             )}
@@ -1377,35 +3754,10 @@ export default function SalaryCalculation() {
             marginBottom: 12,
           }}
         >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            style={{ display: 'none' }}
-            onChange={(event) => handleImport(event.target.files?.[0] || null)}
-          />
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 17, fontWeight: 700 }}>
               <ShieldCheck size={19} color={colors.primary} />
               薪酬核算
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '6px 10px',
-                borderRadius: 4,
-                border: `1px solid ${colors.cardBorder}`,
-                background: colors.tableHeaderBg,
-                color: colors.textMuted,
-                maxWidth: 520,
-              }}
-            >
-              <FileSpreadsheet size={15} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {SOURCE_FILE} / {SOURCE_SHEET}
-              </span>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1445,57 +3797,36 @@ export default function SalaryCalculation() {
               ))}
             </select>
             <button
-              onClick={() => fileInputRef.current?.click()}
-              style={{
-                height: 32,
-                border: `1px solid ${colors.inputBorder}`,
-                borderRadius: 4,
-                background: colors.cardBg,
-                color: colors.text,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '0 10px',
-                cursor: 'pointer',
-              }}
-            >
-              <Upload size={14} />
-              导入
-            </button>
-            <button
               onClick={handleExport}
+              disabled={exportDisabled}
               style={{
                 height: 32,
                 border: 'none',
                 borderRadius: 4,
-                background: colors.primary,
-                color: colors.primaryText,
+                background: exportDisabled ? colors.inputBorder : colors.primary,
+                color: exportDisabled ? colors.textMuted : colors.primaryText,
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 6,
                 padding: '0 10px',
-                cursor: 'pointer',
+                cursor: exportDisabled ? 'not-allowed' : 'pointer',
               }}
             >
               <Download size={14} />
-              导出{selectedVisibleRows.length ? `(${selectedVisibleRows.length})` : ''}
+              {!payrollInputsLoaded ? '加载中' : `导出Excel${selectedVisibleRows.length ? `(${selectedVisibleRows.length})` : ''}`}
             </button>
-            {importStatus && <span style={{ color: colors.textMuted, fontSize: 12 }}>{importStatus}</span>}
+            {(importStatus || payrollInputStatus || salaryPersistenceStatus) && <span style={{ color: colors.textMuted, fontSize: 12 }}>{importStatus || payrollInputStatus || salaryPersistenceStatus}</span>}
+            {activePreviewTemplate && (
+              <button onClick={exitTemplatePreview} style={{ height: 32, border: `1px solid ${colors.primary}`, borderRadius: 4, background: colors.cardBg, color: colors.primary, padding: '0 10px', cursor: 'pointer' }}>
+                退出预览
+              </button>
+            )}
+            {activeAssignmentTemplate && (
+              <button onClick={exitAssignmentResult} style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: colors.text, padding: '0 10px', cursor: 'pointer' }}>
+                退出分配结果
+              </button>
+            )}
           </div>
-        </section>
-
-        <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 12 }}>
-          {[
-            ['验证样例', `${visibleRows.length} 条`],
-            ['对账通过', `${passCount} 条`],
-            ['通过率', pct(passCount, visibleRows.length)],
-            ['差异合计', `${preciseMoney(totalGrossDiff + totalNetDiff)} 元`],
-          ].map(([label, value]) => (
-            <div key={label} style={{ background: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 6, padding: 14 }}>
-              <div style={{ fontSize: 12, color: colors.textMuted }}>{label}</div>
-              <div style={{ fontSize: 22, fontWeight: 700, marginTop: 8 }}>{value}</div>
-            </div>
-          ))}
         </section>
 
         <section
@@ -1508,17 +3839,25 @@ export default function SalaryCalculation() {
           }}
         >
           <div style={{ padding: '10px 12px', borderBottom: `1px solid ${colors.cardBorder}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontWeight: 700 }}>{activePosition === '全部' ? activeGroup : activePosition}</span>
+            <span style={{ fontWeight: 700 }}>
+              {activePreviewTemplate ? `${activePreviewTemplate.name}预览` : activeAssignmentTemplate ? `${activeAssignmentTemplate.name}分配结果` : activePosition === '全部' ? payrollGroupLabel(activeGroup) : activePosition}
+            </span>
             <span style={{ color: colors.textMuted, fontSize: 12 }}>
               已选 {selectedVisibleRows.length} / {visibleRows.length}
             </span>
           </div>
 
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: Math.max(1280, activeSheetColumns.length * 106) }}>
+            <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse' }}>
+              <colgroup>
+                <col style={{ width: 44, minWidth: 44 }} />
+                {activeSheetColumns.map((column, index) => (
+                  <col key={`col-${column.key}-${index}`} style={{ width: columnDisplayWidth(column), minWidth: columnDisplayWidth(column) }} />
+                ))}
+              </colgroup>
               <thead>
                 <tr style={{ background: colors.tableHeaderBg, color: headerTextColor }}>
-                  <th rowSpan={hasTieredHeader ? 2 : 1} style={{ width: 44, padding: '10px 12px', borderBottom: `1px solid ${colors.tableBorder}` }}>
+                  <th rowSpan={hasTieredHeader ? 3 : 1} style={{ width: 44, padding: '10px 12px', borderBottom: `1px solid ${colors.tableBorder}` }}>
                     <input
                       type="checkbox"
                       checked={allVisibleSelected}
@@ -1526,23 +3865,39 @@ export default function SalaryCalculation() {
                       aria-label="全选人员"
                     />
                   </th>
-                  {activeSheetColumns.map((col, index) => (
-                    <th key={`${col.key}-${index}`} style={{ textAlign: 'left', padding: '10px 12px', borderBottom: `1px solid ${colors.tableBorder}`, fontWeight: 600, whiteSpace: 'pre-line', minWidth: col.label ? (col.width || 96) : 60, lineHeight: 1.35 }}>
-                      {renderHeaderCell(col, hasTieredHeader ? (col.topLabel ?? col.label) : col.label)}
+                  {(hasTieredHeader ? topHeaderGroups : activeSheetColumns.map((column, index) => ({ key: `${column.key}-${index}`, label: column.label, colSpan: 1, width: columnDisplayWidth(column), column, color: '', background: '' }))).map((group) => (
+                    <th key={group.key} colSpan={group.colSpan} style={{ textAlign: 'center', padding: '10px 12px', borderTop: group.color ? `2px solid ${group.color}` : undefined, borderLeft: group.color ? `2px solid ${group.color}` : undefined, borderRight: group.color ? `2px solid ${group.color}` : undefined, borderBottom: group.color ? `2px solid ${group.color}` : `1px solid ${colors.tableBorder}`, background: group.background || undefined, color: '#111827', fontSize: 14, fontWeight: 700, whiteSpace: 'pre-line', overflowWrap: 'anywhere', width: group.width, minWidth: group.width, lineHeight: 1.35 }}>
+                      {renderHeaderCell(group.column, hasTieredHeader ? group.label : group.column.label)}
                     </th>
                   ))}
                 </tr>
                 {hasTieredHeader && (
                   <tr style={{ background: colors.tableHeaderBg, color: headerTextColor }}>
+                    {subHeaderGroups.map((group) => (
+                      <th key={`sub-${group.key}`} colSpan={group.colSpan} style={{ textAlign: 'center', padding: '10px 12px', borderLeft: group.color ? `2px solid ${group.color}` : undefined, borderRight: group.color ? `2px solid ${group.color}` : undefined, borderBottom: group.color ? `2px solid ${group.color}` : `1px solid ${colors.tableBorder}`, background: group.background || undefined, color: '#111827', fontSize: 14, fontWeight: 700, whiteSpace: 'pre-line', overflowWrap: 'anywhere', width: group.width, minWidth: group.width, lineHeight: 1.35 }}>
+                        {renderHeaderCell(group.column, group.label)}
+                      </th>
+                    ))}
+                  </tr>
+                )}
+                {hasTieredHeader && (
+                  <tr style={{ background: colors.tableHeaderBg, color: headerTextColor }}>
                     {activeSheetColumns.map((col, index) => (
-                      <th key={`sub-${col.key}-${index}`} style={{ textAlign: 'left', padding: '10px 12px', borderBottom: `1px solid ${colors.tableBorder}`, fontWeight: 600, whiteSpace: 'pre-line', minWidth: col.label ? (col.width || 96) : 60, lineHeight: 1.35 }}>
-                        {renderHeaderCell(col, col.bottomLabel ?? '')}
+                      <th key={`field-${col.key}-${index}`} style={{ textAlign: 'center', padding: '10px 12px', borderBottom: `1px solid ${colors.tableBorder}`, color: '#111827', fontSize: 14, fontWeight: 700, whiteSpace: 'pre-line', overflowWrap: 'anywhere', width: columnDisplayWidth(col), minWidth: columnDisplayWidth(col), lineHeight: 1.35 }}>
+                        {renderHeaderCell(col, col.label)}
                       </th>
                     ))}
                   </tr>
                 )}
               </thead>
               <tbody>
+                {!visibleRows.length && (
+                  <tr>
+                    <td colSpan={activeSheetColumns.length + 1} style={{ padding: '28px 12px', textAlign: 'center', color: colors.textMuted, borderBottom: `1px solid ${colors.tableBorder}` }}>
+                      {templatePreviewView ? '当前模板暂无可预览人员' : '请先完成岗位模板和人员分配'}
+                    </td>
+                  </tr>
+                )}
                 {visibleRows.map((row) => (
                   <tr key={rowKey(row)} style={{ borderBottom: `1px solid ${colors.tableBorder}` }}>
                     <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
@@ -1554,7 +3909,7 @@ export default function SalaryCalculation() {
                       />
                     </td>
                     {activeSheetColumns.map((col, index) => (
-                      <td key={`${rowKey(row)}-${col.key}-${index}`} style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: col.key === 'gross' || col.key === 'net' ? colors.text : undefined }}>
+                      <td key={`${rowKey(row)}-${col.key}-${index}`} style={{ padding: '10px 12px', width: columnDisplayWidth(col), minWidth: columnDisplayWidth(col), textAlign: 'center', whiteSpace: 'nowrap', color: col.key === 'gross' || col.key === 'net' ? colors.text : undefined }}>
                         {col.get(row)}
                       </td>
                     ))}
@@ -1565,40 +3920,19 @@ export default function SalaryCalculation() {
           </div>
         </section>
 
-        <section style={{ background: colors.cardBg, border: `1px solid ${colors.cardBorder}`, borderRadius: 6, padding: 14 }}>
-            <div style={{ fontWeight: 700, marginBottom: 12 }}>样例拆解：{selected.month} / {selected.position}</div>
-            {[
-              ['月薪资标准', selected.calcMonthly, selected.monthly],
-              ['基本工资', selected.calcBase, selected.base],
-              ['加班工资', selected.calcOvertime, selected.overtime],
-              ['绩效标准', selected.calcPerfStd, selected.perfStd],
-              ['实得绩效', selected.calcPerfActual, selected.perfActual],
-              ['应发工资', selected.calcGross, selected.gross],
-              ['实发工资', selected.calcNet, selected.net],
-            ].map(([label, systemValue, excelValue]) => {
-              const diff = val(systemValue as number) - val(excelValue as number);
-              return (
-                <div key={label as string} style={{ display: 'grid', gridTemplateColumns: '90px 1fr 1fr 70px', gap: 8, padding: '8px 0', borderTop: `1px solid ${colors.divider}`, alignItems: 'center' }}>
-                  <span style={{ color: colors.textMuted }}>{label}</span>
-                  <span>系统 {preciseMoney(systemValue as number)}</span>
-                  <span>Excel {preciseMoney(excelValue as number)}</span>
-                  <span style={{ color: Math.abs(diff) <= 1 ? colors.badgeGreenText : colors.badgeRedText }}>{diffText(diff)}</span>
-                </div>
-              );
-            })}
-        </section>
           </>
         )}
       </main>
-      {ruleModal === 'import' && (
+      {assignmentTemplateId && assignmentPosition && editingAssignmentTemplate && (
         <div
-          onClick={() => setRuleModal(null)}
+          onClick={closeAssignmentEditor}
           style={{
             position: 'absolute',
             top: 0,
             left: 0,
             right: 0,
             bottom: 0,
+            height: '100%',
             background: 'rgba(20, 29, 48, 0.28)',
             zIndex: 10,
             display: 'flex',
@@ -1611,72 +3945,142 @@ export default function SalaryCalculation() {
             onClick={(event) => event.stopPropagation()}
             style={{
               width: 760,
-              maxWidth: '100%',
-              maxHeight: '88%',
+              maxWidth: 'calc(100vw - 48px)',
+              maxHeight: 'calc(100vh - 64px)',
               background: colors.cardBg,
               border: `1px solid ${colors.cardBorder}`,
               borderRadius: 8,
-              boxShadow: '0 18px 50px rgba(15, 23, 42, 0.24)',
+              boxShadow: '0 20px 58px rgba(15, 23, 42, 0.28)',
               overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
+              display: 'grid',
+              gridTemplateRows: '58px auto minmax(0, 1fr) 58px',
             }}
           >
-            <div style={{ minHeight: 52, padding: '10px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `1px solid ${colors.cardBorder}` }}>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>导入项确认</div>
-                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>{rulePosition}模板 / 自动识别表头后确认重命名</div>
+            <div style={{ padding: '10px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `1px solid ${colors.cardBorder}`, boxSizing: 'border-box' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: colors.text }}>选择人员</div>
+                <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {editingAssignmentTemplate.name} / {editingAssignmentTemplate.dept || deptForPosition(editingAssignmentTemplate.position)} / {assignmentPosition}
+                </div>
               </div>
-              <button onClick={() => setRuleModal(null)} style={{ border: 'none', background: 'transparent', color: colors.textMuted, cursor: 'pointer', padding: 4 }} aria-label="关闭">
+              <button
+                onClick={closeAssignmentEditor}
+                style={{ border: 'none', background: 'transparent', color: colors.textMuted, cursor: 'pointer', padding: 4 }}
+                aria-label="关闭人员选择"
+              >
                 <X size={18} />
               </button>
             </div>
-            <div style={{ overflow: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 680 }}>
-                <thead>
-                  <tr style={{ background: colors.tableHeaderBg }}>
-                    {['选择', '识别表头', '状态', '确认名称'].map((header) => (
-                      <th key={header} style={{ padding: '10px 12px', fontSize: 12, color: headerTextColor, fontWeight: 600, textAlign: 'left', borderBottom: `1px solid ${colors.tableBorder}`, whiteSpace: 'nowrap' }}>
-                        {header}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {importDraftFields.map((field, index) => (
-                    <tr key={`${field.key}-${index}`} style={{ borderBottom: `1px solid ${colors.tableBorder}` }}>
-                      <td style={{ padding: '9px 12px' }}>
-                        <input
-                          type="checkbox"
-                          checked={field.selected}
-                          onChange={(event) => setImportDraftFields((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, selected: event.target.checked } : item))}
-                        />
-                      </td>
-                      <td style={{ padding: '9px 12px', color: colors.text }}>{field.detectedName || '空表头'}</td>
-                      <td style={{ padding: '9px 12px', color: field.status === '已识别' ? colors.badgeGreenText : colors.primary }}>{field.status}</td>
-                      <td style={{ padding: '9px 12px' }}>
-                        <input
-                          value={field.renamedName}
-                          onChange={(event) => setImportDraftFields((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, renamedName: event.target.value, status: '已识别' } : item))}
-                          style={{ height: 30, width: '100%', border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 8px', outline: 'none' }}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div style={{ padding: '12px 18px', borderBottom: `1px solid ${colors.cardBorder}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <select
+                value={assignmentCategoryId}
+                onChange={(event) => updateAssignmentCategory(event.target.value)}
+                style={{ height: 34, minWidth: 170, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: assignmentCategoryId ? colors.inputText : colors.textMuted, padding: '0 10px', outline: 'none', fontSize: 12 }}
+              >
+                <option value="">选择部门分类</option>
+                {departmentCategories.map((category) => (
+                  <option key={category.id} value={category.id}>{category.name}</option>
+                ))}
+              </select>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 34, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, padding: '0 10px', color: colors.textMuted, fontSize: 12, minWidth: 320, flex: '1 1 320px' }}>
+                <Search size={14} />
+                <input
+                  value={assignmentEmployeeSearch}
+                  onChange={(event) => setAssignmentEmployeeSearch(event.target.value)}
+                  placeholder="搜索姓名、岗位或部门"
+                  autoFocus
+                  style={{ flex: 1, minWidth: 160, height: 30, border: 'none', outline: 'none', background: 'transparent', color: colors.inputText, fontSize: 12 }}
+                />
+              </label>
+              <span style={{ color: colors.textMuted, fontSize: 12 }}>
+                已选 {pendingAssignmentEmployeeKeys.size} 人
+              </span>
             </div>
-            <div style={{ height: 1, background: colors.divider }} />
-            <div style={{ padding: '10px 18px', display: 'flex', justifyContent: 'flex-end', gap: 8, background: colors.cardBg }}>
-              <button onClick={() => setRuleModal(null)} style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: colors.text, padding: '0 12px', cursor: 'pointer' }}>
-                关闭
+            <div style={{ padding: 14, overflow: 'auto', background: colors.tableHeaderBg }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 10 }}>
+                {filteredAssignmentEmployees.map((employee) => {
+                  const key = employee.key;
+                  const assignedTemplateId = assignedEmployeeTemplateByKey[key];
+                  const assignedTemplate = assignedTemplateId ? ruleTemplates.find((template) => template.id === assignedTemplateId) : null;
+                  const assignedElsewhere = !!assignedTemplateId && assignedTemplateId !== assignmentTemplateId;
+                  const selected = pendingAssignmentEmployeeKeys.has(key);
+                  return (
+                    <label
+                      key={`assignment-card-${key}`}
+                      style={{
+                        minHeight: 56,
+                        border: `1px solid ${selected ? colors.primary : colors.tableBorder}`,
+                        borderRadius: 6,
+                        padding: '9px 10px',
+                        display: 'grid',
+                        gridTemplateColumns: '20px minmax(0, 1fr)',
+                        alignItems: 'center',
+                        gap: 8,
+                        color: assignedElsewhere ? colors.textMuted : colors.text,
+                        background: selected ? 'rgba(180, 45, 58, 0.08)' : colors.cardBg,
+                        cursor: assignedElsewhere ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        disabled={assignedElsewhere}
+                        onChange={() => togglePendingAssignmentEmployee(key)}
+                      />
+                      <span style={{ minWidth: 0, display: 'grid', gap: 3 }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600 }}>{employee.employeeName}</span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: colors.textMuted, fontSize: 12 }}>
+                          {employee.dept || '-'} / {employee.position || '-'}
+                        </span>
+                        {assignedElsewhere && assignedTemplate && (
+                          <span style={{ color: colors.badgeRedText || '#B42318', fontSize: 12 }}>
+                            已绑定：{assignedTemplate.name}
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  );
+                })}
+                {!filteredAssignmentEmployees.length && (
+                  <div style={{ minHeight: 56, border: `1px dashed ${colors.tableBorder}`, borderRadius: 6, padding: 12, color: colors.textMuted, background: colors.cardBg }}>
+                    当前岗位暂无可绑定人员
+                  </div>
+                )}
+              </div>
+            </div>
+            <div style={{ padding: '10px 18px', borderTop: `1px solid ${colors.cardBorder}`, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, background: colors.cardBg }}>
+              <button
+                onClick={closeAssignmentEditor}
+                style={{ height: 32, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.cardBg, color: colors.text, padding: '0 12px', cursor: 'pointer' }}
+              >
+                取消
               </button>
-              <button onClick={confirmImportFields} style={{ height: 32, border: 'none', borderRadius: 4, background: colors.primary, color: colors.primaryText, padding: '0 12px', cursor: 'pointer' }}>
-                确认导入
+              <button
+                onClick={confirmAssignment}
+                disabled={pendingAssignmentEmployeeKeys.size === 0}
+                style={{ height: 32, border: 'none', borderRadius: 4, background: pendingAssignmentEmployeeKeys.size ? colors.primary : colors.inputBorder, color: pendingAssignmentEmployeeKeys.size ? colors.primaryText : colors.textMuted, padding: '0 12px', cursor: pendingAssignmentEmployeeKeys.size ? 'pointer' : 'not-allowed' }}
+              >
+                确认
               </button>
             </div>
           </div>
         </div>
+      )}
+      {deleteTemplateTarget && (
+        <ConfirmDialog
+          colors={colors}
+          title="删除模板"
+          message={
+            <span>
+              确认删除「{deleteTemplateTarget.name}」吗？删除后会同步清理该模板的人员分配记录。
+            </span>
+          }
+          confirmLabel="删除"
+          cancelLabel="取消"
+          danger
+          onCancel={() => setDeleteTemplateTarget(null)}
+          onConfirm={() => deleteRuleTemplates(Array.from(selectedTemplateIds))}
+        />
       )}
       {ruleModal === 'export' && (
         <div
@@ -1866,7 +4270,7 @@ export default function SalaryCalculation() {
               <div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{editingRuleField.custom ? '新增字段' : '编辑字段'}</div>
                 <div style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
-                  {ruleMode === 'position' ? '岗位模板' : '人员微调'} / {rulePosition}
+                  岗位模板 / {rulePosition}
                 </div>
               </div>
               <button
@@ -1896,42 +4300,18 @@ export default function SalaryCalculation() {
                   onChange={(event) => setRuleFieldDraft((current) => current ? { ...current, source: event.target.value as RuleFieldConfig['source'] } : current)}
                   style={{ height: 34, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 10px', outline: 'none' }}
                 >
-                  {['输入项', '系统默认', '岗位模板', '人员微调'].map((source) => (
+                  {['输入项', '系统默认', '岗位模板'].map((source) => (
                     <option key={source} value={source}>{source}</option>
                   ))}
                 </select>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: 10, alignItems: 'center' }}>
                 <span style={{ fontSize: 13, color: colors.text }}>运算</span>
-                <div style={{ display: 'grid', gridTemplateColumns: '72px 1fr 72px 1fr', gap: 8 }}>
-                  <select
-                    value={ruleFieldDraft.op1}
-                    onChange={(event) => setRuleFieldDraft((current) => current ? { ...current, op1: event.target.value as RuleFieldConfig['op1'] } : current)}
-                    style={{ height: 34, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 8px' }}
-                  >
-                    {OPERATOR_OPTIONS.map((operator) => (
-                      <option key={operator || 'none1'} value={operator}>{operator || '无'}</option>
-                    ))}
-                  </select>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8 }}>
                   <input
                     value={ruleFieldDraft.value1}
-                    onChange={(event) => setRuleFieldDraft((current) => current ? { ...current, value1: event.target.value } : current)}
-                    placeholder="100"
-                    style={{ height: 34, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 10px', outline: 'none' }}
-                  />
-                  <select
-                    value={ruleFieldDraft.op2}
-                    onChange={(event) => setRuleFieldDraft((current) => current ? { ...current, op2: event.target.value as RuleFieldConfig['op2'] } : current)}
-                    style={{ height: 34, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 8px' }}
-                  >
-                    {OPERATOR_OPTIONS.map((operator) => (
-                      <option key={operator || 'none2'} value={operator}>{operator || '无'}</option>
-                    ))}
-                  </select>
-                  <input
-                    value={ruleFieldDraft.value2}
-                    onChange={(event) => setRuleFieldDraft((current) => current ? { ...current, value2: event.target.value } : current)}
-                    placeholder="10%"
+                    onChange={(event) => setRuleFieldDraft((current) => current ? { ...current, value1: event.target.value, op1: '' } : current)}
+                    placeholder="例如：2000*5%+"
                     style={{ height: 34, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, background: colors.inputBg, color: colors.inputText, padding: '0 10px', outline: 'none' }}
                   />
                 </div>
@@ -1939,7 +4319,7 @@ export default function SalaryCalculation() {
               <div style={{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: 10, alignItems: 'center' }}>
                 <span style={{ fontSize: 13, color: colors.text }}>预览</span>
                 <div style={{ height: 34, display: 'flex', alignItems: 'center', padding: '0 10px', border: `1px solid ${colors.tableBorder}`, borderRadius: 4, background: colors.tableHeaderBg, color: colors.textMuted }}>
-                  {buildOperationText(ruleFieldDraft) || '-'}
+                  {ruleFieldDraft.value1 || '-'}
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '88px 1fr', gap: 10, alignItems: 'start' }}>

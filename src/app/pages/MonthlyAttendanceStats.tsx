@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { fetchMonthlyAttendanceEmployees, type MonthlyAttendanceEmployee as RealMonthlyEmployee } from '../api/realData';
+import { useAttendanceFilterDirectory } from '../shared/domain/attendanceFilters';
+import { downloadAttendanceXlsx } from '../shared/export/attendanceExport';
 import { todayISO } from '../utils/date';
 import {
   ChevronDown, ChevronLeft, ChevronRight, Search, X,
@@ -271,6 +273,7 @@ function FilterSel({
 // ─── Main Component ───────────────────────────
 export default function MonthlyAttendanceStats() {
   const { colors } = useTheme();
+  const attendanceFilters = useAttendanceFilterDirectory();
   const [year, setYear] = useState(TODAY.year);
   const [month, setMonth] = useState(TODAY.month);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
@@ -328,6 +331,27 @@ export default function MonthlyAttendanceStats() {
     setJumpPage('');
   };
 
+  const updateDraftEmpSearch = (value: string) => {
+    setDraftEmpSearch(value);
+    setEmpSearch(value.trim());
+    setCurrentPage(1);
+    setJumpPage('');
+  };
+
+  const updateDraftDeptFilter = (value: string) => {
+    setDraftDeptFilter(value);
+    setDeptFilter(value);
+    setCurrentPage(1);
+    setJumpPage('');
+  };
+
+  const updateDraftAttendGroupFilter = (value: string) => {
+    setDraftAttendGroupFilter(value);
+    setAttendGroupFilter(value);
+    setCurrentPage(1);
+    setJumpPage('');
+  };
+
   const resetFilters = () => {
     setDraftEmpSearch('');
     setDraftDeptFilter('');
@@ -340,13 +364,14 @@ export default function MonthlyAttendanceStats() {
   };
 
   const filteredEmployees = employees.filter(emp => {
-    const keyword = empSearch.trim().toLowerCase();
-    const matchKeyword = !keyword || emp.name.toLowerCase().includes(keyword) || emp.empId.toLowerCase().includes(keyword);
-    const matchDept = !deptFilter || emp.dept === deptFilter;
-    const matchGroup = !attendGroupFilter || emp.attendGroup === attendGroupFilter;
+    const matchLinked = attendanceFilters.matchesLinkedFilters(emp, {
+      dept: deptFilter,
+      attendGroup: attendGroupFilter,
+      keyword: empSearch,
+    });
     const matchAbnormal = !onlyAbnormal || isAbnormalEmployee(emp);
     const matchResigned = !hideResigned || Boolean(emp.empId);
-    return matchKeyword && matchDept && matchGroup && matchAbnormal && matchResigned;
+    return matchLinked && matchAbnormal && matchResigned;
   });
 
   const sortedEmployees = [...filteredEmployees].sort((a, b) => {
@@ -358,6 +383,7 @@ export default function MonthlyAttendanceStats() {
 
   const totalCount = sortedEmployees.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const exportDisabled = sortedEmployees.length === 0;
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -420,12 +446,8 @@ export default function MonthlyAttendanceStats() {
         ? [1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages]
         : [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
 
-  const exportValue = (value: string) => {
-    const escaped = value.replace(/"/g, '""');
-    return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
-  };
-
   const handleExport = () => {
+    if (exportDisabled) return;
     const headers = [
       ...visibleColDefs.map(col => col.label),
       ...days.map(day => `${String(month + 1).padStart(2, '0')}-${String(day.day).padStart(2, '0')}`),
@@ -453,28 +475,17 @@ export default function MonthlyAttendanceStats() {
       return [...left, ...right];
     });
 
-    const csv = [headers, ...rows]
-      .map(row => row.map(cell => exportValue(cell)).join(','))
-      .join('\n');
-
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `月考勤明细-${year}-${String(month + 1).padStart(2, '0')}.csv`;
-    link.click();
-    window.URL.revokeObjectURL(url);
+    void downloadAttendanceXlsx({
+      fileName: `月考勤明细-${year}-${String(month + 1).padStart(2, '0')}-${viewMode === 'result' ? '考勤结果' : '打卡记录'}.xlsx`,
+      sheetName: viewMode === 'result' ? '考勤结果' : '打卡记录',
+      headers,
+      rows,
+      saveAs: true,
+    });
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: colors.appBg, overflow: 'hidden' }}>
-
-      {(sourceFile || loadError) && (
-        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>
-          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
-          {loadError ? ` ${loadError}` : ''}
-        </div>
-      )}
 
       {/* ── Filter bar ───────────────────── */}
       <div style={{ padding: '10px 16px 0', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0 }}>
@@ -507,24 +518,41 @@ export default function MonthlyAttendanceStats() {
             <span style={{ fontSize: '12px', color: colors.text }}>{dateEndStr}</span>
           </div>
 
-          <FilterSel label="部门" options={DEPT_OPTIONS} value={draftDeptFilter} onChange={setDraftDeptFilter} colors={colors} />
+          <FilterSel label="部门" options={attendanceFilters.departmentOptions.length ? attendanceFilters.departmentOptions : DEPT_OPTIONS} value={draftDeptFilter} onChange={updateDraftDeptFilter} colors={colors} />
 
           {/* Employee search */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg, minWidth: 180 }}>
             <span style={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>员工</span>
             <Search size={12} style={{ color: colors.textMuted }} />
-            <input value={draftEmpSearch} onChange={e => setDraftEmpSearch(e.target.value)}
+            <input value={draftEmpSearch} onChange={e => updateDraftEmpSearch(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') applyFilters(); }}
               placeholder="输入姓名或工号"
               style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1, minWidth: 0 }} />
           </div>
 
-          <FilterSel label="考勤组" options={ATTEND_GROUPS} value={draftAttendGroupFilter} onChange={setDraftAttendGroupFilter} colors={colors} />
+          <FilterSel label="考勤组" options={attendanceFilters.attendanceGroupOptions.length ? attendanceFilters.attendanceGroupOptions : ATTEND_GROUPS} value={draftAttendGroupFilter} onChange={updateDraftAttendGroupFilter} colors={colors} />
+          <button
+            onClick={handleExport}
+            disabled={exportDisabled}
+            style={{
+              height: 32,
+              border: 'none',
+              borderRadius: 4,
+              background: exportDisabled ? colors.inputBorder : colors.primary,
+              color: exportDisabled ? colors.textMuted : colors.primaryText,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '0 10px',
+              cursor: exportDisabled ? 'not-allowed' : 'pointer',
+              fontSize: 13,
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <Download size={14}/>导出Excel
+          </button>
 
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button style={outlineBtn(colors)} onClick={resetFilters}>重置</button>
-            <button style={primaryBtn(colors)} onClick={applyFilters}>查询</button>
-          </div>
         </div>
 
         {/* Row 2: View toggle + options + buttons */}
@@ -548,44 +576,6 @@ export default function MonthlyAttendanceStats() {
             ))}
           </div>
 
-          {/* Checkboxes */}
-          <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>
-            <input type="checkbox" checked={hideResigned} onChange={e => setHideResigned(e.target.checked)} style={{ accentColor: colors.primary }} />
-            不看离职人员
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>
-            <input type="checkbox" checked={onlyAbnormal} onChange={e => setOnlyAbnormal(e.target.checked)} style={{ accentColor: colors.primary }} />
-            仅看异常明细
-          </label>
-
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-            {/* Export */}
-            <button style={{ ...primaryBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }} onClick={handleExport}>
-              <Download size={12} />导出
-            </button>
-            {/* 考勤结果显示设置 */}
-            <div ref={resultSettingsRef} style={{ position: 'relative' }}>
-              <button onClick={() => setShowResultSettings(v => !v)}
-                style={{ ...outlineBtn(colors), borderColor: showResultSettings ? colors.primary : colors.inputBorder, color: showResultSettings ? colors.primary : colors.text }}>
-                考勤结果显示设置
-              </button>
-              {showResultSettings && (
-                <ResultSettings colors={colors} onClose={() => setShowResultSettings(false)} />
-              )}
-            </div>
-            {/* 表头设置 button + panel */}
-            <div ref={colPanelRef} style={{ position: 'relative' }}>
-              <button onClick={openColPanel}
-                style={{ ...outlineBtn(colors), borderColor: showColPanel ? colors.primary : colors.inputBorder, color: showColPanel ? colors.primary : colors.text, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <Settings2 size={13} />表头设置
-              </button>
-              {showColPanel && (
-                <ColPanel colors={colors} visible={pendingCols}
-                  onToggle={togglePending} onToggleAll={toggleAllPending}
-                  onCancel={() => setShowColPanel(false)} onApply={applyColPanel} />
-              )}
-            </div>
-          </div>
         </div>
       </div>
 

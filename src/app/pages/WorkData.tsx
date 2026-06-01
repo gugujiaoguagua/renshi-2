@@ -423,13 +423,6 @@ export default function WorkData() {
         )}
       </div>
 
-      {(sourceFile || loadError) && (
-        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>
-          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
-          {loadError ? ` ${loadError}` : ''}
-        </div>
-      )}
-
       <div style={{ display: 'flex', gap: 8, padding: '8px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0, flexWrap: 'wrap' }}>
         {statusItems.map(item => {
           const active = statusFilter === item.key;

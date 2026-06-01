@@ -15,6 +15,8 @@ import {
   type MakeupClockRecord as RealMakeupClockRecord,
   type PhotoClockRecord as RealPhotoClockRecord,
 } from '../api/realData';
+import { useAttendanceFilterDirectory } from '../shared/domain/attendanceFilters';
+import { downloadAttendanceXlsx } from '../shared/export/attendanceExport';
 import { useLocation, useNavigate } from 'react-router';
 import {
   Search, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
@@ -85,16 +87,13 @@ function inDateRange(date: string, range: DateRangeFilter) {
 
 function downloadCsv(filename: string, headers: string[], rows: Array<Array<React.ReactNode>>) {
   const textRows = rows.map(row => row.map(cell => String(cell ?? '').replace(/<[^>]*>/g, '')));
-  const csv = [headers, ...textRows]
-    .map(row => row.map(cell => /[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell).join(','))
-    .join('\n');
-  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.click();
-  window.URL.revokeObjectURL(url);
+  void downloadAttendanceXlsx({
+    fileName: filename,
+    sheetName: filename.replace(/\.[^.]+$/, ''),
+    headers,
+    rows: textRows,
+    saveAs: true,
+  });
 }
 
 function showOriginalClockDetail(row: ClockRecord) {
@@ -258,6 +257,21 @@ function parseCsv(text: string) {
 
 const pBtn = (c: any): React.CSSProperties => ({ padding: '5px 14px', fontSize: '12px', border: 'none', borderRadius: 4, cursor: 'pointer', backgroundColor: c.primary, color: '#fff', whiteSpace: 'nowrap' });
 const oBtn = (c: any, a?: boolean): React.CSSProperties => ({ padding: '5px 12px', fontSize: '12px', border: `1px solid ${a ? c.primary : c.inputBorder}`, borderRadius: 4, cursor: 'pointer', backgroundColor: 'transparent', color: a ? c.primary : c.text, whiteSpace: 'nowrap' });
+const exportBtn = (c: any, disabled = false): React.CSSProperties => ({
+  height: 32,
+  border: 'none',
+  borderRadius: 4,
+  background: disabled ? c.inputBorder : c.primary,
+  color: disabled ? c.textMuted : (c.primaryText || '#fff'),
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '0 10px',
+  cursor: disabled ? 'not-allowed' : 'pointer',
+  fontSize: 13,
+  fontWeight: 600,
+  whiteSpace: 'nowrap',
+});
 const thS = (c: any): React.CSSProperties => ({ padding: '8px 10px', fontSize: '12px', color: c.textMuted, fontWeight: 500, textAlign: 'left', borderBottom: `1px solid ${c.tableBorder}`, backgroundColor: c.tableHeaderBg, whiteSpace: 'nowrap', position: 'sticky', top: 0, zIndex: 20, borderLeft: `1px solid ${c.tableBorder}` });
 const tdS = (c: any): React.CSSProperties => ({ padding: '7px 10px', fontSize: '12px', color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', borderLeft: `1px solid ${c.tableBorder}` });
 const pgS = (c: any, a: boolean): React.CSSProperties => ({ minWidth: 24, height: 24, padding: '0 5px', fontSize: '12px', border: `1px solid ${a ? c.primary : c.inputBorder}`, borderRadius: 4, backgroundColor: a ? c.primary : 'transparent', color: a ? '#fff' : c.text, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' });
@@ -690,6 +704,7 @@ function PaginationBar({ total, page, pageSize, totalPages, onPage, onPageSize, 
 
 // ─── Tab 1: 原始打卡记录 ──────────────────────
 function OriginalClockTab({ colors }: { colors: any }) {
+  const attendanceFilters = useAttendanceFilterDirectory();
   const [showMore, setShowMore] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [page, setPage] = useState(1);
@@ -743,11 +758,10 @@ function OriginalClockTab({ colors }: { colors: any }) {
 
   const filteredRows = rows.filter(row => {
     const keyword = empFilter.trim().toLowerCase();
-    const groupKeyword = groupFilter.replace('考勤组', '').replace('综合', '').replace('华托大厦', '华托');
     const matchForm = inDateRange(row.date, dateRange)
-      && (!deptFilter || row.dept === deptFilter)
+      && attendanceFilters.matchesDepartment(row, deptFilter)
       && (!keyword || row.name.toLowerCase().includes(keyword) || row.empId.toLowerCase().includes(keyword))
-      && (!groupFilter || row.workLocation.includes(groupKeyword) || row.dept.includes(groupKeyword))
+      && (!groupFilter || attendanceFilters.matchesLinkedFilters(row, { attendGroup: groupFilter }))
       && (!sourceFilter || row.source === sourceFilter);
     if (!matchForm) return false;
     if (activeClockFilter === 'all') return true;
@@ -784,6 +798,7 @@ function OriginalClockTab({ colors }: { colors: any }) {
 
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const pagedRows = sortedRows.slice((page - 1) * pageSize, page * pageSize);
+  const exportDisabled = sortedRows.length === 0;
   const allSel = pagedRows.length > 0 && pagedRows.every(row => selected.has(row.id));
 
   const someSel = pagedRows.some(row => selected.has(row.id)) && !allSel;
@@ -975,21 +990,12 @@ function OriginalClockTab({ colors }: { colors: any }) {
       <div style={{ backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, padding: '10px 16px 0', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
           <DateInput label="打卡日" colors={colors} value={dateRange} onChange={setDateRange}/>
-          <InlineSelect label="部门" opts={DEPT_OPTS} colors={colors} value={deptFilter} onChange={setDeptFilter}/>
+          <InlineSelect label="部门" opts={attendanceFilters.departmentOptions.length ? attendanceFilters.departmentOptions : DEPT_OPTS} colors={colors} value={deptFilter} onChange={value => { setDeptFilter(value); setPage(1); }}/>
           <EmpSearch label="员工" colors={colors} minWidth={160} value={empFilter} onChange={setEmpFilter} onEnter={() => setPage(1)}/>
-          <InlineSelect label="考勤组" opts={ATTEND_GROUPS} colors={colors} value={groupFilter} onChange={setGroupFilter}/>
+          <InlineSelect label="考勤组" opts={attendanceFilters.attendanceGroupOptions.length ? attendanceFilters.attendanceGroupOptions : ATTEND_GROUPS} colors={colors} value={groupFilter} onChange={value => { setGroupFilter(value); setPage(1); }}/>
           <InlineSelect label="打卡来源" opts={CLOCK_SOURCE_OPTS} colors={colors} value={sourceFilter} onChange={setSourceFilter}/>
-          <button onClick={() => setShowMore(v => !v)} style={{ ...oBtn(colors, showMore), display: 'flex', alignItems: 'center', gap: 4 }}>更多筛选 {showMore ? <ChevronUp size={11}/> : <ChevronDown size={11}/>}</button>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}><button onClick={resetFilters} style={oBtn(colors)}>重置</button><button onClick={() => { setSelected(new Set()); setPage(1); }} style={pBtn(colors)}>查询</button></div>
         </div>
-        {showMore && <div style={{ marginBottom: 10 }}><span style={{ fontSize: '12px', color: colors.textMuted }}>更多筛选条件可在此扩展</span></div>}
       </div>
-      {(sourceFile || loadError) && (
-        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>
-          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
-          {loadError ? ` ${loadError}` : ''}
-        </div>
-      )}
       <div style={{ display: 'flex', gap: 8, padding: '8px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0, flexWrap: 'wrap' }}>
         {clockFilterItems.map(item => {
           const active = activeClockFilter === item.key;
@@ -1003,8 +1009,7 @@ function OriginalClockTab({ colors }: { colors: any }) {
       {/* Actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0 }}>
         <button onClick={handleAddPresetRecord} style={{ ...pBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}><Plus size={12}/>预制打卡记录</button>
-        <button onClick={() => importInputRef.current?.click()} style={{ ...oBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}><Upload size={12}/>导入打卡记录</button>
-        <button onClick={exportCurrentRows} style={{ ...oBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}><Download size={12}/>导出</button>
+        <button onClick={exportCurrentRows} disabled={exportDisabled} style={exportBtn(colors, exportDisabled)}><Download size={14}/>导出Excel</button>
         <input ref={importInputRef} type="file" accept=".csv,.json" onChange={handleImportRecords} style={{ display: 'none' }}/>
         {selected.size > 0 && <span style={{ fontSize: '12px', color: colors.textMuted }}>已选 {selected.size} 条</span>}
       </div>
@@ -1089,6 +1094,7 @@ function OriginalClockTab({ colors }: { colors: any }) {
 
 // ─── Tab 2: 补卡记录 ──────────────────────────
 function MakeupClockTab({ colors }: { colors: any }) {
+  const attendanceFilters = useAttendanceFilterDirectory();
   const [showMore, setShowMore] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [page, setPage] = useState(1);
@@ -1140,7 +1146,7 @@ function MakeupClockTab({ colors }: { colors: any }) {
     const applicantKeyword = applicantFilter.trim().toLowerCase();
     const initiatorKeyword = initiatorFilter.trim().toLowerCase();
     const matchForm = inDateRange(row.makeupDate, dateRange)
-      && (!deptFilter || row.applicantDept === deptFilter)
+      && attendanceFilters.matchesDepartment(row, deptFilter)
       && (!applicantKeyword || row.applicant.toLowerCase().includes(applicantKeyword) || row.applicantId.toLowerCase().includes(applicantKeyword))
       && (!initiatorKeyword || row.initiator.toLowerCase().includes(initiatorKeyword) || row.initiatorId.toLowerCase().includes(initiatorKeyword))
       && (!recordStatusFilter || row.status === recordStatusFilter);
@@ -1168,6 +1174,7 @@ function MakeupClockTab({ colors }: { colors: any }) {
   });
 
   const pagedRows = sortedRows.slice((page - 1) * pageSize, page * pageSize);
+  const exportDisabled = sortedRows.length === 0;
 
   const statusItems = [
     { key: 'all', label: '全部', count: rows.length },
@@ -1292,15 +1299,12 @@ function MakeupClockTab({ colors }: { colors: any }) {
           <EmpSearch label="申请人" colors={colors} minWidth={150} value={applicantFilter} onChange={setApplicantFilter} onEnter={() => setPage(1)}/>
           <EmpSearch label="发起人" colors={colors} minWidth={150} value={initiatorFilter} onChange={setInitiatorFilter} onEnter={() => setPage(1)}/>
           <InlineSelect label="记录状态" opts={STATUS_OPTS_MAKEUP} colors={colors} value={recordStatusFilter} onChange={setRecordStatusFilter}/>
-          <button onClick={() => setShowMore(v => !v)} style={{ ...oBtn(colors, showMore), display: 'flex', alignItems: 'center', gap: 4 }}>更多筛选 {showMore ? <ChevronUp size={11}/> : <ChevronDown size={11}/>}</button>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}><button onClick={resetFilters} style={oBtn(colors)}>重置</button><button onClick={() => { setSelected(new Set()); setPage(1); }} style={pBtn(colors)}>查询</button></div>
         </div>
-        {showMore && <div style={{ marginBottom: 10 }}><span style={{ fontSize: '12px', color: colors.textMuted }}>更多筛选条件可在此扩展</span></div>}
       </div>
       {/* Actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0 }}>
         <button onClick={startMakeupRecord} style={{ ...pBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}><Plus size={12}/>发起补卡记录</button>
-        <button onClick={exportCurrentRows} style={{ ...oBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}><Download size={12}/>导出</button>
+        <button onClick={exportCurrentRows} disabled={exportDisabled} style={exportBtn(colors, exportDisabled)}><Download size={14}/>导出Excel</button>
         {selected.size > 0 && <span style={{ fontSize: '12px', color: colors.textMuted }}>已选 {selected.size} 条</span>}
       </div>
       {/* Table */}
@@ -1377,6 +1381,7 @@ function MakeupClockTab({ colors }: { colors: any }) {
 
 // ─── Tab 3: 外勤记录 ──────────────────────────
 function FieldWorkTab({ colors }: { colors: any }) {
+  const attendanceFilters = useAttendanceFilterDirectory();
   const [showMore, setShowMore] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [page, setPage] = useState(1);
@@ -1429,7 +1434,7 @@ function FieldWorkTab({ colors }: { colors: any }) {
     const applicantKeyword = applicantFilter.trim().toLowerCase();
     const initiatorKeyword = initiatorFilter.trim().toLowerCase();
     const matchForm = inDateRange(row.date, dateRange)
-      && (!deptFilter || row.dept === deptFilter)
+      && attendanceFilters.matchesDepartment(row, deptFilter)
       && (!applicantKeyword || row.name.toLowerCase().includes(applicantKeyword) || row.empId.toLowerCase().includes(applicantKeyword))
       && (!initiatorKeyword || row.initiator.toLowerCase().includes(initiatorKeyword) || row.initiatorId.toLowerCase().includes(initiatorKeyword))
       && (!reviewFilter || row.reviewStatus === reviewFilter);
@@ -1457,6 +1462,7 @@ function FieldWorkTab({ colors }: { colors: any }) {
   });
 
   const pagedRows = sortedRows.slice((page - 1) * pageSize, page * pageSize);
+  const exportDisabled = sortedRows.length === 0;
   const statusItems = [
     { key: 'all', label: '全部', count: rows.length },
     { key: '已通过', label: '已通过', count: rows.filter(row => row.reviewStatus === '已通过').length },
@@ -1639,7 +1645,11 @@ function FieldWorkTab({ colors }: { colors: any }) {
       ? sortedRows.filter(row => selected.has(row.id))
       : sortedRows;
 
-    downloadCsv('外勤记录.csv', ['姓名','员工号','发起人','发起人员工号','数据来源','部门','外勤日期','外勤时间','发起时间','完成时间','外勤地点','备注','查看图片','审核状态'], exportRows.map(row => [row.name, row.empId, row.initiator, row.initiatorId, row.source, row.dept, row.date, row.time, row.initiateTime, row.completeTime, row.location, row.note, row.hasPhoto ? '有' : '无', row.reviewStatus]));
+    downloadCsv(
+      `外勤记录-${selected.size > 0 ? '选中' : '筛选'}-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      ['姓名','员工号','发起人','发起人员工号','数据来源','部门','外勤日期','外勤时间','发起时间','完成时间','外勤地点','备注','查看图片','审核状态'],
+      exportRows.map(row => [row.name, row.empId, row.initiator, row.initiatorId, row.source, row.dept, row.date, row.time, row.initiateTime, row.completeTime, row.location, row.note, row.hasPhoto ? '有' : '无', row.reviewStatus]),
+    );
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
@@ -1647,21 +1657,17 @@ function FieldWorkTab({ colors }: { colors: any }) {
       <div style={{ backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, padding: '10px 16px 0', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
           <DateInput label="外勤日期" colors={colors} value={dateRange} onChange={setDateRange}/>
-          <InlineSelect label="部门" opts={DEPT_OPTS} colors={colors} value={deptFilter} onChange={setDeptFilter}/>
+          <InlineSelect label="部门" opts={attendanceFilters.departmentOptions.length ? attendanceFilters.departmentOptions : DEPT_OPTS} colors={colors} value={deptFilter} onChange={value => { setDeptFilter(value); setPage(1); }}/>
           <EmpSearch label="申请人" colors={colors} minWidth={150} value={applicantFilter} onChange={setApplicantFilter} onEnter={() => setPage(1)}/>
           <EmpSearch label="发起人" colors={colors} minWidth={150} value={initiatorFilter} onChange={setInitiatorFilter} onEnter={() => setPage(1)}/>
           <InlineSelect label="审核状态" opts={REVIEW_OPTS} colors={colors} value={reviewFilter} onChange={setReviewFilter}/>
-          <button onClick={() => setShowMore(v => !v)} style={{ ...oBtn(colors, showMore), display: 'flex', alignItems: 'center', gap: 4 }}>更多筛选 {showMore ? <ChevronUp size={11}/> : <ChevronDown size={11}/>}</button>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}><button onClick={resetFilters} style={oBtn(colors)}>重置</button><button onClick={() => { setSelected(new Set()); setPage(1); }} style={pBtn(colors)}>查询</button></div>
         </div>
-        {showMore && <div style={{ marginBottom: 10 }}><span style={{ fontSize: '12px', color: colors.textMuted }}>更多筛选条件可在此扩展</span></div>}
       </div>
       <StatusFilterBar items={statusItems} activeKey={statusFilter} onChange={(key) => { setStatusFilter(key); setSelected(new Set()); setPage(1); }} colors={colors} />
       {/* Actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0 }}>
         <button onClick={handleAddFieldRecord} style={{ ...pBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}><Plus size={12}/>发起外勤记录</button>
-        <button onClick={() => fieldImportInputRef.current?.click()} style={{ ...oBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}><Upload size={12}/>批量导入</button>
-        <button onClick={exportCurrentRows} style={{ ...oBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}><Download size={12}/>导出</button>
+        <button onClick={exportCurrentRows} disabled={exportDisabled} style={exportBtn(colors, exportDisabled)}><Download size={14}/>导出Excel</button>
         <input ref={fieldImportInputRef} type="file" accept=".csv,.json" onChange={handleImportFieldRecords} style={{ display: 'none' }}/>
         {selected.size > 0 && <span style={{ fontSize: '12px', color: colors.textMuted }}>已选 {selected.size} 条</span>}
       </div>
@@ -1741,6 +1747,7 @@ function FieldWorkTab({ colors }: { colors: any }) {
 
 // ─── Tab 4: 拍照打卡记录 ─────────────────────
 function PhotoClockTab({ colors }: { colors: any }) {
+  const attendanceFilters = useAttendanceFilterDirectory();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -1772,7 +1779,7 @@ function PhotoClockTab({ colors }: { colors: any }) {
   const filteredRows = rows.filter(row => {
     const keyword = empFilter.trim().toLowerCase();
     const matchForm = inDateRange(row.date, dateRange)
-      && (!deptFilter || row.dept === deptFilter)
+      && attendanceFilters.matchesDepartment(row, deptFilter)
       && (!keyword || row.name.toLowerCase().includes(keyword) || row.empId.toLowerCase().includes(keyword))
       && (!reviewFilter || row.reviewStatus === reviewFilter);
     return matchForm && (statusFilter === 'all' || row.reviewStatus === statusFilter || (statusFilter === 'hasPhoto' && row.hasPhoto));
@@ -1799,6 +1806,7 @@ function PhotoClockTab({ colors }: { colors: any }) {
   });
 
   const pagedRows = sortedRows.slice((page - 1) * pageSize, page * pageSize);
+  const exportDisabled = sortedRows.length === 0;
   const statusItems = [
     { key: 'all', label: '全部', count: rows.length },
     { key: '已通过', label: '已通过', count: rows.filter(row => row.reviewStatus === '已通过').length },
@@ -1845,6 +1853,21 @@ function PhotoClockTab({ colors }: { colors: any }) {
     if (sortKey !== key) return '↕';
     return sortOrder === 'asc' ? '↑' : '↓';
   };
+  const exportCurrentRows = () => {
+    const exportRows = selected.size > 0
+      ? sortedRows.filter(row => selected.has(row.id))
+      : sortedRows;
+
+    downloadCsv(
+      `拍照打卡记录-${selected.size > 0 ? '选中' : '筛选'}-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      COLS.map(col => col.l),
+      exportRows.map(row => COLS.map(col => {
+        const value = row[col.k];
+        if (typeof value === 'boolean') return value ? '有' : '无';
+        return String(value ?? '');
+      })),
+    );
+  };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       {/* Filter */}
@@ -1852,14 +1875,17 @@ function PhotoClockTab({ colors }: { colors: any }) {
         {loadError && <div style={{ marginBottom: 8, fontSize: '12px', color: colors.danger || '#AA2B3A' }}>{loadError}</div>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <DateInput label="打卡日期" colors={colors} value={dateRange} onChange={setDateRange}/>
-          <InlineSelect label="部门" opts={DEPT_OPTS} colors={colors} value={deptFilter} onChange={setDeptFilter}/>
+          <InlineSelect label="部门" opts={attendanceFilters.departmentOptions.length ? attendanceFilters.departmentOptions : DEPT_OPTS} colors={colors} value={deptFilter} onChange={value => { setDeptFilter(value); setPage(1); }}/>
           <EmpSearch label="员工" colors={colors} minWidth={150} value={empFilter} onChange={setEmpFilter} onEnter={() => setPage(1)}/>
           <InlineSelect label="审核状态" opts={REVIEW_OPTS} colors={colors} value={reviewFilter} onChange={setReviewFilter}/>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}><button onClick={resetFilters} style={oBtn(colors)}>重置</button><button onClick={() => { setSelected(new Set()); setPage(1); }} style={pBtn(colors)}>查询</button></div>
         </div>
       </div>
       <StatusFilterBar items={statusItems} activeKey={statusFilter} onChange={(key) => { setStatusFilter(key); setSelected(new Set()); setPage(1); }} colors={colors} />
-      {/* Table (no extra action bar per spec – "操作保持现有页面语义，不新增不删减") */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0 }}>
+        <button onClick={exportCurrentRows} disabled={exportDisabled} style={exportBtn(colors, exportDisabled)}><Download size={14}/>导出Excel</button>
+        {selected.size > 0 && <span style={{ fontSize: '12px', color: colors.textMuted }}>已选 {selected.size} 条</span>}
+      </div>
+      {/* Table */}
       <div style={{ flex: 1, overflow: 'auto', backgroundColor: colors.cardBg }}>
         <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: '100%' }}>
           <thead>

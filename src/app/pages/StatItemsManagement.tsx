@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { fetchStatItems, saveStatItems, type StatItemRecord } from '../api/realData';
+import { downloadAttendanceXlsx } from '../shared/export/attendanceExport';
 
 import {
   Search, X, ChevronLeft, ChevronRight, ChevronDown,
-  Plus, Trash2, Edit2, ArrowLeft, Info,
+  Plus, Trash2, Edit2, ArrowLeft, Info, Download,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────
@@ -431,9 +432,30 @@ export default function StatItemsManagement() {
   const totalCount = sorted.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const pageRows = sorted.slice((page - 1) * pageSize, page * pageSize);
+  const exportDisabled = sorted.length === 0;
 
   const getPages = (): (number | '...')[] =>
     totalPages <= 7 ? Array.from({ length: totalPages }, (_, i) => i + 1) : [1, 2, 3, '...', totalPages];
+  const handleExport = () => {
+    if (exportDisabled) return;
+
+    void downloadAttendanceXlsx({
+      fileName: `统计项管理-${scope}-${category}.xlsx`,
+      sheetName: '统计项管理',
+      headers: ['统计项名称', '应用模块', '分类', '适用范围', '外部数据', '说明', '是否启用'],
+      rows: sorted.map(item => [
+        item.name,
+        item.module,
+        item.category,
+        item.scope || SCOPES[0],
+        item.externalEnabled ? '可写入' : '关闭',
+        item.desc,
+        item.enabled ? '是' : '否',
+      ]),
+      emptyMessage: '暂无可导出的统计项',
+      saveAs: true,
+    });
+  };
 
   if (view === 'edit') {
     return (
@@ -461,38 +483,33 @@ export default function StatItemsManagement() {
                 style={{ padding: '5px 10px', fontSize: '12px', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap', backgroundColor: scope === s ? colors.primary : 'transparent', color: scope === s ? '#fff' : colors.text }}>{s}</button>
             ))}
           </div>
-          {/* 统计项名称搜索 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${colors.inputBorder}`, borderRadius: 4, padding: '5px 10px', backgroundColor: colors.inputBg, minWidth: 200 }}>
-            <Search size={12} style={{ color: colors.textMuted }}/>
-            <input value={nameSearch} onChange={e => setNameSearch(e.target.value)} placeholder="搜索统计项名称"
-              style={{ border: 'none', outline: 'none', fontSize: '12px', background: 'transparent', color: colors.text, flex: 1 }}/>
-            {nameSearch && <X size={11} style={{ color: colors.textMuted, cursor: 'pointer' }} onClick={() => setNameSearch('')}/>}
-          </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button onClick={() => { setNameSearch(''); setScope(SCOPES[0]); }} style={oBtn(colors)}>重置</button>
-            <button style={pBtn(colors)}>查询</button>
-          </div>
         </div>
       </div>
-
-      {(sourceFile || loadError) && (
-        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>
-          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
-          {loadError ? ` ${loadError}` : ''}
-        </div>
-      )}
 
       {/* ── Action bar ───────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0, flexWrap: 'wrap' }}>
         <button onClick={openAdd} style={{ ...pBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}><Plus size={12}/>新增自定义项</button>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 14 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>
-            <input type="checkbox" checked={onlyEnabled} onChange={e => setOnlyEnabled(e.target.checked)} style={{ accentColor: colors.primary, width: 13, height: 13 }}/>仅显示启用统计项
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>
-            <input type="checkbox" checked={onlyFormula} onChange={e => setOnlyFormula(e.target.checked)} style={{ accentColor: colors.primary, width: 13, height: 13 }}/>仅看有业务公式项
-          </label>
-        </div>
+        <button
+          onClick={handleExport}
+          disabled={exportDisabled}
+          style={{
+            height: 32,
+            border: 'none',
+            borderRadius: 4,
+            background: exportDisabled ? colors.inputBorder : colors.primary,
+            color: exportDisabled ? colors.textMuted : colors.primaryText,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '0 10px',
+            cursor: exportDisabled ? 'not-allowed' : 'pointer',
+            fontSize: 13,
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <Download size={14}/>导出Excel
+        </button>
       </div>
 
       {/* ── Category tabs ────────────────── */}

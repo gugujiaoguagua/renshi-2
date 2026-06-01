@@ -24,17 +24,13 @@ const menuItems: MenuItem[] = [
       { key: 'stats-daily',    label: '日考勤统计',   path: '/attendance/daily-stats' },
       { key: 'stats-detail',   label: '月考勤明细',   path: '/attendance/monthly-detail' },
       { key: 'stats-summary',  label: '月考勤汇总',   path: '/attendance/monthly-summary' },
-      { key: 'stats-work',     label: '勤务数据',     path: '/attendance/work-data' },
-      { key: 'stats-report',   label: '考勤报表',     path: '/attendance/reports' },
       { key: 'stats-items',    label: '统计项管理',   path: '/attendance/stat-items' },
-      { key: 'stats-external', label: '外部数据管理', path: '/attendance/external-data' },
     ],
   },
   {
     key: 'anomaly', label: '异常管理', icon: <AlertTriangle size={14} />,
     children: [
       { key: 'anomaly-list', label: '考勤异常', path: '/attendance/anomaly' },
-      { key: 'anomaly-biz', label: '业务异常', path: '/attendance/anomaly-biz' },
     ],
   },
   {
@@ -44,12 +40,6 @@ const menuItems: MenuItem[] = [
       { key: 'clock-makeup', label: '补卡记录', path: '/attendance/clock-makeup' },
       { key: 'clock-field', label: '外勤记录', path: '/attendance/clock-field' },
       { key: 'clock-photo', label: '拍照打卡记录', path: '/attendance/clock-photo' },
-    ],
-  },
-  {
-    key: 'overtime', label: '加班管理', icon: <Coffee size={14} />,
-    children: [
-      { key: 'overtime-records', label: '加班记录', path: '/attendance/overtime' },
     ],
   },
   {
@@ -63,32 +53,22 @@ const menuItems: MenuItem[] = [
     key: 'schedule', label: '排班管理', icon: <Calendar size={14} />,
     children: [
       { key: 'schedule-table', label: '排班表', path: '/attendance/schedule' },
-      { key: 'schedule-records', label: '班次调整记录', path: '/attendance/schedule-adjust' },
     ],
   },
   {
     key: 'leave', label: '假期管理', icon: <Umbrella size={14} />,
     children: [
-      { key: 'leave-records', label: '请假记录', path: '/attendance/leave' },
-      { key: 'leave-balance', label: '假期余额', path: '/attendance/leave-balance' },
-      { key: 'leave-detail', label: '假期额度明细', path: '/attendance/leave-detail' },
       { key: 'leave-type', label: '假期类型设置', path: '/attendance/leave-type' },
-      { key: 'leave-scheme', label: '假期方案设置', path: '/attendance/leave-scheme' },
     ],
   },
   {
     key: 'setting', label: '考勤设置', icon: <Settings size={14} />,
     children: [
-      { key: 'setting-config', label: '配置总览', path: '/attendance/settings' },
       { key: 'setting-group', label: '考勤组管理', path: '/attendance/settings/groups' },
       { key: 'setting-shifts', label: '班次管理', path: '/attendance/settings/shifts' },
       { key: 'setting-people', label: '考勤人员', path: '/attendance/settings/people' },
       { key: 'setting-card', label: '打卡规则', path: '/attendance/settings/card-rules' },
-      { key: 'setting-mobile', label: '移动打卡方案', path: '/attendance/settings/mobile-clock' },
-      { key: 'setting-location', label: '上班地点', path: '/attendance/settings/location' },
       { key: 'setting-face', label: '人脸管理', path: '/attendance/settings/face' },
-      { key: 'setting-device', label: '考勤机管理', path: '/attendance/settings/devices' },
-      { key: 'setting-holiday', label: '节假日管理', path: '/attendance/settings/holiday' },
       { key: 'setting-calendar', label: '司历管理', path: '/attendance/settings/calendar' },
       { key: 'setting-overtime', label: '加班规则', path: '/attendance/settings/overtime-rules' },
       { key: 'setting-field', label: '外勤规则', path: '/attendance/settings/field-rules' },

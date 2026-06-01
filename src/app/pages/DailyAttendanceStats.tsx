@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from '../context/ThemeContext';
 import { fetchDailyAttendanceEmployees, fetchFieldOutRecords, fetchFieldTripRecords, fetchLeaveRecords, fetchSettingsPeople, saveDailyAttendanceEmployees, saveFieldOutRecords, saveFieldTripRecords, saveLeaveRecords, type DailyAttendanceEmployee as RealDailyEmployee, type FieldWorkRecord } from '../api/realData';
+import { useAttendanceFilterDirectory } from '../shared/domain/attendanceFilters';
+import { downloadAttendanceXlsx } from '../shared/export/attendanceExport';
 import { addDaysISO, monthEndISO, monthStartISO, todayISO } from '../utils/date';
 import {
   Calendar, Search, ChevronDown, ChevronLeft, ChevronRight,
@@ -962,6 +964,26 @@ function ImportWizard({ colors, onBack }: { colors: any; onBack: () => void }) {
   const [dragOver, setDragOver] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<string | null>(null);
   const [validateTab, setValidateTab] = useState<'pass' | 'fail'>('fail');
+  const importHeaders = ['姓名', '员工号', '日期', '部门', '岗位', '部门全路径', '转正日期', '考勤组'];
+  const downloadTemplate = () => {
+    void downloadAttendanceXlsx({
+      fileName: '日考勤导入标准模板.xlsx',
+      sheetName: '标准模板',
+      headers: importHeaders,
+      rows: [['张三', 'EMP001', todayISO(), '产品研发中心', '员工', '上海拉迷家具有限公司/产品研发中心', '', '综合考勤组']],
+      allowEmpty: true,
+    });
+  };
+  const exportFailedRows = () => {
+    void downloadAttendanceXlsx({
+      fileName: '日考勤导入不通过数据.xlsx',
+      sheetName: '不通过数据',
+      headers: ['错误信息', ...importHeaders],
+      rows: EMPLOYEES.map(emp => ['考勤数据已锁定，不可修改', emp.name, emp.empId, emp.date, emp.dept, emp.position, emp.deptFullPath, emp.regularDate || '', emp.attendGroup]),
+      emptyMessage: '暂无不通过数据',
+      allowEmpty: true,
+    });
+  };
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: colors.appBg, overflow: 'hidden' }}>
@@ -992,7 +1014,7 @@ function ImportWizard({ colors, onBack }: { colors: any; onBack: () => void }) {
           <div style={{ maxWidth: 600, margin: '40px auto', padding: '0 20px' }}>
             <div style={{ marginBottom: 28 }}>
               <p style={{ fontSize: '13px', color: colors.text, marginBottom: 10 }}>1. 下载模板</p>
-              <button style={{ ...outlineBtn(colors), display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px' }}><Download size={13} />标准模板</button>
+              <button onClick={downloadTemplate} style={{ ...outlineBtn(colors), display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px' }}><Download size={13} />标准模板</button>
             </div>
             <div>
               <p style={{ fontSize: '13px', color: colors.text, marginBottom: 10 }}>2. 上传Excel簿格</p>
@@ -1017,7 +1039,7 @@ function ImportWizard({ colors, onBack }: { colors: any; onBack: () => void }) {
               </div>
               <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
                 <button style={outlineBtn(colors)}>重新导入</button>
-                <button style={outlineBtn(colors)}>导出不通过数据</button>
+                <button onClick={exportFailedRows} style={outlineBtn(colors)}>导出不通过数据</button>
                 <button style={primaryBtn(colors)}>重新校验</button>
               </div>
             </div>
@@ -1075,6 +1097,7 @@ function ImportWizard({ colors, onBack }: { colors: any; onBack: () => void }) {
 // ─── Main page ───────────────────────────────
 export default function DailyAttendanceStats() {
   const { colors } = useTheme();
+  const attendanceFilters = useAttendanceFilterDirectory();
   const [viewMode, setViewMode] = useState<ViewMode>('main');
   const [modal, setModal] = useState<ModalType>(null);
   const [showMoreFilter, setShowMoreFilter] = useState(false);
@@ -1141,7 +1164,14 @@ export default function DailyAttendanceStats() {
   useClickOutside(datePickerRef, () => setShowDatePicker(false));
 
   const updateDraftFilter = <K extends keyof DailyFilters>(key: K, value: DailyFilters[K]) => {
-    setDraftFilters(prev => ({ ...prev, [key]: value }));
+    setDraftFilters(prev => {
+      const next = { ...prev, [key]: value };
+      setAppliedFilters(next);
+      return next;
+    });
+    setCurrentPage(1);
+    setJumpPage('');
+    setCheckedRows(new Set());
   };
 
   const applyFilters = () => {
@@ -1178,11 +1208,12 @@ export default function DailyAttendanceStats() {
   };
 
   const baseFilteredEmployees = employees.filter(emp => {
-    const keyword = appliedFilters.empSearch.trim().toLowerCase();
-    const matchKeyword = !keyword || emp.name.toLowerCase().includes(keyword) || emp.empId.toLowerCase().includes(keyword);
-    const matchDept = !appliedFilters.dept || emp.dept === appliedFilters.dept;
-    const matchGroup = !appliedFilters.attendGroup || emp.attendGroup === appliedFilters.attendGroup;
-    const matchShift = !appliedFilters.shift || emp.shiftName === appliedFilters.shift;
+    const matchLinked = attendanceFilters.matchesLinkedFilters(emp, {
+      dept: appliedFilters.dept,
+      attendGroup: appliedFilters.attendGroup,
+      shift: appliedFilters.shift,
+      keyword: appliedFilters.empSearch,
+    });
     const matchDateType = !appliedFilters.dateType || emp.dateType === appliedFilters.dateType;
     const matchResult = !appliedFilters.attendResult || appliedFilters.attendResult === '全部' || emp.attendResult === appliedFilters.attendResult;
     const matchLock = !appliedFilters.lockStatus || appliedFilters.lockStatus === '全部' || (appliedFilters.lockStatus === '已锁定' ? emp.confirmStatus === '已确认' : emp.confirmStatus !== '已确认');
@@ -1190,7 +1221,7 @@ export default function DailyAttendanceStats() {
     const matchDateRange = emp.date >= dateStart && emp.date <= dateEnd;
     const matchResigned = !hideResigned || Boolean(emp.empId);
 
-    return matchKeyword && matchDept && matchGroup && matchShift && matchDateType && matchResult && matchLock && matchConfirm && matchDateRange && matchResigned;
+    return matchLinked && matchDateType && matchResult && matchLock && matchConfirm && matchDateRange && matchResigned;
   });
 
   const matchesStatFilter = (emp: DailyEmployee) => {
@@ -1226,6 +1257,8 @@ export default function DailyAttendanceStats() {
 
   const pagedEmployees = sortedEmployees.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const allChecked = pagedEmployees.length > 0 && pagedEmployees.every(emp => checkedRows.has(emp.empId));
+  const someChecked = pagedEmployees.some(emp => checkedRows.has(emp.empId)) && !allChecked;
+  const exportDisabled = sortedEmployees.length === 0;
 
   const toggleAll = () => {
     if (allChecked) {
@@ -1276,17 +1309,17 @@ export default function DailyAttendanceStats() {
     updateEmployeesPersistently(current => current.filter(emp => !selectedEmpIds.has(emp.empId)));
   };
   const exportRows = (targetRows: DailyEmployee[]) => {
-    const headers = colDefs.map(col => col.label);
-    const csv = [headers, ...targetRows.map(emp => colDefs.map(col => String((emp as any)[col.key] ?? '')))]
-      .map(row => row.map(cell => /[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell).join(','))
-      .join('\n');
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = '日考勤统计.csv';
-    link.click();
-    window.URL.revokeObjectURL(url);
+    void downloadAttendanceXlsx({
+      fileName: `日考勤统计-${dateStart}-${dateEnd}${checkedRows.size ? '-选中记录' : '-筛选结果'}.xlsx`,
+      sheetName: '日考勤统计',
+      headers: ['确认状态', ...colDefs.map(col => col.label)],
+      rows: targetRows.map(emp => [emp.confirmStatus, ...colDefs.map(col => String((emp as any)[col.key] ?? ''))]),
+      saveAs: true,
+    });
+  };
+  const handleExportRows = () => {
+    if (exportDisabled) return;
+    exportRows(checkedRows.size ? sortedEmployees.filter(emp => checkedRows.has(emp.empId)) : sortedEmployees);
   };
 
   const renderCell = (emp: DailyEmployee, key: string): React.ReactNode => {
@@ -1329,7 +1362,7 @@ export default function DailyAttendanceStats() {
             )}
           </div>
 
-          <FilterSelect label="部门" options={DEPT_OPTIONS} value={draftFilters.dept} onChange={value => updateDraftFilter('dept', value)} colors={colors} />
+          <FilterSelect label="部门" options={attendanceFilters.departmentOptions.length ? attendanceFilters.departmentOptions : DEPT_OPTIONS} value={draftFilters.dept} onChange={value => updateDraftFilter('dept', value)} colors={colors} />
           <div style={{ ...inputBox(colors, false), minWidth: 170 }}>
             <span style={{ fontSize: '12px', color: colors.text, whiteSpace: 'nowrap' }}>员工</span>
             <input value={draftFilters.empSearch} onChange={e => updateDraftFilter('empSearch', e.target.value)} placeholder="请输入姓名或选择人员"
@@ -1338,34 +1371,30 @@ export default function DailyAttendanceStats() {
             <Search size={12} style={{ color: colors.textMuted }} />
             <span style={{ fontSize: '11px', color: colors.textMuted, marginLeft: 2 }}>A</span>
           </div>
-          <FilterSelect label="考勤组" options={ATTEND_GROUPS} value={draftFilters.attendGroup} onChange={value => updateDraftFilter('attendGroup', value)} colors={colors} />
-          <FilterSelect label="班次" options={SHIFTS} value={draftFilters.shift} onChange={value => updateDraftFilter('shift', value)} colors={colors} />
-          <button style={{ ...outlineBtn(colors), padding: '5px 8px' }} title="刷新" onClick={handleRefresh}><RotateCcw size={13} /></button>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button style={outlineBtn(colors)} onClick={resetFilters}>重置</button>
-            <button style={primaryBtn(colors)} onClick={applyFilters}>查询</button>
-            <button onClick={() => setShowMoreFilter(v => !v)}
-              style={{ ...outlineBtn(colors), display: 'flex', alignItems: 'center', gap: 4, color: showMoreFilter ? colors.primary : colors.text, borderColor: showMoreFilter ? colors.primary : colors.inputBorder }}>
-              更多筛选 <ChevronDown size={11} style={{ transform: showMoreFilter ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-            </button>
-          </div>
+          <FilterSelect label="考勤组" options={attendanceFilters.attendanceGroupOptions.length ? attendanceFilters.attendanceGroupOptions : ATTEND_GROUPS} value={draftFilters.attendGroup} onChange={value => updateDraftFilter('attendGroup', value)} colors={colors} />
+          <FilterSelect label="班次" options={attendanceFilters.shiftOptions.length ? attendanceFilters.shiftOptions : SHIFTS} value={draftFilters.shift} onChange={value => updateDraftFilter('shift', value)} colors={colors} />
+          <button
+            onClick={handleExportRows}
+            disabled={exportDisabled}
+            style={{
+              height: 32,
+              border: 'none',
+              borderRadius: 4,
+              background: exportDisabled ? colors.inputBorder : colors.primary,
+              color: exportDisabled ? colors.textMuted : colors.primaryText,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '0 10px',
+              cursor: exportDisabled ? 'not-allowed' : 'pointer',
+              fontSize: 13,
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
+            }}
+          ><Download size={14}/>导出Excel</button>
+          {checkedRows.size > 0 && <span style={{ fontSize: '12px', color: colors.textMuted }}>已选{checkedRows.size}条</span>}
         </div>
-        {showMoreFilter && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${colors.divider}` }}>
-            <FilterSelect label="日期类型" options={['工作日', '休息日', '节假日']} value={draftFilters.dateType} onChange={value => updateDraftFilter('dateType', value)} colors={colors} />
-            <FilterSelect label="考勤结果" options={['全部', '正常', '异常', '休息']} value={draftFilters.attendResult} onChange={value => updateDraftFilter('attendResult', value)} colors={colors} />
-            <FilterSelect label="锁定状态" options={['全部', '已锁定', '未锁定']} value={draftFilters.lockStatus} onChange={value => updateDraftFilter('lockStatus', value)} colors={colors} />
-            <FilterSelect label="确认状态" options={['全部', '已确认', '未确认']} value={draftFilters.confirmStatus} onChange={value => updateDraftFilter('confirmStatus', value)} colors={colors} />
-          </div>
-        )}
       </div>
-
-      {(sourceFile || loadError) && (
-        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 6, backgroundColor: '#FFFBEB', border: '1px solid #FCD34D', fontSize: '12px', color: '#92400E', flexShrink: 0 }}>
-          {sourceFile ? `已连接真实数据源：${sourceFile}` : ''}
-          {loadError ? ` ${loadError}` : ''}
-        </div>
-      )}
 
       {/* ── Stats bar ────────────────────── */}
       <div style={{ backgroundColor: colors.statCardBg, borderBottom: `1px solid ${colors.divider}`, padding: '7px 16px', flexShrink: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1387,60 +1416,19 @@ export default function DailyAttendanceStats() {
       </div>
 
       {/* ── Toolbar ──────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0, flexWrap: 'wrap' }}>
-        <NestedDropdown label="核算考勤" tooltip="对当天人员考勤情况进行统计，包含打卡，早退等，敬请期待" colors={colors} items={[
-          { label: '补卡',     children: [{ label: '添加记录', action: () => setModal('clock-patch') }, { label: '发起流程', action: () => setModal('clock-patch') }] },
-          { label: '请假',     children: [{ label: '添加记录', action: () => setModal('leave') }, { label: '发起流程', action: () => setModal('leave') }] },
-          { label: '外出',     children: [{ label: '添加记录', action: () => setModal('field-out') }, { label: '发起流程', action: () => setModal('field-out') }] },
-          { label: '出差',     children: [{ label: '添加记录', action: () => setModal('field-trip') }, { label: '发起流程', action: () => setModal('field-trip') }] },
-          { label: '变更班次', children: [{ label: '单人变更', action: () => mutateTargetRows(emp => ({ ...emp, shiftName: '已变更班次' })) }, { label: '批量变更', action: () => mutateTargetRows(emp => ({ ...emp, shiftName: '已批量变更班次' })) }] },
-          { label: '核销异常', action: () => mutateTargetRows(emp => ({ ...emp, anomalyDesc: '', attendResult: '正常' })) },
-        ]} />
-        <FlatDropdown label="处理异常" colors={colors} items={[{ label: '加记异常', action: () => mutateTargetRows(emp => ({ ...emp, anomalyDesc: '手动加记异常', attendResult: '异常' })) }, { label: '请假申请', action: () => setModal('leave') }, { label: '出差申请', action: () => setModal('field-trip') }, { label: '加班申请', action: () => setModal('overtime') }, { label: '外出申请', action: () => setModal('field-out') }, { label: '补卡申请', action: () => setModal('clock-patch') }]} />
-        <FlatDropdown label="锁定" colors={colors} items={[{ label: '锁定当前页', action: () => lockRows('page') }, { label: '锁定全部', action: () => lockRows('all') }]} />
-        <FlatDropdown label="解扣" colors={colors} items={[{ label: '解除迟到扣除', action: () => clearDeduction('迟到') }, { label: '解除早退扣除', action: () => clearDeduction('早退') }, { label: '解除旷工扣除', action: () => clearDeduction('旷工') }]} />
-        <button style={outlineBtn(colors)} onClick={() => setViewMode('import')}>导入</button>
-        <FlatDropdown label="导出" colors={colors} items={[{ label: '全部导出', action: () => exportRows(sortedEmployees) }, { label: '自定义导出', action: () => exportRows(pagedEmployees) }]} />
-        <FlatDropdown label="更多操作" colors={colors} items={[{ label: '批量确认', action: () => mutateTargetRows(emp => ({ ...emp, confirmStatus: '已确认' })) }, { label: '批量撤销确认', action: () => unlockRows() }, { label: '批量删除记录', action: () => deleteTargetRows() }]} />
-
-        {/* Right controls */}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-          {/* 核算异常清单 */}
-          <span style={{ fontSize: '12px', color: colors.primary, cursor: 'pointer', whiteSpace: 'nowrap', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 3 }}
-            onClick={() => setModal('calc-range')}>
-            核算异常清单<span style={{ backgroundColor: colors.primary, color: '#fff', borderRadius: 10, padding: '0 5px', fontSize: '11px' }}>7</span>
-          </span>
-          {/* 不看离职人员 */}
-          <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>
-            <input type="checkbox" checked={hideResigned} onChange={e => setHideResigned(e.target.checked)} style={{ accentColor: colors.primary }} />
-            不看离职人员
-          </label>
-          {/* Filter list icon */}
-          <button onClick={() => setShowMoreFilter(v => !v)} style={{ ...iconBtnSq(colors), color: showMoreFilter ? colors.primary : colors.textMuted, borderColor: showMoreFilter ? colors.primary : colors.inputBorder }} title="筛选设置">
-            <Filter size={13} />
-          </button>
-          {/* Column settings */}
-          <div style={{ position: 'relative' }} ref={colPanelRef}>
-            <button onClick={() => setShowColPanel(v => !v)}
-              style={{ ...iconBtnSq(colors), color: showColPanel ? colors.primary : colors.textMuted, borderColor: showColPanel ? colors.primary : colors.inputBorder }}>
-              <Settings2 size={13} />
-            </button>
-            {showColPanel && (
-              <ColPanel colors={colors} colOrder={colOrder} onColOrderChange={setColOrder}
-                freezeCount={freezeCount} onFreezeChange={setFreezeCount}
-                onCancel={() => setShowColPanel(false)} onApply={() => setShowColPanel(false)} />
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* ── Table ────────────────────────── */}
       <div style={{ flex: 1, overflow: 'auto', backgroundColor: colors.cardBg }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1100 }}>
           <thead>
             <tr style={{ backgroundColor: colors.tableHeaderBg, position: 'sticky', top: 0, zIndex: 10 }}>
               <th style={{ ...th(colors), width: 36 }}>
-                <input type="checkbox" checked={allChecked} onChange={toggleAll} style={{ accentColor: colors.primary }} />
+                <input
+                  type="checkbox"
+                  checked={allChecked}
+                  ref={el => { if (el) el.indeterminate = someChecked; }}
+                  onChange={toggleAll}
+                  style={{ accentColor: colors.primary }}
+                />
               </th>
               {/* Fixed column: 确认状态 */}
               <th style={{ ...th(colors), whiteSpace: 'nowrap' }}>确认状态</th>
@@ -1457,11 +1445,14 @@ export default function DailyAttendanceStats() {
             </tr>
           </thead>
           <tbody>
-            {pagedEmployees.map((emp, i) => (
+            {pagedEmployees.map((emp, i) => {
+              const selected = checkedRows.has(emp.empId);
+              const rowBg = selected ? `${colors.primary}0D` : i % 2 === 0 ? colors.cardBg : colors.tableStripe;
+              return (
               <tr key={emp.empId || `${emp.name}-${i}`}
-                style={{ backgroundColor: i % 2 === 0 ? colors.cardBg : colors.tableStripe, borderBottom: `1px solid ${colors.tableBorder}`, transition: 'background 0.1s' }}
-                onMouseEnter={e => (e.currentTarget.style.backgroundColor = colors.tableRowHover)}
-                onMouseLeave={e => (e.currentTarget.style.backgroundColor = i % 2 === 0 ? colors.cardBg : colors.tableStripe)}>
+                style={{ backgroundColor: rowBg, borderBottom: `1px solid ${colors.tableBorder}`, transition: 'background 0.1s' }}
+                onMouseEnter={e => { if (!selected) e.currentTarget.style.backgroundColor = colors.tableRowHover; }}
+                onMouseLeave={e => { if (!selected) e.currentTarget.style.backgroundColor = rowBg; }}>
                 <td style={td(colors)}>
                   <input type="checkbox" checked={checkedRows.has(emp.empId)} onChange={() => setCheckedRows(prev => { const s = new Set(prev); s.has(emp.empId) ? s.delete(emp.empId) : s.add(emp.empId); return s; })} style={{ accentColor: colors.primary }} />
                 </td>
@@ -1475,7 +1466,8 @@ export default function DailyAttendanceStats() {
                   <td key={col.key} style={td(colors)}>{renderCell(emp, col.key)}</td>
                 ))}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

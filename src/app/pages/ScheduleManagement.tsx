@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
 import { assignEmployeesToAttendanceGroup, fetchScheduleMonth, saveScheduleAssignments, type ScheduleMonthEmployee, type ScheduleShiftOption } from '../api/realData';
+import { downloadAttendanceXlsx } from '../shared/export/attendanceExport';
 import { monthEndISO, monthStartISO, todayISO } from '../utils/date';
 import {
   Calendar,
@@ -11,6 +12,7 @@ import {
   ChevronUp,
   FileText,
   HelpCircle,
+  Download,
   Search,
   Settings2,
   Users,
@@ -86,7 +88,6 @@ export default function ScheduleManagement() {
       <div style={{ backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 4, minHeight: 40, flexShrink: 0 }}>
         <TopTab label="首页" active={false} onClick={() => navigate('/attendance/home')} colors={colors} />
         <TopTab label="排班表" active={mainView === 'table'} onClick={() => navigate('/attendance/schedule')} colors={colors} />
-        <TopTab label="班次调整记录" active={mainView === 'adjust'} onClick={() => navigate('/attendance/schedule-adjust')} colors={colors} />
         <button
           style={{
             marginLeft: 4,
@@ -272,6 +273,21 @@ function ScheduleTableView({
     setEmployeeTypeFilter('');
     setStatusFilter('');
   };
+  const exportSchedule = () => {
+    void downloadAttendanceXlsx({
+      fileName: `排班表-${monthLabel}.xlsx`,
+      sheetName: '排班表',
+      headers: ['姓名', '员工号', ...CALENDAR_DAYS.map(day => `${month}-${String(day).padStart(2, '0')}`)],
+      rows: filteredRows.map(row => [
+        row.name,
+        row.employeeNo,
+        ...CALENDAR_DAYS.map(day => row.dayResults?.[String(day)] || '未排班'),
+      ]),
+      emptyMessage: '暂无可导出的排班表',
+      saveAs: true,
+    });
+  };
+  const exportDisabled = filteredRows.length === 0;
 
   return (
     <>
@@ -289,9 +305,8 @@ function ScheduleTableView({
           })} style={ghostIconBtn(colors)}><ChevronRight size={14} /></button>
           <span style={{ fontSize: '12px', color: colors.textMuted }}>考勤周期 {cycleStart} 至 {cycleEnd}</span>
         </div>
-        <button style={{ border: 'none', background: 'transparent', color: colors.primary, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: '12px' }}>
-          <HelpCircle size={12} />
-          使用指引
+        <button onClick={exportSchedule} disabled={exportDisabled} style={exportBtn(colors, exportDisabled)}>
+          <Download size={14}/>导出Excel
         </button>
       </div>
 
@@ -307,25 +322,7 @@ function ScheduleTableView({
           <SelectField label="部门" placeholder="请选择" colors={colors} width={136} options={deptOptions} value={deptFilter} onChange={setDeptFilter} />
           <SelectField label="岗位" placeholder="请选择" colors={colors} width={136} options={positionOptions} value={positionFilter} onChange={setPositionFilter} />
           <SelectField label="员工类型" placeholder="请选择" colors={colors} width={144} options={employeeTypeOptions} value={employeeTypeFilter} onChange={setEmployeeTypeFilter} />
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button onClick={openJoinModal} disabled={!groupFilter} style={groupFilter ? primaryBtn(colors) : disabledBtn(colors)}>加入人员</button>
-            <button onClick={onToggleMore} style={toggleBtn(colors, showMore)}>
-              更多筛选
-              {showMore ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-            </button>
-            <button onClick={resetFilters} style={outlineBtn(colors)}>重置</button>
-            <button style={primaryBtn(colors)}>查询</button>
-            <button style={iconBtn(colors)}><Settings2 size={12} /></button>
-          </div>
         </div>
-        {showMore && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${colors.divider}` }}>
-            <SelectField label="排班状态" placeholder="全部" colors={colors} width={128} options={['已排班', '未排班']} value={statusFilter} onChange={setStatusFilter} />
-            <SelectField label="班次类型" placeholder="全部班次" colors={colors} width={138} />
-            <SelectField label="显示范围" placeholder="仅在岗员工" colors={colors} width={144} />
-            <SelectField label="编制岗位" placeholder="请选择" colors={colors} width={136} />
-          </div>
-        )}
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', backgroundColor: colors.cardBg, borderTop: `1px solid ${colors.tableBorder}` }}>
@@ -482,6 +479,16 @@ function ScheduleAdjustView({
   showMore: boolean;
   onToggleMore: () => void;
 }) {
+  const exportAdjustRecords = () => {
+    void downloadAttendanceXlsx({
+      fileName: `${currentTab.label}.xlsx`,
+      sheetName: currentTab.label,
+      headers: currentTab.columns,
+      rows: [],
+      allowEmpty: true,
+    });
+  };
+
   return (
     <>
       <div style={{ backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 20, minHeight: 40, flexShrink: 0 }}>
@@ -511,21 +518,10 @@ function ScheduleAdjustView({
           <SelectField label="部门" placeholder="请选择" colors={colors} width={148} />
           <SelectField label="审批状态" placeholder="请选择" colors={colors} width={148} />
           {renderAdjustPrimaryFilters(currentTab.key, colors)}
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button style={outlineBtn(colors)}>重置</button>
-            <button style={primaryBtn(colors)}>查询</button>
-            <button onClick={onToggleMore} style={toggleBtn(colors, showMore)}>
-              更多筛选
-              {showMore ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-            </button>
-            <button style={iconBtn(colors)}><Settings2 size={12} /></button>
-          </div>
+          <button onClick={exportAdjustRecords} style={{ ...outlineBtn(colors), display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Download size={12}/>导出Excel
+          </button>
         </div>
-        {showMore && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${colors.divider}` }}>
-            {renderAdjustMoreFilters(currentTab.key, colors)}
-          </div>
-        )}
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', backgroundColor: colors.cardBg }}>
@@ -900,6 +896,24 @@ function outlineBtn(colors: any): React.CSSProperties {
     color: colors.text,
     fontSize: '12px',
     cursor: 'pointer',
+  };
+}
+
+function exportBtn(colors: any, disabled = false): React.CSSProperties {
+  return {
+    height: 32,
+    border: 'none',
+    borderRadius: 4,
+    background: disabled ? colors.inputBorder : colors.primary,
+    color: disabled ? colors.textMuted : (colors.primaryText || '#fff'),
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '0 10px',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 13,
+    fontWeight: 600,
+    whiteSpace: 'nowrap',
   };
 }
 

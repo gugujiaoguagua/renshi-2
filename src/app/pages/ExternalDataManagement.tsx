@@ -496,8 +496,6 @@ export default function ExternalDataManagement() {
         <Info size={14} style={{ color: '#D97706', flexShrink: 0, marginTop: 1 }}/>
         <span style={{ fontSize: '12px', color: '#92400E', lineHeight: 1.5 }}>
           外部数据导入后，需在<strong>月考勤汇总</strong>页面执行"核算考勤"操作，数据方可参与统计计算并更新汇总结果。
-          {sourceFile ? ` 当前已连接真实数据源：${sourceFile}` : ''}
-          {loadError ? `（${loadError}）` : ''}
         </span>
       </div>
 

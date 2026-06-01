@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router';
-import { Bell, HelpCircle, Grid3X3, Search, Sun, Moon } from 'lucide-react';
+import { Sun, Moon } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import { fetchBackendHealth } from '../api/realData';
 
 const topTabs = [
   { label: '组织管理', path: '/organization' },
@@ -16,8 +17,31 @@ export const TopNav: React.FC = () => {
   const { colors, theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
+  const [connectionStatus, setConnectionStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
+  const [lastChecked, setLastChecked] = useState('');
 
-  const isAttendance = location.pathname.startsWith('/attendance') || location.pathname === '/';
+  useEffect(() => {
+    let alive = true;
+    const checkConnection = async () => {
+      try {
+        const health = await fetchBackendHealth();
+        if (!alive) return;
+        setConnectionStatus(health.ok === false ? 'disconnected' : 'connected');
+        setLastChecked(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+      } catch (_error) {
+        if (!alive) return;
+        setConnectionStatus('disconnected');
+        setLastChecked(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+      }
+    };
+
+    checkConnection();
+    const timer = window.setInterval(checkConnection, 30000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   return (
     <div
@@ -101,26 +125,6 @@ export const TopNav: React.FC = () => {
 
       {/* Right actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px', paddingRight: '16px', flexShrink: 0 }}>
-        {/* Search */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            background: 'rgba(255,255,255,0.1)',
-            borderRadius: '4px',
-            padding: '4px 10px',
-            fontSize: '12px',
-            color: colors.topNavText,
-            cursor: 'pointer',
-            marginRight: '8px',
-          }}
-        >
-          <Search size={12} />
-          <span>输入关键字、问题</span>
-        </div>
-
-        {/* Theme toggle */}
         <button
           onClick={toggleTheme}
           title={theme === 'light' ? '切换深色模式' : '切换浅色模式'}
@@ -141,54 +145,7 @@ export const TopNav: React.FC = () => {
           {theme === 'light' ? <Moon size={14} /> : <Sun size={14} />}
         </button>
 
-        <button
-          style={{
-            width: '28px',
-            height: '28px',
-            borderRadius: '4px',
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: colors.topNavText,
-          }}
-        >
-          <Bell size={14} />
-        </button>
-        <button
-          style={{
-            width: '28px',
-            height: '28px',
-            borderRadius: '4px',
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: colors.topNavText,
-          }}
-        >
-          <HelpCircle size={14} />
-        </button>
-        <button
-          style={{
-            width: '28px',
-            height: '28px',
-            borderRadius: '4px',
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: colors.topNavText,
-          }}
-        >
-          <Grid3X3 size={14} />
-        </button>
+        <ConnectionDot status={connectionStatus} lastChecked={lastChecked} />
 
         <div
           style={{
@@ -224,3 +181,46 @@ export const TopNav: React.FC = () => {
     </div>
   );
 };
+
+function ConnectionDot({ status, lastChecked }: { status: 'loading' | 'connected' | 'disconnected'; lastChecked: string }) {
+  const labelByStatus = {
+    loading: '后端正在加载或等待',
+    connected: '后端已连接',
+    disconnected: '后端未连接',
+  };
+  const colorByStatus = {
+    loading: '#F59E0B',
+    connected: '#22C55E',
+    disconnected: '#EF4444',
+  };
+  const title = `${labelByStatus[status]}${lastChecked ? `，检查时间 ${lastChecked}` : ''}`;
+
+  return (
+    <div
+      data-testid="backend-connection-dot"
+      title={title}
+      aria-label={title}
+      style={{
+        width: 28,
+        height: 28,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 4,
+        background: 'transparent',
+        flexShrink: 0,
+      }}
+    >
+      <span
+        style={{
+          width: 9,
+          height: 9,
+          borderRadius: '50%',
+          backgroundColor: colorByStatus[status],
+          boxShadow: `0 0 0 3px ${colorByStatus[status]}26`,
+          display: 'block',
+        }}
+      />
+    </div>
+  );
+}

@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../context/ThemeContext';
 import { fetchFieldOutRecords, fetchFieldTripRecords, fetchSettingsPeople, saveFieldOutRecords, saveFieldTripRecords } from '../api/realData';
+import { useAttendanceFilterDirectory } from '../shared/domain/attendanceFilters';
+import { downloadAttendanceXlsx } from '../shared/export/attendanceExport';
 import {
   Calendar,
   ChevronDown,
   ChevronUp,
   FileText,
   HelpCircle,
+  Download,
   Search,
   Settings2,
   SlidersHorizontal,
@@ -446,6 +449,7 @@ function DropdownAction({
 
 export default function FieldWork() {
   const { colors } = useTheme();
+  const attendanceFilters = useAttendanceFilterDirectory();
   const location = useLocation();
   const navigate = useNavigate();
   const [showMoreFilter, setShowMoreFilter] = useState(false);
@@ -498,7 +502,7 @@ export default function FieldWork() {
     const routeKeyword = tripRouteFilter.trim().toLowerCase();
     const dateText = row.values.join(' ');
     const rowDate = dateText.match(/\d{4}-\d{2}-\d{2}/)?.[0] || '';
-    const matchForm = (!deptFilter || row.dept === deptFilter)
+    const matchForm = attendanceFilters.matchesDepartment(row, deptFilter)
       && (!keyword || row.name.toLowerCase().includes(keyword) || row.empId.toLowerCase().includes(keyword))
       && (!recordStatusFilter || row.status === recordStatusFilter)
       && (!flowStatusFilter || row.flowStatus === flowStatusFilter)
@@ -570,17 +574,17 @@ export default function FieldWork() {
   };
 
   const exportRows = (columns: string[]) => {
-    const csv = [columns, ...filteredRows.map(row => [row.status, row.name, row.empId, row.dept, row.deptPath, row.effect, ...row.values, row.flowStatus, '查看'].slice(0, columns.length))]
-      .map(row => row.map(cell => /[",\n]/.test(String(cell)) ? `"${String(cell).replace(/"/g, '""')}"` : String(cell)).join(','))
-      .join('\n');
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${activeView === 'trip' ? '出差记录' : '外出记录'}.csv`;
-    link.click();
-    window.URL.revokeObjectURL(url);
+    const exportRows = selected.size > 0 ? filteredRows.filter(row => selected.has(row.id)) : filteredRows;
+    void downloadAttendanceXlsx({
+      fileName: `${activeView === 'trip' ? '出差记录' : '外出记录'}-${selected.size > 0 ? '选中记录' : '筛选结果'}.xlsx`,
+      sheetName: activeView === 'trip' ? '出差记录' : '外出记录',
+      headers: columns,
+      rows: exportRows.map(row => [row.status, row.name, row.empId, row.dept, row.deptPath, row.effect, ...row.values, row.flowStatus, '查看'].slice(0, columns.length)),
+      emptyMessage: `暂无可导出的${activeView === 'trip' ? '出差记录' : '外出记录'}`,
+      saveAs: true,
+    });
   };
+  const exportDisabled = filteredRows.length === 0;
   const persistOutRows = (rows: FieldRow[]) => void saveFieldOutRecords(rows).catch(() => window.alert('外出记录已在页面更新，但保存到后端失败'));
   const persistTripRows = (rows: FieldRow[]) => void saveFieldTripRecords(rows).catch(() => window.alert('出差记录已在页面更新，但保存到后端失败'));
   const deleteRows = () => {
@@ -712,7 +716,7 @@ export default function FieldWork() {
       <div style={{ backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, padding: '12px 16px 10px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
           <DateRangeField label={pageConfig.dateLabel} colors={colors} value={dateRange} onChange={setDateRange} />
-          <SelectField label="部门" placeholder="请选择" colors={colors} width={146} options={['产品运营部','产品研发中心','研发设计一部','工艺开发部']} value={deptFilter} onChange={setDeptFilter} />
+          <SelectField label="部门" placeholder="请选择" colors={colors} width={146} options={attendanceFilters.departmentOptions.length ? attendanceFilters.departmentOptions : ['产品运营部','产品研发中心','研发设计一部','工艺开发部']} value={deptFilter} onChange={setDeptFilter} />
           <SearchField label="申请人" placeholder="请输入人员姓名" colors={colors} width={182} value={applicantFilter} onChange={setApplicantFilter} />
           {activeView === 'out' ? (
             <>
@@ -725,45 +729,7 @@ export default function FieldWork() {
               <SelectField label="当前流程状态" placeholder="请选择" colors={colors} width={168} options={['已通过','审批中','已拒绝']} value={flowStatusFilter} onChange={setFlowStatusFilter} />
             </>
           )}
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button onClick={resetFilters} style={outlineBtn(colors)}>重置</button>
-            <button onClick={() => setSelected(new Set())} style={primaryBtn(colors)}>查询</button>
-            <button
-              onClick={() => setShowMoreFilter(v => !v)}
-              style={{
-                ...outlineBtn(colors),
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                borderColor: showMoreFilter ? colors.primary : colors.inputBorder,
-                color: showMoreFilter ? colors.primary : colors.text,
-              }}
-            >
-              更多筛选
-              {showMoreFilter ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-            </button>
-          </div>
         </div>
-
-        {showMoreFilter && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10, flexWrap: 'wrap' }}>
-            {activeView === 'out' ? (
-              <>
-                <DateRangeField label="完成时间" colors={colors} width={286} value={finishTimeRange} onChange={setFinishTimeRange} />
-                <SelectField label="记录状态" placeholder="请选择" colors={colors} width={146} options={['已通过','审批中','已拒绝']} value={recordStatusFilter} onChange={setRecordStatusFilter} />
-                <SelectField label="生效状态" placeholder="请选择" colors={colors} width={146} options={['已生效','待生效']} value={effectFilter} onChange={setEffectFilter} />
-                <SelectField label="数据来源" placeholder="请选择" colors={colors} width={146} options={['移动端申请','PC端申请','HR手动添加']} value={sourceFilter} onChange={setSourceFilter} />
-              </>
-            ) : (
-
-              <>
-                <SelectField label="数据来源" placeholder="请选择" colors={colors} width={146} options={['移动端申请','PC端申请','HR手动添加']} value={sourceFilter} onChange={setSourceFilter} />
-                <SelectField label="单程/往返" placeholder="请选择" colors={colors} width={146} options={['单程','往返']} value={tripTypeFilter} onChange={setTripTypeFilter} />
-                <SearchField label="出差行程" placeholder="请输入城市或地点" colors={colors} width={188} value={tripRouteFilter} onChange={setTripRouteFilter} />
-              </>
-            )}
-          </div>
-        )}
       </div>
 
       <div style={{ display: 'flex', gap: 8, padding: '8px 16px', backgroundColor: colors.cardBg, borderBottom: `1px solid ${colors.cardBorder}`, flexShrink: 0, flexWrap: 'wrap' }}>
@@ -809,17 +775,9 @@ export default function FieldWork() {
           onSelect={(item) => addFieldAction(`发起-${item.label}`)}
           colors={colors}
         />
-        <button onClick={() => exportRows(pageConfig.columns)} style={outlineBtn(colors)}>导出</button>
+        <button onClick={() => exportRows(pageConfig.columns)} disabled={exportDisabled} style={exportBtn(colors, exportDisabled)}><Download size={14}/>导出Excel</button>
         <button onClick={deleteRows} style={selected.size ? outlineBtn(colors) : disabledBtn(colors)} disabled={!selected.size}>删除</button>
 
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button onClick={() => setShowMoreFilter(current => !current)} style={iconBtn(colors)}>
-            <SlidersHorizontal size={13} />
-          </button>
-          <button onClick={() => setSortConfig(null)} style={iconBtn(colors)} title="恢复默认表头排序">
-            <Settings2 size={13} />
-          </button>
-        </div>
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', backgroundColor: colors.cardBg }}>
@@ -1142,6 +1100,24 @@ function outlineBtn(c: any): React.CSSProperties {
     cursor: 'pointer',
     backgroundColor: 'transparent',
     color: c.text,
+    whiteSpace: 'nowrap',
+  };
+}
+
+function exportBtn(c: any, disabled = false): React.CSSProperties {
+  return {
+    height: 32,
+    border: 'none',
+    borderRadius: 4,
+    background: disabled ? c.inputBorder : c.primary,
+    color: disabled ? c.textMuted : (c.primaryText || '#fff'),
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '0 10px',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 13,
+    fontWeight: 600,
     whiteSpace: 'nowrap',
   };
 }
